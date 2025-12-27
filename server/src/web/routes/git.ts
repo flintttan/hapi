@@ -36,7 +36,12 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             return engine
         }
 
-        const sessionResult = requireSessionFromParam(c, engine)
+        const userId = c.get('userId') as string
+        if (!userId) {
+            return c.json({ error: 'Unauthorized' }, 401)
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, userId)
         if (sessionResult instanceof Response) {
             return sessionResult
         }
@@ -56,7 +61,12 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             return engine
         }
 
-        const sessionResult = requireSessionFromParam(c, engine)
+        const userId = c.get('userId') as string
+        if (!userId) {
+            return c.json({ error: 'Unauthorized' }, 401)
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, userId)
         if (sessionResult instanceof Response) {
             return sessionResult
         }
@@ -77,7 +87,12 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             return engine
         }
 
-        const sessionResult = requireSessionFromParam(c, engine)
+        const userId = c.get('userId') as string
+        if (!userId) {
+            return c.json({ error: 'Unauthorized' }, 401)
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, userId)
         if (sessionResult instanceof Response) {
             return sessionResult
         }
@@ -107,7 +122,12 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             return engine
         }
 
-        const sessionResult = requireSessionFromParam(c, engine)
+        const userId = c.get('userId') as string
+        if (!userId) {
+            return c.json({ error: 'Unauthorized' }, 401)
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, userId)
         if (sessionResult instanceof Response) {
             return sessionResult
         }
@@ -132,7 +152,12 @@ export function createGitRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
             return engine
         }
 
-        const sessionResult = requireSessionFromParam(c, engine)
+        const userId = c.get('userId') as string
+        if (!userId) {
+            return c.json({ error: 'Unauthorized' }, 401)
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, userId)
         if (sessionResult instanceof Response) {
             return sessionResult
         }

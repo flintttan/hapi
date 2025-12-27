@@ -13,6 +13,7 @@ import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
 import { NewSession } from '@/components/NewSession'
 import { LoadingState } from '@/components/LoadingState'
+import { UserMenu } from '@/components/UserMenu'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
@@ -66,7 +67,7 @@ function PlusIcon(props: { className?: string }) {
 }
 
 function SessionsPage() {
-    const { api } = useAppContext()
+    const { api, user, onLogout } = useAppContext()
     const navigate = useNavigate()
     const { sessions, isLoading, error, refetch } = useSessions(api)
 
@@ -78,8 +79,11 @@ function SessionsPage() {
         <div className="flex h-full flex-col">
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
                 <div className="mx-auto w-full max-w-content flex items-center justify-between px-3 py-2">
-                    <div className="text-xs text-[var(--app-hint)]">
-                        {sessions.length} sessions
+                    <div className="flex items-center gap-3">
+                        <UserMenu user={user} onLogout={onLogout} />
+                        <div className="text-xs text-[var(--app-hint)]">
+                            {sessions.length} sessions
+                        </div>
                     </div>
                     <button
                         type="button"

@@ -35,6 +35,19 @@ Transform HAPI from single-user architecture to multi-user system with complete 
 
 **User Note**: Consider migrating from SQLite to MySQL/PostgreSQL for enhanced multi-user performance and scalability.
 
+**Database Technology Decision Framework**:
+- **Use SQLite if**:
+  - Expected concurrent users < 100
+  - Single-server deployment (no distributed architecture)
+  - File-based database acceptable
+  - Simple backup/restore requirements
+- **Use MySQL/PostgreSQL if**:
+  - Expected concurrent users ≥ 100
+  - Distributed deployment or high availability required
+  - Advanced query optimization needed
+  - Enterprise-grade replication/backup needed
+- **Migration Path**: IMPL-001 migration script supports both SQLite and MySQL/PostgreSQL - database choice can be made during Phase 1 execution based on deployment scale
+
 ## 2. Context Analysis
 
 ### CCW Workflow Context

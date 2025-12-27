@@ -23,7 +23,12 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const sessionResult = requireSessionFromParam(c, engine)
+        const userId = c.get('userId') as string
+        if (!userId) {
+            return c.json({ error: 'Unauthorized' }, 401)
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, userId)
         if (sessionResult instanceof Response) {
             return sessionResult
         }
@@ -41,7 +46,12 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        const userId = c.get('userId') as string
+        if (!userId) {
+            return c.json({ error: 'Unauthorized' }, 401)
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, userId, { requireActive: true })
         if (sessionResult instanceof Response) {
             return sessionResult
         }

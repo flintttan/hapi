@@ -138,6 +138,7 @@ export interface SyncEvent {
     type: SyncEventType
     sessionId?: string
     machineId?: string
+    userId?: string
     data?: unknown
     message?: DecryptedMessage
 }
@@ -170,7 +171,8 @@ export class SyncEngine {
         private readonly rpcRegistry: RpcRegistry,
         private readonly sseManager: SSEManager
     ) {
-        this.reloadAll()
+        // Cache is populated on-demand via refreshSession/refreshMachine calls
+        // from event handlers and getOrCreateSession/Machine methods
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
     }
 
@@ -204,12 +206,14 @@ export class SyncEngine {
                 type: event.type,
                 sessionId: event.sessionId,
                 machineId: event.machineId,
+                userId: event.userId,
                 message: event.message
             }
             : {
                 type: event.type,
                 sessionId: event.sessionId,
-                machineId: event.machineId
+                machineId: event.machineId,
+                userId: event.userId
             }
 
         this.sseManager.broadcast(webappEvent)
@@ -219,35 +223,45 @@ export class SyncEngine {
         return this.connectionStatus
     }
 
-    getSessions(): Session[] {
-        return Array.from(this.sessions.values())
+    getSessions(userId: string): Session[] {
+        return Array.from(this.sessions.values()).filter(s =>
+            s.metadata?.userId === userId
+        )
     }
 
-    getSession(sessionId: string): Session | undefined {
-        return this.sessions.get(sessionId)
+    getSession(sessionId: string, userId: string): Session | undefined {
+        const session = this.sessions.get(sessionId)
+        if (!session) return undefined
+        if (session.metadata?.userId !== userId) return undefined
+        return session
     }
 
-    getActiveSessions(): Session[] {
-        return this.getSessions().filter(s => s.active)
+    getActiveSessions(userId: string): Session[] {
+        return this.getSessions(userId).filter(s => s.active)
     }
 
-    getMachines(): Machine[] {
-        return Array.from(this.machines.values())
+    getMachines(userId: string): Machine[] {
+        return Array.from(this.machines.values()).filter(m =>
+            m.metadata?.userId === userId
+        )
     }
 
-    getMachine(machineId: string): Machine | undefined {
-        return this.machines.get(machineId)
+    getMachine(machineId: string, userId: string): Machine | undefined {
+        const machine = this.machines.get(machineId)
+        if (!machine) return undefined
+        if (machine.metadata?.userId !== userId) return undefined
+        return machine
     }
 
-    getOnlineMachines(): Machine[] {
-        return this.getMachines().filter(m => m.active)
+    getOnlineMachines(userId: string): Machine[] {
+        return this.getMachines(userId).filter(m => m.active)
     }
 
     getSessionMessages(sessionId: string): DecryptedMessage[] {
         return this.sessionMessages.get(sessionId) || []
     }
 
-    getMessagesPage(sessionId: string, options: { limit: number; beforeSeq: number | null }): {
+    getMessagesPage(sessionId: string, userId: string, options: { limit: number; beforeSeq: number | null }): {
         messages: DecryptedMessage[]
         page: {
             limit: number
@@ -256,7 +270,7 @@ export class SyncEngine {
             hasMore: boolean
         }
     } {
-        const stored = this.store.getMessages(sessionId, options.limit, options.beforeSeq ?? undefined)
+        const stored = this.store.getMessages(sessionId, userId, options.limit, options.beforeSeq ?? undefined)
         const messages: DecryptedMessage[] = stored.map((m) => ({
             id: m.id,
             seq: m.seq,
@@ -274,7 +288,7 @@ export class SyncEngine {
         }
 
         const nextBeforeSeq = oldestSeq
-        const hasMore = nextBeforeSeq !== null && this.store.getMessages(sessionId, 1, nextBeforeSeq).length > 0
+        const hasMore = nextBeforeSeq !== null && this.store.getMessages(sessionId, userId, 1, nextBeforeSeq).length > 0
 
         return {
             messages,
@@ -324,7 +338,12 @@ export class SyncEngine {
 
         if (shouldBroadcast) {
             this.lastBroadcastAtBySessionId.set(session.id, now)
-            this.emit({ type: 'session-updated', sessionId: session.id, data: { activeAt: session.activeAt, thinking: session.thinking } })
+            this.emit({
+                type: 'session-updated',
+                sessionId: session.id,
+                userId: session.metadata?.userId as string | undefined,
+                data: { activeAt: session.activeAt, thinking: session.thinking }
+            })
         }
     }
 
@@ -342,7 +361,12 @@ export class SyncEngine {
         session.thinking = false
         session.thinkingAt = t
 
-        this.emit({ type: 'session-updated', sessionId: session.id, data: { active: false, thinking: false } })
+        this.emit({
+            type: 'session-updated',
+            sessionId: session.id,
+            userId: session.metadata?.userId as string | undefined,
+            data: { active: false, thinking: false }
+        })
     }
 
     handleMachineAlive(payload: { machineId: string; time: number }): void {
@@ -361,7 +385,12 @@ export class SyncEngine {
         const shouldBroadcast = (!wasActive && machine.active) || (now - lastBroadcastAt > 10_000)
         if (shouldBroadcast) {
             this.lastBroadcastAtByMachineId.set(machine.id, now)
-            this.emit({ type: 'machine-updated', machineId: machine.id, data: { activeAt: machine.activeAt } })
+            this.emit({
+                type: 'machine-updated',
+                machineId: machine.id,
+                userId: machine.metadata?.userId as string | undefined,
+                data: { activeAt: machine.activeAt }
+            })
         }
     }
 
@@ -375,23 +404,39 @@ export class SyncEngine {
             if (now - session.activeAt <= sessionTimeoutMs) continue
             session.active = false
             session.thinking = false
-            this.emit({ type: 'session-updated', sessionId: session.id, data: { active: false } })
+            this.emit({
+                type: 'session-updated',
+                sessionId: session.id,
+                userId: session.metadata?.userId as string | undefined,
+                data: { active: false }
+            })
         }
 
         for (const machine of this.machines.values()) {
             if (!machine.active) continue
             if (now - machine.activeAt <= machineTimeoutMs) continue
             machine.active = false
-            this.emit({ type: 'machine-updated', machineId: machine.id, data: { active: false } })
+            this.emit({
+                type: 'machine-updated',
+                machineId: machine.id,
+                userId: machine.metadata?.userId as string | undefined,
+                data: { active: false }
+            })
         }
     }
 
     private refreshSession(sessionId: string): Session | null {
-        let stored = this.store.getSession(sessionId)
+        // Internal method uses unsafe Store access for cache refresh
+        let stored = this.store._unsafeGetSession(sessionId)
         if (!stored) {
+            const deletedSession = this.sessions.get(sessionId)
             const existed = this.sessions.delete(sessionId)
             if (existed) {
-                this.emit({ type: 'session-removed', sessionId })
+                this.emit({
+                    type: 'session-removed',
+                    sessionId,
+                    userId: deletedSession?.metadata?.userId as string | undefined
+                })
             }
             return null
         }
@@ -400,14 +445,14 @@ export class SyncEngine {
 
         if (stored.todos === null && !this.todoBackfillAttemptedSessionIds.has(sessionId)) {
             this.todoBackfillAttemptedSessionIds.add(sessionId)
-            const messages = this.store.getMessages(sessionId, 200)
+            const messages = this.store._unsafeGetMessages(sessionId, 200)
             for (let i = messages.length - 1; i >= 0; i -= 1) {
                 const message = messages[i]
                 const todos = extractTodoWriteTodosFromMessageContent(message.content)
                 if (todos) {
-                    const updated = this.store.setSessionTodos(sessionId, todos, message.createdAt)
+                    const updated = this.store._unsafeSetSessionTodos(sessionId, todos, message.createdAt)
                     if (updated) {
-                        stored = this.store.getSession(sessionId) ?? stored
+                        stored = this.store._unsafeGetSession(sessionId) ?? stored
                     }
                     break
                 }
@@ -449,16 +494,28 @@ export class SyncEngine {
         }
 
         this.sessions.set(sessionId, session)
-        this.emit({ type: existing ? 'session-updated' : 'session-added', sessionId, data: session })
+        this.emit({
+            type: existing ? 'session-updated' : 'session-added',
+            sessionId,
+            userId: session.metadata?.userId as string | undefined,
+            data: session
+        })
         return session
     }
 
     private refreshMachine(machineId: string): Machine | null {
-        const stored = this.store.getMachine(machineId)
+        // Internal method uses unsafe Store access for cache refresh
+        const stored = this.store._unsafeGetMachine(machineId)
         if (!stored) {
+            const deletedMachine = this.machines.get(machineId)
             const existed = this.machines.delete(machineId)
             if (existed) {
-                this.emit({ type: 'machine-updated', machineId, data: null })
+                this.emit({
+                    type: 'machine-updated',
+                    machineId,
+                    userId: deletedMachine?.metadata?.userId as string | undefined,
+                    data: null
+                })
             }
             return null
         }
@@ -494,35 +551,28 @@ export class SyncEngine {
         }
 
         this.machines.set(machineId, machine)
-        this.emit({ type: 'machine-updated', machineId, data: machine })
+        this.emit({
+            type: 'machine-updated',
+            machineId,
+            userId: machine.metadata?.userId as string | undefined,
+            data: machine
+        })
         return machine
     }
 
-    private reloadAll(): void {
-        const sessions = this.store.getSessions()
-        for (const s of sessions) {
-            this.refreshSession(s.id)
-        }
-
-        const machines = this.store.getMachines()
-        for (const m of machines) {
-            this.refreshMachine(m.id)
-        }
-    }
-
-    getOrCreateSession(tag: string, metadata: unknown, agentState: unknown): Session {
-        const stored = this.store.getOrCreateSession(tag, metadata, agentState)
+    getOrCreateSession(tag: string, metadata: unknown, agentState: unknown, userId: string): Session {
+        const stored = this.store.getOrCreateSession(tag, metadata, agentState, userId)
         return this.refreshSession(stored.id) ?? (() => { throw new Error('Failed to load session') })()
     }
 
-    getOrCreateMachine(id: string, metadata: unknown, daemonState: unknown): Machine {
-        const stored = this.store.getOrCreateMachine(id, metadata, daemonState)
+    getOrCreateMachine(id: string, metadata: unknown, daemonState: unknown, userId: string): Machine {
+        const stored = this.store.getOrCreateMachine(id, metadata, daemonState, userId)
         return this.refreshMachine(stored.id) ?? (() => { throw new Error('Failed to load machine') })()
     }
 
-    async fetchMessages(sessionId: string): Promise<FetchMessagesResult> {
+    async fetchMessages(sessionId: string, userId: string): Promise<FetchMessagesResult> {
         try {
-            const stored = this.store.getMessages(sessionId, 200)
+            const stored = this.store.getMessages(sessionId, userId, 200)
             const messages: DecryptedMessage[] = stored.map((m) => ({
                 id: m.id,
                 seq: m.seq,
@@ -537,7 +587,7 @@ export class SyncEngine {
         }
     }
 
-    async sendMessage(sessionId: string, payload: { text: string; localId?: string | null; sentFrom?: 'telegram-bot' | 'webapp' }): Promise<void> {
+    async sendMessage(sessionId: string, userId: string, payload: { text: string; localId?: string | null; sentFrom?: 'telegram-bot' | 'webapp' }): Promise<void> {
         const session = this.sessions.get(sessionId)
         const sentFrom = payload.sentFrom ?? 'webapp'
 
@@ -554,7 +604,7 @@ export class SyncEngine {
             }
         }
 
-        const msg = this.store.addMessage(sessionId, content, payload.localId ?? undefined)
+        const msg = this.store.createMessage(sessionId, content, userId, payload.localId ?? undefined)
 
         const update = {
             id: msg.id,
@@ -582,6 +632,7 @@ export class SyncEngine {
         this.emit({
             type: 'message-received',
             sessionId,
+            userId: session?.metadata?.userId as string | undefined,
             message: {
                 id: msg.id,
                 seq: msg.seq,
@@ -637,7 +688,12 @@ export class SyncEngine {
         const session = this.sessions.get(sessionId)
         if (session) {
             session.permissionMode = mode
-            this.emit({ type: 'session-updated', sessionId, data: session })
+            this.emit({
+                type: 'session-updated',
+                sessionId,
+                userId: session.metadata?.userId as string | undefined,
+                data: session
+            })
         }
     }
 
@@ -645,7 +701,12 @@ export class SyncEngine {
         const session = this.sessions.get(sessionId)
         if (session) {
             session.modelMode = model
-            this.emit({ type: 'session-updated', sessionId, data: session })
+            this.emit({
+                type: 'session-updated',
+                sessionId,
+                userId: session.metadata?.userId as string | undefined,
+                data: session
+            })
         }
     }
 

@@ -1,7 +1,7 @@
 {
   "id": "IMPL-007",
   "title": "Implement per-user CLI API token generation system",
-  "status": "pending",
+  "status": "completed",
   "context_package_path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json",
   "meta": {
     "type": "feature",
@@ -28,7 +28,7 @@
       "3 API endpoints created: verify by grep 'POST\\|GET\\|DELETE.*cli-tokens' server/src/web/routes/cli-tokens.ts | wc -l = 3",
       "Per-user tokens work: verify by bun test server/src/web/routes/__tests__/cli-tokens.test.ts (exit code 0)"
     ],
-    "depends_on": ["IMPL-002"],
+    "depends_on": ["IMPL-001", "IMPL-002"],
     "inherited": {
       "from": "IMPL-002",
       "context": ["users table exists with user management functions", "User authentication flow established via getOrCreateUser"]
@@ -38,7 +38,11 @@
       "token_strategy": "Per-user API tokens stored in database, legacy shared token supported during migration period",
       "conventions": ["Use crypto.randomBytes(32).toString('base64url') for token generation", "Hash tokens before storage", "Include last_used_at for audit trail"]
     },
-    "artifacts": []
+    "artifacts": [
+      "@.process/context-package.json",
+      "@.process/exploration-security.json",
+      "@.process/exploration-auth-patterns.json"
+    ]
   },
   "flow_control": {
     "pre_analysis": [

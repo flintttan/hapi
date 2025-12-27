@@ -20,6 +20,22 @@ function generateOwnerId(): number {
 
 let cachedOwnerId: number | null = null
 
+/**
+ * @deprecated This function is deprecated and will be removed in a future version.
+ *
+ * The single-user ownerId system has been replaced with multi-user support.
+ *
+ * Migration Guide:
+ * - For Telegram authentication: Use getOrCreateUser(telegramId, username) from auth.ts
+ * - For CLI authentication: Use getUserByCliToken() from auth.ts
+ * - For user management: Use Store.createUser(), Store.getUserById(), Store.getUserByTelegramId()
+ *
+ * The existing ownerId is now migrated to the 'admin-user' in the users table.
+ * All new authentication flows should use the User-based system with per-user IDs.
+ *
+ * @see server/src/web/routes/auth.ts for new authentication functions
+ * @see server/src/store/index.ts for user management methods
+ */
 export async function getOrCreateOwnerId(): Promise<number> {
     if (cachedOwnerId !== null) {
         return cachedOwnerId

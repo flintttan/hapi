@@ -38,7 +38,11 @@
       "auth_context": "Middleware sets c.get('userId') from JWT verification, guards use this to validate resource ownership",
       "conventions": ["Return 404 for unauthorized access to hide resource existence", "Use 403 only if resource exists but user lacks permission", "Log security events for audit trail"]
     },
-    "artifacts": []
+    "artifacts": [
+      "@.process/context-package.json",
+      "@.process/exploration-security.json",
+      "@.process/exploration-validation.json"
+    ]
   },
   "flow_control": {
     "pre_analysis": [

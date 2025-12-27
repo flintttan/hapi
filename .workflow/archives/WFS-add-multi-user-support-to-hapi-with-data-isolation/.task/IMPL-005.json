@@ -1,7 +1,7 @@
 {
   "id": "IMPL-005",
   "title": "Add user filtering to SyncEngine in-memory cache and operations",
-  "status": "pending",
+  "status": "completed",
   "context_package_path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json",
   "meta": {
     "type": "refactor",
@@ -36,7 +36,10 @@
       "cache_pattern": "In-memory cache mirrors Store data for performance, MUST maintain same userId filtering",
       "conventions": ["Cache operations delegate to Store for persistence", "Cache invalidation on updates", "Event emission after cache updates"]
     },
-    "artifacts": []
+    "artifacts": [
+      "@.process/context-package.json",
+      "@.process/exploration-dataflow.json"
+    ]
   },
   "flow_control": {
     "pre_analysis": [
@@ -55,6 +58,16 @@
           "bash(grep -n 'class SyncEngine\\|private sessions\\|private machines' server/src/sync/syncEngine.ts)"
         ],
         "output_to": "syncengine_structure"
+      },
+      {
+        "step": "verify_cache_initialization_pattern",
+        "action": "CRITICAL: Determine if SyncEngine uses eager or lazy cache initialization",
+        "commands": [
+          "bash(grep -n 'loadCache\\|constructor' server/src/sync/syncEngine.ts | head -10)",
+          "bash(grep -n 'this\\.sessions\\s*=\\s*new Map' server/src/sync/syncEngine.ts)"
+        ],
+        "output_to": "cache_initialization_pattern",
+        "note": "If eager loading exists (loadCache() called in constructor), keep eager pattern with userId filtering. If lazy loading exists, extend it. This determines step 5 implementation approach."
       },
       {
         "step": "identify_cache_operations",
@@ -152,24 +165,26 @@
       },
       {
         "step": 5,
-        "title": "Update cache initialization and synchronization",
-        "description": "Ensure cache loading respects multi-user data structure",
+        "title": "Update cache initialization and synchronization (ADAPTIVE APPROACH)",
+        "description": "Adapt cache loading strategy based on current SyncEngine architecture (determined in pre_analysis step)",
         "modification_points": [
-          "Modify 1 method: loadCache() in server/src/sync/syncEngine.ts lines 260-280",
-          "Remove global cache loading: Cannot load all sessions/machines into cache (multi-user)",
-          "Implement lazy cache loading: Load user-specific data on first access",
-          "Add cache TTL: 1 cache expiration mechanism (5 minutes) to prevent stale data"
+          "APPROACH A (if eager loading exists): Modify loadCache() to support multi-user cache structure, load all data with userId included",
+          "APPROACH B (if lazy loading exists): Extend lazy loading with userId parameter, add cache TTL tracking",
+          "APPROACH C (if no loading exists): Implement on-demand loading in getSessions/getMachines with Store fallback",
+          "Select approach based on pre_analysis 'cache_initialization_pattern' findings"
         ],
         "logic_flow": [
-          "Deprecate loadCache() global initialization",
-          "Implement getUserCache(userId) lazy loading pattern",
-          "On first getSessions(userId) call, load from Store and cache",
-          "Add cache entry with timestamp for TTL tracking",
-          "On subsequent calls, check cache age and refresh if > 5 minutes",
-          "Emit 'cache:loaded' event with userId for monitoring"
+          "DECISION POINT: Check pre_analysis output for current cache pattern",
+          "IF eager loading (loadCache() in constructor): Keep pattern, add userId to cached objects, filter on read",
+          "IF lazy loading (cache-miss triggers load): Extend with user-specific loading, add TTL mechanism",
+          "IF no explicit loading (cache-on-demand): Cache is populated by create/update operations only, add Store fallback in get methods",
+          "COMMON: All approaches MUST filter cache reads by userId",
+          "COMMON: All approaches MUST maintain cache-Store consistency",
+          "Document chosen approach in implementation comments"
         ],
         "depends_on": [3, 4],
-        "output": "cache_sync_updated"
+        "output": "cache_sync_updated",
+        "note": "This step adapts to existing architecture instead of imposing lazy loading. Pre-analysis determines the correct approach."
       },
       {
         "step": 6,

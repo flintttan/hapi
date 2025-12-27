@@ -40,7 +40,9 @@
       "testing_strategy": "Integration tests validate complete user isolation across all system layers (database, cache, API, events)",
       "conventions": ["Use test database separate from production", "Clean up test data after each test", "Use realistic user scenarios"]
     },
-    "artifacts": []
+    "artifacts": [
+      "@.process/context-package.json"
+    ]
   },
   "flow_control": {
     "pre_analysis": [

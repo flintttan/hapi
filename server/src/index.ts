@@ -106,6 +106,7 @@ async function main() {
 
     // Start HTTP server for Telegram Mini App
     webServer = await startWebServer({
+        store,
         getSyncEngine: () => syncEngine,
         getSseManager: () => sseManager,
         jwtSecret,

@@ -1,7 +1,7 @@
 {
   "id": "IMPL-001",
   "title": "Create users table and database schema migration",
-  "status": "pending",
+  "status": "completed",
   "context_package_path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json",
   "meta": {
     "type": "feature",
@@ -26,6 +26,7 @@
       "1 users table created: verify by SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
       "3 tables have user_id column: verify by PRAGMA table_info(sessions|machines|messages) | grep user_id",
       "3 foreign keys exist: verify by SELECT COUNT(*) FROM pragma_foreign_key_list WHERE table IN ('sessions','machines','messages')",
+      "Foreign key cascades work: verify by creating test user with sessions/machines/messages, deleting user, and checking related records deleted",
       "Migration script executable: verify by bun run server/scripts/migrate-add-users.ts (exit code 0)",
       "Database schema documentation updated: verify by grep 'users table' server/README.md or inline comments"
     ],
@@ -35,7 +36,10 @@
       "database_strategy": "SQLite primary (file-based, WAL mode), MySQL/PostgreSQL optional via configuration",
       "conventions": ["Follow existing Store class patterns in server/src/store/index.ts", "Use prepared statements for all queries", "Enable foreign key constraints"]
     },
-    "artifacts": []
+    "artifacts": [
+      "@.process/context-package.json",
+      "@.process/exploration-dataflow.json"
+    ]
   },
   "flow_control": {
     "pre_analysis": [

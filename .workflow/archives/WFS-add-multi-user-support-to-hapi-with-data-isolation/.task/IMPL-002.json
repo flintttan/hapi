@@ -38,7 +38,11 @@
       "user_model": "User = {id: string, telegram_id: string | null, username: string, created_at: number}",
       "conventions": ["Use nanoid for user ID generation", "Username defaults to 'User-{telegram_id}' if not provided", "CLI users have telegram_id = null"]
     },
-    "artifacts": []
+    "artifacts": [
+      "@.process/context-package.json",
+      "@.process/exploration-security.json",
+      "@.process/exploration-auth-patterns.json"
+    ]
   },
   "flow_control": {
     "pre_analysis": [
@@ -108,18 +112,20 @@
       {
         "step": 3,
         "title": "Create getUserByCliToken helper for CLI authentication",
-        "description": "Implement user mapping for CLI_API_TOKEN authentication mode",
+        "description": "Implement user mapping for legacy CLI_API_TOKEN authentication mode (NOTE: This creates a single 'cli-user' for legacy shared token migration only. Per-user CLI tokens in IMPL-007 will create separate users)",
         "modification_points": [
           "Create 1 helper function in server/src/web/routes/auth.ts: getUserByCliToken(): User",
-          "Create 1 synthetic CLI user: {id: 'cli-user', telegram_id: null, username: 'CLI User'}",
-          "Add memoization to avoid repeated database queries for same CLI user"
+          "Create 1 synthetic CLI user: {id: 'cli-user', telegram_id: null, username: 'CLI User'} for legacy shared token migration",
+          "Add memoization to avoid repeated database queries for same CLI user",
+          "Add comment: This is legacy migration support - per-user CLI tokens (IMPL-007) will create separate userId per token"
         ],
         "logic_flow": [
           "Check if CLI user exists with getUserById('cli-user')",
           "If exists, return CLI user",
-          "If not exists, create CLI user with fixed ID 'cli-user'",
+          "If not exists, create CLI user with fixed ID 'cli-user' (legacy migration user)",
           "Cache result in-memory to avoid DB lookups on every CLI request",
-          "Return CLI user"
+          "Return CLI user (NOTE: All legacy shared token requests map to this single user during migration period)",
+          "After IMPL-007: Per-user CLI tokens will generate separate userId per token"
         ],
         "depends_on": [1],
         "output": "cli_user_helper"

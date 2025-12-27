@@ -120,7 +120,33 @@
       }
     ]
   },
-  "features": [],
+  "features": [
+    {
+      "id": "add-multi-user-support-to-hapi-with-data-isolation",
+      "title": "Add Multi-User Support to HAPI with Data Isolation",
+      "description": "Transform HAPI from single-user architecture to multi-user system with complete data isolation across all layers (database, cache, API, real-time events). Replace single-user ownerId with per-user identity management.",
+      "status": "completed",
+      "tags": [
+        "multi-user",
+        "data-isolation",
+        "authentication",
+        "database-migration",
+        "security"
+      ],
+      "timeline": {
+        "created_at": "2025-12-27T12:11:19Z",
+        "implemented_at": "2025-12-27",
+        "updated_at": "2025-12-27T12:11:19Z"
+      },
+      "traceability": {
+        "session_id": "WFS-add-multi-user-support-to-hapi-with-data-isolation",
+        "archive_path": ".workflow/archives/WFS-add-multi-user-support-to-hapi-with-data-isolation",
+        "commit_hash": "89e94b7"
+      },
+      "docs": [],
+      "relations": []
+    }
+  ],
   "development_index": {
     "feature": [],
     "enhancement": [],
@@ -129,9 +155,9 @@
     "docs": []
   },
   "statistics": {
-    "total_features": 0,
-    "total_sessions": 0,
-    "last_updated": "2025-12-27T08:55:00.000Z"
+    "total_features": 1,
+    "total_sessions": 1,
+    "last_updated": "2025-12-27T12:11:19Z"
   },
   "_metadata": {
     "initialized_by": "cli-explore-agent",

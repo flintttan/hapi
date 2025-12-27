@@ -1,0 +1,43 @@
+[
+  {
+    "session_id": "WFS-add-multi-user-support-to-hapi-with-data-isolation",
+    "description": "Transform HAPI from single-user architecture to multi-user system with complete data isolation across database, cache, API, and real-time event layers",
+    "archived_at": "2025-12-27T12:11:19Z",
+    "archive_path": ".workflow/archives/WFS-add-multi-user-support-to-hapi-with-data-isolation",
+    "metrics": {
+      "duration_hours": 11.2,
+      "tasks_completed": 5,
+      "tasks_total": 8,
+      "summaries_generated": 8,
+      "success_rate": 0.625
+    },
+    "tags": [
+      "multi-user-architecture",
+      "data-isolation",
+      "database-migration",
+      "row-level-security",
+      "authentication-refactoring"
+    ],
+    "lessons": {
+      "successes": [
+        "Incremental database migration with rollback support - Migration script with transactional safety, idempotency checks, and dry-run mode prevented data loss",
+        "Row-level security via user_id filtering - WHERE clauses in all 24+ queries enforced data isolation without complex database-level RLS",
+        "On-demand cache loading strategy - Removed eager loading from SyncEngine constructor, reduced memory footprint and startup time",
+        "Comprehensive test coverage - 38 tests across 5 test suites validated user isolation at database, cache, and application layers",
+        "Backward-compatible authentication - Dual-mode CLI token system (per-user + legacy shared) enabled gradual migration"
+      ],
+      "challenges": [
+        "TypeScript compilation cascades - Adding userId parameters to Store methods triggered compilation errors across 20+ route handlers and socket handlers",
+        "Foreign key cascade complexity - SQLite requires table recreation to add FK constraints, increasing migration risk and complexity",
+        "Message ownership indirection - Messages inherit ownership via session FK, requiring JOIN/subquery patterns instead of direct user_id column",
+        "Cross-module coordination - SyncEngine changes required internal Store unsafe methods to bypass userId validation for cache refresh"
+      ],
+      "watch_patterns": [
+        "Migration testing critical - Always test migration scripts on production data copies; SQLite table recreation can fail on constraint violations",
+        "userId validation gaps - Check ALL code paths (route handlers, socket handlers, background jobs) to prevent missed userId parameter passing",
+        "Cache-Store consistency - Monitor cache TTL and refresh logic to prevent stale data when Store is updated directly",
+        "Event broadcasting leaks - Verify Socket.IO room filtering and SSE listener filtering to prevent cross-user event delivery"
+      ]
+    }
+  }
+]

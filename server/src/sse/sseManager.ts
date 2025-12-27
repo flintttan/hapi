@@ -5,6 +5,7 @@ export type SSESubscription = {
     all: boolean
     sessionId: string | null
     machineId: string | null
+    userId: string | null
 }
 
 type SSEConnection = SSESubscription & {
@@ -26,6 +27,7 @@ export class SSEManager {
         all?: boolean
         sessionId?: string | null
         machineId?: string | null
+        userId?: string | null
         send: (event: SyncEvent) => void | Promise<void>
         sendHeartbeat: () => void | Promise<void>
     }): SSESubscription {
@@ -34,6 +36,7 @@ export class SSEManager {
             all: Boolean(options.all),
             sessionId: options.sessionId ?? null,
             machineId: options.machineId ?? null,
+            userId: options.userId ?? null,
             send: options.send,
             sendHeartbeat: options.sendHeartbeat
         }
@@ -44,7 +47,8 @@ export class SSEManager {
             id: subscription.id,
             all: subscription.all,
             sessionId: subscription.sessionId,
-            machineId: subscription.machineId
+            machineId: subscription.machineId,
+            userId: subscription.userId
         }
     }
 
@@ -96,6 +100,11 @@ export class SSEManager {
     }
 
     private shouldSend(connection: SSEConnection, event: SyncEvent): boolean {
+        // User-level isolation: Only send events matching the connection's userId
+        if (connection.userId && event.userId && connection.userId !== event.userId) {
+            return false
+        }
+
         if (event.type === 'message-received') {
             return Boolean(event.sessionId && connection.sessionId === event.sessionId)
         }

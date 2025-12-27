@@ -1,7 +1,7 @@
 {
   "id": "IMPL-003",
   "title": "Add userId parameter to all Store methods and implement user-scoped queries",
-  "status": "pending",
+  "status": "completed",
   "context_package_path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json",
   "meta": {
     "type": "refactor",
@@ -36,7 +36,11 @@
       "query_pattern": "All queries MUST include WHERE user_id = ? for data isolation",
       "conventions": ["Use prepared statements for security", "Validate userId before database operations", "Return empty arrays for no results, not null"]
     },
-    "artifacts": []
+    "artifacts": [
+      "@.process/context-package.json",
+      "@.process/exploration-dataflow.json",
+      "@.process/exploration-validation.json"
+    ]
   },
   "flow_control": {
     "pre_analysis": [

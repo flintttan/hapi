@@ -33,12 +33,16 @@ export function createEventsRoutes(getSseManager: () => SSEManager | null): Hono
         const machineId = parseOptionalId(query.machineId)
         const subscriptionId = randomUUID()
 
+        // Extract userId from authenticated context
+        const userId = c.get('userId') ?? null
+
         return streamSSE(c, async (stream) => {
             manager.subscribe({
                 id: subscriptionId,
                 all,
                 sessionId,
                 machineId,
+                userId,
                 send: (event) => stream.writeSSE({ data: JSON.stringify(event) }),
                 sendHeartbeat: async () => {
                     await stream.write(': heartbeat\n\n')

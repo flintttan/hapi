@@ -112,6 +112,13 @@ export function registerCliHandlers(socket: Socket, deps: CliHandlersDeps): void
         socket.join(`machine:${machineId}`)
     }
 
+    // Join user-specific room for event broadcasting isolation
+    const userId = typeof auth?.userId === 'string' ? auth.userId : null
+    if (userId) {
+        socket.join(`user:${userId}`)
+        console.log(`[Socket.IO] User ${userId} joined room user:${userId}`)
+    }
+
     socket.on('rpc-register', (data: unknown) => {
         const parsed = rpcRegisterSchema.safeParse(data)
         if (!parsed.success) {
@@ -129,6 +136,12 @@ export function registerCliHandlers(socket: Socket, deps: CliHandlersDeps): void
     })
 
     socket.on('disconnect', () => {
+        // Leave user room on disconnect
+        if (userId) {
+            socket.leave(`user:${userId}`)
+            console.log(`[Socket.IO] User ${userId} left room user:${userId}`)
+        }
+
         rpcRegistry.unregisterAll(socket)
         const removed = terminalRegistry.removeByCliSocket(socket.id)
         for (const entry of removed) {
