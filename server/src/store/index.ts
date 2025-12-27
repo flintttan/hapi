@@ -302,7 +302,15 @@ export class Store {
             this.db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT')
         }
         if (!userColumnNames.has('email')) {
-            this.db.exec('ALTER TABLE users ADD COLUMN email TEXT UNIQUE')
+            // SQLite doesn't allow adding UNIQUE columns via ALTER TABLE
+            // Add without UNIQUE first
+            this.db.exec('ALTER TABLE users ADD COLUMN email TEXT')
+            // Then create a unique index for existing databases
+            try {
+                this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL')
+            } catch {
+                // Index might already exist, ignore error
+            }
         }
     }
 
