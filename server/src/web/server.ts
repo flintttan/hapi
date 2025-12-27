@@ -6,8 +6,10 @@ import { existsSync } from 'node:fs'
 import { serveStatic } from 'hono/bun'
 import { configuration } from '../configuration'
 import type { SyncEngine } from '../sync/syncEngine'
+import type { Store } from '../store'
 import { createAuthMiddleware, type WebAppEnv } from './middleware/auth'
 import { createAuthRoutes } from './routes/auth'
+import { createRegisterRoutes } from './routes/register'
 import { createEventsRoutes } from './routes/events'
 import { createSessionsRoutes } from './routes/sessions'
 import { createMessagesRoutes } from './routes/messages'
@@ -15,6 +17,7 @@ import { createPermissionsRoutes } from './routes/permissions'
 import { createMachinesRoutes } from './routes/machines'
 import { createGitRoutes } from './routes/git'
 import { createCliRoutes } from './routes/cli'
+import { createCliTokenRoutes } from './routes/cli-tokens'
 import type { SSEManager } from '../sse/sseManager'
 import type { Server as BunServer } from 'bun'
 import type { Server as SocketEngine } from '@socket.io/bun-engine'
@@ -49,6 +52,7 @@ function serveEmbeddedAsset(asset: EmbeddedWebAsset): Response {
 }
 
 function createWebApp(options: {
+    store: Store
     getSyncEngine: () => SyncEngine | null
     getSseManager: () => SSEManager | null
     jwtSecret: Uint8Array
@@ -70,15 +74,17 @@ function createWebApp(options: {
 
     app.route('/cli', createCliRoutes(options.getSyncEngine))
 
-    app.route('/api', createAuthRoutes(options.jwtSecret))
+    app.route('/api', createAuthRoutes(options.jwtSecret, options.store))
+    app.route('/api', createRegisterRoutes(options.jwtSecret, options.store))
 
-    app.use('/api/*', createAuthMiddleware(options.jwtSecret))
+    app.use('/api/*', createAuthMiddleware(options.jwtSecret, options.store))
     app.route('/api', createEventsRoutes(options.getSseManager))
     app.route('/api', createSessionsRoutes(options.getSyncEngine))
     app.route('/api', createMessagesRoutes(options.getSyncEngine))
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
     app.route('/api', createMachinesRoutes(options.getSyncEngine))
     app.route('/api', createGitRoutes(options.getSyncEngine))
+    app.route('/api', createCliTokenRoutes(options.store))
 
     if (options.embeddedAssetMap) {
         const embeddedAssetMap = options.embeddedAssetMap
@@ -159,6 +165,7 @@ function createWebApp(options: {
 }
 
 export async function startWebServer(options: {
+    store: Store
     getSyncEngine: () => SyncEngine | null
     getSseManager: () => SSEManager | null
     jwtSecret: Uint8Array
@@ -167,6 +174,7 @@ export async function startWebServer(options: {
     const isCompiled = isBunCompiled()
     const embeddedAssetMap = isCompiled ? await loadEmbeddedAssetMap() : null
     const app = createWebApp({
+        store: options.store,
         getSyncEngine: options.getSyncEngine,
         getSseManager: options.getSseManager,
         jwtSecret: options.jwtSecret,

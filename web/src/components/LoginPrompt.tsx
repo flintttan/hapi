@@ -7,6 +7,7 @@ import type { ServerUrlResult } from '@/hooks/useServerUrl'
 
 type LoginPromptProps = {
     onLogin: (token: string) => void
+    onPasswordLogin?: (username: string, password: string) => void
     baseUrl: string
     serverUrl: string | null
     setServerUrl: (input: string) => ServerUrlResult
@@ -16,6 +17,10 @@ type LoginPromptProps = {
 
 export function LoginPrompt(props: LoginPromptProps) {
     const [accessToken, setAccessToken] = useState('')
+    const [username, setUsername] = useState('')
+    const [password, setPassword] = useState('')
+    const [email, setEmail] = useState('')
+    const [mode, setMode] = useState<'login' | 'register'>('login')
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const [isServerDialogOpen, setIsServerDialogOpen] = useState(false)
@@ -25,6 +30,63 @@ export function LoginPrompt(props: LoginPromptProps) {
     const handleSubmit = useCallback(async (e: React.FormEvent) => {
         e.preventDefault()
 
+        // Username/Password mode
+        if (mode === 'login' && username && password) {
+            if (!props.onPasswordLogin) {
+                setError('Password login not supported')
+                return
+            }
+            setIsLoading(true)
+            setError(null)
+
+            try {
+                // Pass to onPasswordLogin callback
+                props.onPasswordLogin(username.trim(), password)
+            } catch (e) {
+                setError(e instanceof Error ? e.message : 'Login failed')
+                setIsLoading(false)
+            }
+            return
+        }
+
+        // Registration mode
+        if (mode === 'register' && username && password) {
+            setIsLoading(true)
+            setError(null)
+
+            try {
+                const response = await fetch(`${props.baseUrl}/api/register`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        username: username.trim(),
+                        email: email.trim() || undefined,
+                        password
+                    })
+                })
+
+                if (!response.ok) {
+                    const data = await response.json()
+                    throw new Error(data.error || 'Registration failed')
+                }
+
+                // Registration successful, switch to login mode
+                setMode('login')
+                setError(null)
+                setPassword('')
+                setEmail('')
+                return
+            } catch (e) {
+                setError(e instanceof Error ? e.message : 'Registration failed')
+            } finally {
+                setIsLoading(false)
+            }
+            return
+        }
+
+        // Access token mode
         const trimmedToken = accessToken.trim()
         if (!trimmedToken) {
             setError('Please enter an access token')
@@ -45,7 +107,7 @@ export function LoginPrompt(props: LoginPromptProps) {
         } finally {
             setIsLoading(false)
         }
-    }, [accessToken, props])
+    }, [accessToken, username, password, email, mode, props])
 
     useEffect(() => {
         if (!isServerDialogOpen) {
@@ -142,23 +204,119 @@ export function LoginPrompt(props: LoginPromptProps) {
                 <div className="text-center space-y-2">
                     <div className="text-2xl font-semibold">Hapi</div>
                     <div className="text-sm text-[var(--app-hint)]">
-                        Enter your access token to continue
+                        {mode === 'register' ? 'Create your account' : 'Sign in to continue'}
                     </div>
+                </div>
+
+                {/* Mode Toggle */}
+                <div className="flex border border-[var(--app-border)] rounded-lg p-1">
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setMode('login')
+                            setError(null)
+                        }}
+                        className={`flex-1 py-2 text-sm font-medium rounded transition-colors ${
+                            mode === 'login'
+                                ? 'bg-[var(--app-button)] text-[var(--app-button-text)]'
+                                : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'
+                        }`}
+                    >
+                        Login
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            setMode('register')
+                            setError(null)
+                        }}
+                        className={`flex-1 py-2 text-sm font-medium rounded transition-colors ${
+                            mode === 'register'
+                                ? 'bg-[var(--app-button)] text-[var(--app-button-text)]'
+                                : 'text-[var(--app-hint)] hover:text-[var(--app-fg)]'
+                        }`}
+                    >
+                        Register
+                    </button>
                 </div>
 
                 {/* Form */}
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <input
-                            type="password"
-                            value={accessToken}
-                            onChange={(e) => setAccessToken(e.target.value)}
-                            placeholder="Access Token"
-                            autoComplete="current-password"
-                            disabled={isLoading}
-                            className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
-                        />
-                    </div>
+                    {mode === 'login' && (
+                        <>
+                            <div>
+                                <input
+                                    type="text"
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    placeholder="Username or Access Token"
+                                    autoComplete="username"
+                                    disabled={isLoading}
+                                    className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                                />
+                            </div>
+                            <div>
+                                <input
+                                    type="password"
+                                    value={password || accessToken}
+                                    onChange={(e) => {
+                                        if (username) {
+                                            setPassword(e.target.value)
+                                        } else {
+                                            setAccessToken(e.target.value)
+                                        }
+                                    }}
+                                    placeholder="Password or Token"
+                                    autoComplete="current-password"
+                                    disabled={isLoading}
+                                    className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                                />
+                            </div>
+                        </>
+                    )}
+
+                    {mode === 'register' && (
+                        <>
+                            <div>
+                                <input
+                                    type="text"
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    placeholder="Username (3-50 characters)"
+                                    autoComplete="username"
+                                    disabled={isLoading}
+                                    required
+                                    minLength={3}
+                                    maxLength={50}
+                                    className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                                />
+                            </div>
+                            <div>
+                                <input
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    placeholder="Email (optional)"
+                                    autoComplete="email"
+                                    disabled={isLoading}
+                                    className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                                />
+                            </div>
+                            <div>
+                                <input
+                                    type="password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="Password (min 6 characters)"
+                                    autoComplete="new-password"
+                                    disabled={isLoading}
+                                    required
+                                    minLength={6}
+                                    className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                                />
+                            </div>
+                        </>
+                    )}
 
                     {displayError && (
                         <div className="text-sm text-red-500 text-center">
@@ -168,24 +326,25 @@ export function LoginPrompt(props: LoginPromptProps) {
 
                     <button
                         type="submit"
-                        disabled={isLoading || !accessToken.trim()}
+                        disabled={isLoading || (mode === 'login' && !username && !password && !accessToken) || (mode === 'register' && (!username || !password))}
                         aria-busy={isLoading}
                         className="w-full py-2.5 rounded-lg bg-[var(--app-button)] text-[var(--app-button-text)] font-medium disabled:opacity-50 hover:opacity-90 transition-opacity inline-flex items-center justify-center gap-2"
                     >
                         {isLoading ? (
                             <>
                                 <Spinner size="sm" label={null} className="text-[var(--app-button-text)]" />
-                                Signing in…
+                                {mode === 'register' ? 'Creating account…' : 'Signing in…'}
                             </>
                         ) : (
-                            'Sign In'
+                            mode === 'register' ? 'Create Account' : 'Sign In'
                         )}
                     </button>
                 </form>
 
                 {/* Help text */}
                 <div className="text-xs text-[var(--app-hint)] text-center">
-                    Use the CLI_API_TOKEN from your server configuration
+                    {mode === 'login' && 'Use your username/password or CLI_API_TOKEN'}
+                    {mode === 'register' && 'Create an account to get started'}
                 </div>
             </div>
         </div>

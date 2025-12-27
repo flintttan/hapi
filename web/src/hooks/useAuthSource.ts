@@ -54,6 +54,7 @@ export function useAuthSource(baseUrl: string): {
     isLoading: boolean
     isTelegram: boolean
     setAccessToken: (token: string) => void
+    setPasswordAuth: (username: string, password: string) => void
     clearAuth: () => void
 } {
     const [authSource, setAuthSource] = useState<AuthSource | null>(null)
@@ -125,6 +126,11 @@ export function useAuthSource(baseUrl: string): {
         setAuthSource({ type: 'accessToken', token })
     }, [accessTokenKey])
 
+    const setPasswordAuth = useCallback((username: string, password: string) => {
+        // Store username for potential reuse, password is never stored
+        setAuthSource({ type: 'password', username, password })
+    }, [])
+
     const clearAuth = useCallback(() => {
         clearStoredAccessToken(accessTokenKey)
         setAuthSource(null)
@@ -135,6 +141,7 @@ export function useAuthSource(baseUrl: string): {
         isLoading,
         isTelegram,
         setAccessToken,
+        setPasswordAuth,
         clearAuth
     }
 }

@@ -19,8 +19,8 @@ import { LoadingState } from '@/components/LoadingState'
 
 export function App() {
     const { serverUrl, baseUrl, setServerUrl, clearServerUrl } = useServerUrl()
-    const { authSource, isLoading: isAuthSourceLoading, setAccessToken } = useAuthSource(baseUrl)
-    const { token, api, isLoading: isAuthLoading, error: authError } = useAuth(authSource, baseUrl)
+    const { authSource, isLoading: isAuthSourceLoading, setAccessToken, setPasswordAuth, clearAuth } = useAuthSource(baseUrl)
+    const { token, user, api, isLoading: isAuthLoading, error: authError } = useAuth(authSource, baseUrl)
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
     const matchRoute = useMatchRoute()
@@ -168,6 +168,7 @@ export function App() {
         return (
             <LoginPrompt
                 onLogin={setAccessToken}
+                onPasswordLogin={setPasswordAuth}
                 baseUrl={baseUrl}
                 serverUrl={serverUrl}
                 setServerUrl={setServerUrl}
@@ -186,12 +187,13 @@ export function App() {
     }
 
     // Auth error
-    if (authError || !token || !api) {
-        // If using access token and auth failed, show login again
-        if (authSource.type === 'accessToken') {
+    if (authError || !token || !api || !user) {
+        // If using access token or password and auth failed, show login again
+        if (authSource.type === 'accessToken' || authSource.type === 'password') {
             return (
                 <LoginPrompt
                     onLogin={setAccessToken}
+                    onPasswordLogin={setPasswordAuth}
                     baseUrl={baseUrl}
                     serverUrl={serverUrl}
                     setServerUrl={setServerUrl}
@@ -216,7 +218,7 @@ export function App() {
     }
 
     return (
-        <AppContextProvider value={{ api, token }}>
+        <AppContextProvider value={{ api, token, user, onLogout: clearAuth }}>
             <SyncingBanner isSyncing={isSyncing} />
             <OfflineBanner />
             <div className="h-full flex flex-col">
