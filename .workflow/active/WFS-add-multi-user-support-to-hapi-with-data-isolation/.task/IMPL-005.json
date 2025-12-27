@@ -1,0 +1,211 @@
+{
+  "id": "IMPL-005",
+  "title": "Add user filtering to SyncEngine in-memory cache and operations",
+  "status": "pending",
+  "context_package_path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json",
+  "meta": {
+    "type": "refactor",
+    "agent": "@code-developer",
+    "execution_group": null,
+    "module": "server"
+  },
+  "context": {
+    "requirements": [
+      "Add userId parameter to 8 SyncEngine methods: [getSessions(userId), getSession(sessionId, userId), createSession(data, userId), updateSession(sessionId, updates, userId), getMachines(userId), getMachine(machineId, userId), createMachine(data, userId), updateMachine(machineId, updates, userId)]",
+      "Implement user-scoped filtering: 2 Map data structures [sessions Map filtered by userId, machines Map filtered by userId]",
+      "Update cache synchronization: Modify 6 cache operations to respect userId boundaries",
+      "Maintain cache coherence: Ensure in-memory cache matches Store userId filtering"
+    ],
+    "focus_paths": [
+      "server/src/sync/syncEngine.ts",
+      "server/src/store/index.ts"
+    ],
+    "acceptance": [
+      "8 methods have userId parameter: verify by grep -E '(getSessions|getSession|createSession|updateSession|getMachines|getMachine|createMachine|updateMachine).*userId' server/src/sync/syncEngine.ts | wc -l = 8",
+      "Cache filtering implemented: verify by grep 'filter.*userId' server/src/sync/syncEngine.ts | wc -l >= 2",
+      "Cache-Store consistency maintained: verify by bun test server/src/sync/__tests__/cache-consistency.test.ts (exit code 0)",
+      "User isolation in cache verified: verify by bun test server/src/sync/__tests__/user-cache-isolation.test.ts (exit code 0)"
+    ],
+    "depends_on": ["IMPL-003"],
+    "inherited": {
+      "from": "IMPL-003",
+      "context": ["Store methods require userId and return user-scoped data via WHERE user_id = ? clauses"]
+    },
+    "shared_context": {
+      "tech_stack": ["TypeScript", "In-memory Map cache", "Event-driven architecture"],
+      "cache_pattern": "In-memory cache mirrors Store data for performance, MUST maintain same userId filtering",
+      "conventions": ["Cache operations delegate to Store for persistence", "Cache invalidation on updates", "Event emission after cache updates"]
+    },
+    "artifacts": []
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_context_package",
+        "action": "Load context package for SyncEngine architecture analysis",
+        "commands": ["Read(.workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json)"],
+        "output_to": "context_package",
+        "on_error": "fail"
+      },
+      {
+        "step": "analyze_syncengine_structure",
+        "action": "Review SyncEngine class structure and cache management",
+        "commands": [
+          "Read(server/src/sync/syncEngine.ts)",
+          "bash(grep -n 'class SyncEngine\\|private sessions\\|private machines' server/src/sync/syncEngine.ts)"
+        ],
+        "output_to": "syncengine_structure"
+      },
+      {
+        "step": "identify_cache_operations",
+        "action": "Find all cache read/write operations in SyncEngine",
+        "commands": ["bash(grep -E 'this\\.sessions\\.|this\\.machines\\.' server/src/sync/syncEngine.ts | head -30)"],
+        "output_to": "cache_operations"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "Update getSessions and getSession with userId filtering",
+        "description": "Add userId parameter and filter in-memory sessions cache by userId",
+        "modification_points": [
+          "Modify 2 methods in server/src/sync/syncEngine.ts: [getSessions(userId): lines 80-95, getSession(sessionId, userId): lines 97-110]",
+          "Add userId parameter to both method signatures",
+          "Implement cache filtering: Array.from(this.sessions.values()).filter(s => s.userId === userId)",
+          "Update getSession ownership check: Verify session.userId === userId before returning"
+        ],
+        "logic_flow": [
+          "getSessions(userId): Filter sessions Map by userId, return array of owned sessions",
+          "If cache empty or stale, delegate to Store.getSessions(userId) and refresh cache",
+          "getSession(sessionId, userId): Fetch session from cache or Store",
+          "Verify session.userId === userId, return null if mismatch",
+          "Return session object if ownership verified"
+        ],
+        "depends_on": [],
+        "output": "session_filtering_added"
+      },
+      {
+        "step": 2,
+        "title": "Update getMachines and getMachine with userId filtering",
+        "description": "Add userId parameter and filter in-memory machines cache by userId",
+        "modification_points": [
+          "Modify 2 methods in server/src/sync/syncEngine.ts: [getMachines(userId): lines 120-135, getMachine(machineId, userId): lines 137-150]",
+          "Add userId parameter to both method signatures",
+          "Implement cache filtering: Array.from(this.machines.values()).filter(m => m.userId === userId)",
+          "Update getMachine ownership check: Verify machine.userId === userId before returning"
+        ],
+        "logic_flow": [
+          "getMachines(userId): Filter machines Map by userId, return array of owned machines",
+          "If cache empty or stale, delegate to Store.getMachines(userId) and refresh cache",
+          "getMachine(machineId, userId): Fetch machine from cache or Store",
+          "Verify machine.userId === userId, return null if mismatch",
+          "Return machine object if ownership verified"
+        ],
+        "depends_on": [],
+        "output": "machine_filtering_added"
+      },
+      {
+        "step": 3,
+        "title": "Update session creation and mutation methods",
+        "description": "Add userId parameter to createSession and updateSession, enforce ownership in cache operations",
+        "modification_points": [
+          "Modify 2 methods in server/src/sync/syncEngine.ts: [createSession(data, userId): lines 160-180, updateSession(sessionId, updates, userId): lines 182-200]",
+          "Add userId to createSession data object before Store call",
+          "Add ownership validation in updateSession before applying updates",
+          "Update cache after Store operations to maintain consistency"
+        ],
+        "logic_flow": [
+          "createSession(data, userId): Merge userId into data object, call Store.createSession(data, userId)",
+          "Add new session to cache: this.sessions.set(session.id, session)",
+          "Emit 'session:created' event with session data",
+          "updateSession(sessionId, updates, userId): Verify ownership with getSession(sessionId, userId)",
+          "If session not owned by user, throw UnauthorizedError",
+          "Call Store.updateSession(sessionId, updates, userId)",
+          "Update cache with new session data",
+          "Emit 'session:updated' event"
+        ],
+        "depends_on": [1],
+        "output": "session_mutations_updated"
+      },
+      {
+        "step": 4,
+        "title": "Update machine creation and mutation methods",
+        "description": "Add userId parameter to createMachine and updateMachine, enforce ownership in cache operations",
+        "modification_points": [
+          "Modify 2 methods in server/src/sync/syncEngine.ts: [createMachine(data, userId): lines 210-230, updateMachine(machineId, updates, userId): lines 232-250]",
+          "Add userId to createMachine data object before Store call",
+          "Add ownership validation in updateMachine before applying updates",
+          "Update cache after Store operations to maintain consistency"
+        ],
+        "logic_flow": [
+          "createMachine(data, userId): Merge userId into data object, call Store.createMachine(data, userId)",
+          "Add new machine to cache: this.machines.set(machine.id, machine)",
+          "Emit 'machine:created' event with machine data",
+          "updateMachine(machineId, updates, userId): Verify ownership with getMachine(machineId, userId)",
+          "If machine not owned by user, throw UnauthorizedError",
+          "Call Store.updateMachine(machineId, updates, userId)",
+          "Update cache with new machine data",
+          "Emit 'machine:updated' event"
+        ],
+        "depends_on": [2],
+        "output": "machine_mutations_updated"
+      },
+      {
+        "step": 5,
+        "title": "Update cache initialization and synchronization",
+        "description": "Ensure cache loading respects multi-user data structure",
+        "modification_points": [
+          "Modify 1 method: loadCache() in server/src/sync/syncEngine.ts lines 260-280",
+          "Remove global cache loading: Cannot load all sessions/machines into cache (multi-user)",
+          "Implement lazy cache loading: Load user-specific data on first access",
+          "Add cache TTL: 1 cache expiration mechanism (5 minutes) to prevent stale data"
+        ],
+        "logic_flow": [
+          "Deprecate loadCache() global initialization",
+          "Implement getUserCache(userId) lazy loading pattern",
+          "On first getSessions(userId) call, load from Store and cache",
+          "Add cache entry with timestamp for TTL tracking",
+          "On subsequent calls, check cache age and refresh if > 5 minutes",
+          "Emit 'cache:loaded' event with userId for monitoring"
+        ],
+        "depends_on": [3, 4],
+        "output": "cache_sync_updated"
+      },
+      {
+        "step": 6,
+        "title": "Create SyncEngine user isolation test suite",
+        "description": "Verify cache filtering and user isolation in SyncEngine",
+        "modification_points": [
+          "Create 2 test files: [server/src/sync/__tests__/cache-consistency.test.ts, server/src/sync/__tests__/user-cache-isolation.test.ts] with 80-100 lines each",
+          "Implement 8 test cases: [Cache filters sessions by userId, Cache filters machines by userId, Cache updates respect ownership, Unauthorized updates blocked, Cache-Store consistency maintained, Lazy cache loading works, Cache TTL expiration, Event emission includes userId]",
+          "Use mock Store for isolation"
+        ],
+        "logic_flow": [
+          "Setup: Create mock Store with multi-user data",
+          "Test session cache filtering: Create sessions for 2 users, verify getSessions(userA) returns only userA sessions",
+          "Test machine cache filtering: Similar to sessions",
+          "Test update authorization: Verify userA cannot update userB's session via SyncEngine",
+          "Test cache-Store consistency: Modify data via Store, verify cache reflects changes",
+          "Test lazy loading: Verify cache only loads user data on demand",
+          "Test TTL: Verify cache expires after 5 minutes and reloads",
+          "Cleanup: Clear cache and mocks"
+        ],
+        "depends_on": [5],
+        "output": "syncengine_isolation_tests"
+      }
+    ],
+    "target_files": [
+      "server/src/sync/syncEngine.ts:getSessions:80-95",
+      "server/src/sync/syncEngine.ts:getSession:97-110",
+      "server/src/sync/syncEngine.ts:getMachines:120-135",
+      "server/src/sync/syncEngine.ts:getMachine:137-150",
+      "server/src/sync/syncEngine.ts:createSession:160-180",
+      "server/src/sync/syncEngine.ts:updateSession:182-200",
+      "server/src/sync/syncEngine.ts:createMachine:210-230",
+      "server/src/sync/syncEngine.ts:updateMachine:232-250",
+      "server/src/sync/syncEngine.ts:loadCache:260-280",
+      "server/src/sync/__tests__/cache-consistency.test.ts",
+      "server/src/sync/__tests__/user-cache-isolation.test.ts"
+    ]
+  }
+}

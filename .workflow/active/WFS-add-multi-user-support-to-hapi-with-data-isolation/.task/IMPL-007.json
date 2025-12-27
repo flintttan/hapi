@@ -1,0 +1,212 @@
+{
+  "id": "IMPL-007",
+  "title": "Implement per-user CLI API token generation system",
+  "status": "pending",
+  "context_package_path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json",
+  "meta": {
+    "type": "feature",
+    "agent": "@code-developer",
+    "execution_group": null,
+    "module": "server"
+  },
+  "context": {
+    "requirements": [
+      "Create 1 cli_tokens table: [id, user_id (FK to users.id), token (unique), name, created_at, last_used_at]",
+      "Implement 4 CLI token management functions: [generateCliToken(userId, name?), validateCliToken(token), revokeCliToken(tokenId, userId), getCliTokens(userId)]",
+      "Add CLI token authentication to auth middleware: Support both legacy shared token and new per-user tokens during migration",
+      "Create CLI token management API: 3 endpoints [POST /api/cli-tokens (generate), GET /api/cli-tokens (list), DELETE /api/cli-tokens/:id (revoke)]"
+    ],
+    "focus_paths": [
+      "server/src/web/cliApiToken.ts",
+      "server/src/store/index.ts",
+      "server/src/web/middleware/auth.ts",
+      "server/src/web/routes/cli-tokens.ts"
+    ],
+    "acceptance": [
+      "1 cli_tokens table created: verify by SELECT name FROM sqlite_master WHERE type='table' AND name='cli_tokens'",
+      "4 token functions implemented: verify by grep 'generateCliToken\\|validateCliToken\\|revokeCliToken\\|getCliTokens' server/src/store/index.ts | wc -l = 4",
+      "3 API endpoints created: verify by grep 'POST\\|GET\\|DELETE.*cli-tokens' server/src/web/routes/cli-tokens.ts | wc -l = 3",
+      "Per-user tokens work: verify by bun test server/src/web/routes/__tests__/cli-tokens.test.ts (exit code 0)"
+    ],
+    "depends_on": ["IMPL-002"],
+    "inherited": {
+      "from": "IMPL-002",
+      "context": ["users table exists with user management functions", "User authentication flow established via getOrCreateUser"]
+    },
+    "shared_context": {
+      "tech_stack": ["TypeScript", "bun:sqlite", "Crypto (token generation)", "Hono"],
+      "token_strategy": "Per-user API tokens stored in database, legacy shared token supported during migration period",
+      "conventions": ["Use crypto.randomBytes(32).toString('base64url') for token generation", "Hash tokens before storage", "Include last_used_at for audit trail"]
+    },
+    "artifacts": []
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_context_package",
+        "action": "Load context package for CLI token system analysis",
+        "commands": ["Read(.workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json)"],
+        "output_to": "context_package",
+        "on_error": "fail"
+      },
+      {
+        "step": "analyze_current_token_system",
+        "action": "Review existing shared CLI_API_TOKEN implementation",
+        "commands": [
+          "Read(server/src/web/cliApiToken.ts)",
+          "bash(grep 'CLI_API_TOKEN' server/src -r --type ts -n)"
+        ],
+        "output_to": "current_token_system"
+      },
+      {
+        "step": "identify_token_usage",
+        "action": "Find all locations where CLI token is validated",
+        "commands": ["bash(grep 'getOrCreateCliApiToken\\|CLI_API_TOKEN' server/src/web/middleware/auth.ts -n)"],
+        "output_to": "token_usage_points"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "Create cli_tokens table schema",
+        "description": "Design database schema for per-user CLI token storage",
+        "modification_points": [
+          "Create 1 table: cli_tokens with 6 columns [id TEXT PRIMARY KEY, user_id TEXT NOT NULL (FK), token TEXT UNIQUE NOT NULL, name TEXT, created_at INTEGER NOT NULL, last_used_at INTEGER]",
+          "Add 1 foreign key: user_id REFERENCES users(id) ON DELETE CASCADE",
+          "Add 1 unique constraint: token column must be unique across all users",
+          "Add 1 index: CREATE INDEX idx_cli_tokens_user_id ON cli_tokens(user_id) for query performance"
+        ],
+        "logic_flow": [
+          "Define table schema supporting multiple tokens per user",
+          "Add user_id foreign key for ownership tracking",
+          "Add token uniqueness constraint to prevent duplicates",
+          "Add optional name field for user-friendly token identification",
+          "Add last_used_at for audit and cleanup of stale tokens",
+          "Create index on user_id for efficient getCliTokens(userId) queries"
+        ],
+        "depends_on": [],
+        "output": "cli_tokens_table_schema"
+      },
+      {
+        "step": 2,
+        "title": "Implement CLI token CRUD methods in Store",
+        "description": "Add database operations for CLI token management",
+        "modification_points": [
+          "Add 4 methods to Store class in server/src/store/index.ts: [generateCliToken(userId, name?): CliToken, validateCliToken(token): {userId, tokenId}|null, revokeCliToken(tokenId, userId): boolean, getCliTokens(userId): CliToken[]]",
+          "Add CliToken type export: {id, user_id, token, name, created_at, last_used_at}",
+          "Implement token hashing: Use SHA-256 for token storage (store hash, not plaintext)",
+          "Add last_used_at update: Update timestamp on validateCliToken"
+        ],
+        "logic_flow": [
+          "generateCliToken: Generate random token with crypto.randomBytes(32).toString('base64url')",
+          "Hash token with SHA-256 before storing",
+          "INSERT INTO cli_tokens with userId, hashed token, name, created_at",
+          "Return {id, token (unhashed for display), name, created_at}",
+          "validateCliToken: Hash input token, SELECT user_id, id WHERE token = hashed_token",
+          "If found, UPDATE last_used_at = Date.now() and return {userId, tokenId}",
+          "If not found, return null",
+          "revokeCliToken: DELETE WHERE id = tokenId AND user_id = userId (ownership check)",
+          "getCliTokens: SELECT * WHERE user_id = userId ORDER BY created_at DESC"
+        ],
+        "depends_on": [1],
+        "output": "cli_token_store_methods"
+      },
+      {
+        "step": 3,
+        "title": "Update auth middleware to support per-user CLI tokens",
+        "description": "Extend authentication middleware to validate both legacy shared token and new per-user tokens",
+        "modification_points": [
+          "Modify 1 function: createAuthMiddleware in server/src/web/middleware/auth.ts lines 40-80",
+          "Add CLI token validation: Check if Authorization header contains CLI token",
+          "Implement dual-mode authentication: Try per-user token first, fallback to legacy shared token",
+          "Set userId in context: c.set('userId', userId) from validated token"
+        ],
+        "logic_flow": [
+          "Extract token from Authorization: 'Bearer {token}' header",
+          "First try: Call Store.validateCliToken(token) to check per-user tokens",
+          "If validateCliToken returns {userId, tokenId}, set c.set('userId', userId) and continue",
+          "If validateCliToken returns null, try legacy shared token (getOrCreateCliApiToken())",
+          "If legacy token matches, get CLI user (getUserByCliToken()) and set userId",
+          "If neither validation succeeds, return 401 Unauthorized",
+          "Log authentication method used (per-user token vs legacy) for monitoring"
+        ],
+        "depends_on": [2],
+        "output": "auth_middleware_updated"
+      },
+      {
+        "step": 4,
+        "title": "Create CLI token management API routes",
+        "description": "Implement REST endpoints for CLI token CRUD operations",
+        "modification_points": [
+          "Create 1 new file: server/src/web/routes/cli-tokens.ts with 80-100 lines",
+          "Implement 3 route handlers: [POST /api/cli-tokens (generate), GET /api/cli-tokens (list), DELETE /api/cli-tokens/:id (revoke)]",
+          "Add authentication: All routes require authenticated user (JWT)",
+          "Add request validation: Zod schemas for POST body (optional name field)"
+        ],
+        "logic_flow": [
+          "POST /api/cli-tokens: Extract userId from c.get('userId'), parse optional name from body",
+          "Call Store.generateCliToken(userId, name)",
+          "Return {id, token (display once), name, created_at} in response",
+          "GET /api/cli-tokens: Extract userId, call Store.getCliTokens(userId)",
+          "Return array of tokens (WITHOUT full token value, only id, name, created_at, last_used_at)",
+          "DELETE /api/cli-tokens/:id: Extract tokenId from params, userId from context",
+          "Call Store.revokeCliToken(tokenId, userId)",
+          "Return 204 No Content on success, 404 if token not found or not owned by user"
+        ],
+        "depends_on": [2],
+        "output": "cli_token_api_routes"
+      },
+      {
+        "step": 5,
+        "title": "Add CLI token migration documentation",
+        "description": "Document migration path from shared token to per-user tokens",
+        "modification_points": [
+          "Update 1 file: server/README.md with CLI token migration section",
+          "Add migration guide: 3 steps [Generate per-user token via API, Update CLI config with new token, Deprecate shared token after all users migrated]",
+          "Add security note: Shared token will be disabled in future version, migration recommended"
+        ],
+        "logic_flow": [
+          "Document current dual-mode authentication support",
+          "Explain per-user token benefits (isolation, revocation, audit)",
+          "Provide step-by-step migration instructions",
+          "Include API examples for token generation",
+          "Add security best practices (token rotation, storage)",
+          "Set deprecation timeline for shared token"
+        ],
+        "depends_on": [3, 4],
+        "output": "migration_documentation"
+      },
+      {
+        "step": 6,
+        "title": "Create CLI token test suite",
+        "description": "Verify per-user token generation, validation, and API endpoints",
+        "modification_points": [
+          "Create 1 test file: server/src/web/routes/__tests__/cli-tokens.test.ts with 120-150 lines",
+          "Implement 9 test cases: [Token generation creates unique tokens, Token validation succeeds for valid token, Token validation fails for invalid token, Token hashing works correctly, last_used_at updates on validation, revokeCliToken deletes only owned tokens, API POST creates token, API GET lists user tokens, API DELETE revokes token]",
+          "Use test database for isolation"
+        ],
+        "logic_flow": [
+          "Setup: Create test users and database",
+          "Test generation: Generate 2 tokens for same user, verify uniqueness",
+          "Test validation: Validate token, verify userId returned correctly",
+          "Test hashing: Verify stored token is hashed, not plaintext",
+          "Test last_used_at: Validate token, verify timestamp updated",
+          "Test ownership: UserA generates token, UserB tries to revoke, verify blocked",
+          "Test API POST: Send POST /api/cli-tokens, verify token returned",
+          "Test API GET: List tokens, verify own tokens only",
+          "Test API DELETE: Revoke token, verify deletion",
+          "Cleanup: Remove test data"
+        ],
+        "depends_on": [2, 4],
+        "output": "cli_token_tests"
+      }
+    ],
+    "target_files": [
+      "server/src/store/index.ts",
+      "server/src/web/middleware/auth.ts:createAuthMiddleware:40-80",
+      "server/src/web/routes/cli-tokens.ts",
+      "server/src/web/cliApiToken.ts",
+      "server/src/web/routes/__tests__/cli-tokens.test.ts"
+    ]
+  }
+}

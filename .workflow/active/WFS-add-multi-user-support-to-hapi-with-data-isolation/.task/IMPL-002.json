@@ -1,0 +1,171 @@
+{
+  "id": "IMPL-002",
+  "title": "Implement user management system replacing ownerId mechanism",
+  "status": "pending",
+  "context_package_path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json",
+  "meta": {
+    "type": "feature",
+    "agent": "@code-developer",
+    "execution_group": null,
+    "module": "server"
+  },
+  "context": {
+    "requirements": [
+      "Create 2 user management functions: [getOrCreateUser(telegramId, username), getUserByCliToken()]",
+      "Deprecate 1 existing function: server/src/web/ownerId.ts:getOrCreateOwnerId()",
+      "Add user CRUD operations to Store: 4 methods [createUser(), getUserById(), getUserByTelegramId(), getAllUsers()]",
+      "Support 2 authentication modes: [Telegram initData → telegram_id, CLI_API_TOKEN → synthetic user]"
+    ],
+    "focus_paths": [
+      "server/src/web/routes/auth.ts",
+      "server/src/web/ownerId.ts",
+      "server/src/store/index.ts",
+      "server/src/web/middleware/auth.ts"
+    ],
+    "acceptance": [
+      "2 user creation functions implemented: verify by grep 'getOrCreateUser\\|getUserByCliToken' server/src/web/routes/auth.ts",
+      "4 Store methods added: verify by grep 'createUser\\|getUserById\\|getUserByTelegramId\\|getAllUsers' server/src/store/index.ts | wc -l = 4",
+      "ownerId.ts deprecated: verify by grep '@deprecated' server/src/web/ownerId.ts",
+      "User creation tested: verify by bun test server/src/store/__tests__/user-management.test.ts (exit code 0)"
+    ],
+    "depends_on": ["IMPL-001"],
+    "inherited": {
+      "from": "IMPL-001",
+      "context": ["users table schema created with id, telegram_id, username, created_at columns", "Database migration completed successfully"]
+    },
+    "shared_context": {
+      "tech_stack": ["TypeScript", "bun:sqlite", "Zod", "jose (JWT)"],
+      "user_model": "User = {id: string, telegram_id: string | null, username: string, created_at: number}",
+      "conventions": ["Use nanoid for user ID generation", "Username defaults to 'User-{telegram_id}' if not provided", "CLI users have telegram_id = null"]
+    },
+    "artifacts": []
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_context_package",
+        "action": "Load context package for authentication flow analysis",
+        "commands": ["Read(.workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json)"],
+        "output_to": "context_package",
+        "on_error": "fail"
+      },
+      {
+        "step": "analyze_auth_flow",
+        "action": "Study current authentication flow in auth.ts",
+        "commands": [
+          "Read(server/src/web/routes/auth.ts)",
+          "Extract(getOrCreateOwnerId usage patterns)"
+        ],
+        "output_to": "current_auth_flow"
+      },
+      {
+        "step": "review_ownerId_usage",
+        "action": "Find all usages of getOrCreateOwnerId to ensure complete replacement",
+        "commands": ["bash(rg 'getOrCreateOwnerId' server/src --type ts -n)"],
+        "output_to": "ownerId_usages"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "Add user CRUD methods to Store class",
+        "description": "Implement database operations for user management",
+        "modification_points": [
+          "Add 4 new methods to Store class in server/src/store/index.ts: [createUser(user): User, getUserById(id): User|null, getUserByTelegramId(telegramId): User|null, getAllUsers(): User[]]",
+          "Create 4 prepared SQL statements: [INSERT user, SELECT by id, SELECT by telegram_id, SELECT all users]",
+          "Add User type export: 1 interface definition"
+        ],
+        "logic_flow": [
+          "Define User interface with id, telegram_id, username, created_at fields",
+          "Implement createUser with INSERT INTO users prepared statement",
+          "Implement getUserById with SELECT WHERE id = ? query",
+          "Implement getUserByTelegramId with SELECT WHERE telegram_id = ? query",
+          "Implement getAllUsers with SELECT * FROM users query",
+          "Add proper error handling for constraint violations (duplicate telegram_id)"
+        ],
+        "depends_on": [],
+        "output": "store_user_methods"
+      },
+      {
+        "step": 2,
+        "title": "Create getOrCreateUser helper for Telegram authentication",
+        "description": "Implement user creation/retrieval logic for Telegram users in auth.ts",
+        "modification_points": [
+          "Create 1 helper function in server/src/web/routes/auth.ts: getOrCreateUser(telegramId: string, username?: string): User",
+          "Add 1 username generation fallback: 'User-{telegram_id}' if username not provided",
+          "Integrate with Store.createUser and Store.getUserByTelegramId"
+        ],
+        "logic_flow": [
+          "Check if user exists with getUserByTelegramId(telegramId)",
+          "If exists, return existing user",
+          "If not exists, generate username (provided or default)",
+          "Create new user with createUser({id: nanoid(), telegram_id: telegramId, username, created_at: Date.now()})",
+          "Return newly created user"
+        ],
+        "depends_on": [1],
+        "output": "telegram_user_helper"
+      },
+      {
+        "step": 3,
+        "title": "Create getUserByCliToken helper for CLI authentication",
+        "description": "Implement user mapping for CLI_API_TOKEN authentication mode",
+        "modification_points": [
+          "Create 1 helper function in server/src/web/routes/auth.ts: getUserByCliToken(): User",
+          "Create 1 synthetic CLI user: {id: 'cli-user', telegram_id: null, username: 'CLI User'}",
+          "Add memoization to avoid repeated database queries for same CLI user"
+        ],
+        "logic_flow": [
+          "Check if CLI user exists with getUserById('cli-user')",
+          "If exists, return CLI user",
+          "If not exists, create CLI user with fixed ID 'cli-user'",
+          "Cache result in-memory to avoid DB lookups on every CLI request",
+          "Return CLI user"
+        ],
+        "depends_on": [1],
+        "output": "cli_user_helper"
+      },
+      {
+        "step": 4,
+        "title": "Replace getOrCreateOwnerId calls in auth routes",
+        "description": "Update authentication flow to use new user management functions",
+        "modification_points": [
+          "Modify 2 auth routes in server/src/web/routes/auth.ts: [POST /api/auth with initData, POST /api/auth with CLI token]",
+          "Replace 2 getOrCreateOwnerId() calls with: [getOrCreateUser(telegramId, username) for Telegram, getUserByCliToken() for CLI]",
+          "Update JWT payload: Change 'uid' claim to use user.id instead of ownerId"
+        ],
+        "logic_flow": [
+          "For Telegram auth: Extract telegramId and username from validated initData",
+          "Call getOrCreateUser(telegramId, username) to get/create user",
+          "For CLI auth: Call getUserByCliToken() to get CLI user",
+          "Generate JWT with user.id in 'uid' claim",
+          "Return {token, user: {id, username}} in response"
+        ],
+        "depends_on": [2, 3],
+        "output": "updated_auth_routes"
+      },
+      {
+        "step": 5,
+        "title": "Deprecate ownerId.ts and update documentation",
+        "description": "Mark old single-user system as deprecated and document migration",
+        "modification_points": [
+          "Add @deprecated JSDoc to server/src/web/ownerId.ts:getOrCreateOwnerId() function",
+          "Create migration guide: 1 comment block explaining replacement pattern",
+          "Update 1 file: server/README.md with multi-user authentication section"
+        ],
+        "logic_flow": [
+          "Add deprecation notice to getOrCreateOwnerId with link to new functions",
+          "Document that existing ownerId is migrated to admin user",
+          "Add comments explaining user management architecture",
+          "Update README with authentication flow diagram"
+        ],
+        "depends_on": [4],
+        "output": "deprecation_docs"
+      }
+    ],
+    "target_files": [
+      "server/src/store/index.ts",
+      "server/src/web/routes/auth.ts:POST /api/auth:50-120",
+      "server/src/web/ownerId.ts:getOrCreateOwnerId:10-30"
+    ]
+  }
+}

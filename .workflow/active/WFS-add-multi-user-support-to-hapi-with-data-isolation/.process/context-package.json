@@ -1,0 +1,742 @@
+{
+  "metadata": {
+    "task_description": "GOAL: Add multi-user support to HAPI with data isolation\nSCOPE: User authentication system, session management, data isolation layer, migration from single-user to multi-user architecture\nCONTEXT: Current HAPI implementation is designed for single personal user, need to extend to support multiple users with isolated data access",
+    "timestamp": "2025-12-27T09:07:30.000Z",
+    "keywords": [
+      "multi-user",
+      "authentication",
+      "data-isolation",
+      "user-ownership",
+      "session-management",
+      "migration",
+      "security",
+      "authorization",
+      "row-level-security",
+      "JWT",
+      "userId",
+      "database-schema",
+      "SQLite",
+      "access-control"
+    ],
+    "complexity": "High",
+    "tech_stack": {
+      "languages": ["TypeScript"],
+      "frameworks": ["Hono", "Socket.IO", "React 19", "Bun"],
+      "databases": ["SQLite (bun:sqlite)"],
+      "authentication": ["JWT (jose library)", "Telegram Bot API"],
+      "validation": ["Zod"],
+      "real_time": ["Socket.IO", "SSE"]
+    },
+    "session_id": "WFS-add-multi-user-support-to-hapi-with-data-isolation"
+  },
+  "project_context": {
+    "description": "Local-first AI coding assistant platform enabling remote control of Claude Code/Codex/Gemini sessions via Web/PWA/Telegram Mini App. Multi-agent workspace with CLI wrapper, real-time server, and React-based control interface.",
+    "technology_stack": {
+      "languages": [
+        {
+          "name": "TypeScript",
+          "file_count": 307,
+          "primary": true
+        },
+        {
+          "name": "JSON",
+          "file_count": 8,
+          "primary": false
+        }
+      ],
+      "frameworks": [
+        "React 19",
+        "Bun",
+        "Vite",
+        "TanStack Router",
+        "TanStack Query",
+        "Tailwind CSS",
+        "Socket.IO",
+        "Hono",
+        "Fastify",
+        "Grammy (Telegram Bot)"
+      ],
+      "build_tools": [
+        "Bun",
+        "Vite",
+        "TypeScript",
+        "Vitest",
+        "Concurrently"
+      ],
+      "test_frameworks": [
+        "Vitest"
+      ]
+    },
+    "architecture": {
+      "style": "Distributed client-server microservices with monorepo workspace architecture",
+      "layers": [
+        "presentation",
+        "business-logic",
+        "data-access"
+      ],
+      "patterns": [
+        "Client-Server",
+        "Event-Driven Architecture",
+        "Real-time Messaging (Socket.IO + SSE)",
+        "MCP (Model Context Protocol)",
+        "RPC Registry",
+        "Store (Repository Pattern)",
+        "Singleton Configuration",
+        "Factory (Agent Runners)"
+      ],
+      "current_security_model": "Single owner system - all authenticated users share same ownerId (generated once per server), sessions/machines not scoped to users, no row-level security"
+    },
+    "key_components": [
+      {
+        "name": "CLI Agent Wrapper",
+        "path": "cli/src",
+        "description": "Multi-agent CLI wrapper for Claude Code, Codex, and Gemini with session management, daemon support, and MCP stdio bridge",
+        "importance": "high"
+      },
+      {
+        "name": "API Communication Layer",
+        "path": "cli/src/api",
+        "description": "Socket.IO + REST client for bot communication with RPC support and optimistic concurrency control",
+        "importance": "high"
+      },
+      {
+        "name": "Claude SDK Integration",
+        "path": "cli/src/claude",
+        "description": "Claude Code integration layer with dual-mode operation (interactive/remote), session persistence, and message streaming",
+        "importance": "high"
+      },
+      {
+        "name": "Real-time Server",
+        "path": "server/src",
+        "description": "Hono-based HTTP server with Socket.IO, SSE streaming, Telegram bot, and SQLite persistence",
+        "importance": "high"
+      },
+      {
+        "name": "Sync Engine",
+        "path": "server/src/sync",
+        "description": "Core session/message manager with in-memory cache, versioning, permission handling, and RPC routing - NO USER FILTERING CURRENTLY",
+        "importance": "high"
+      },
+      {
+        "name": "Socket.IO Handlers",
+        "path": "server/src/socket",
+        "description": "Real-time event handlers for CLI connections, terminal sessions, and RPC registry",
+        "importance": "high"
+      },
+      {
+        "name": "SQLite Store",
+        "path": "server/src/store",
+        "description": "Persistence layer for sessions, messages, machines - CRITICAL: NO user_id columns, schema migration required",
+        "importance": "high"
+      },
+      {
+        "name": "React Web App",
+        "path": "web/src",
+        "description": "PWA/Telegram Mini App with session list, chat interface, file browser, git diff viewer, and permission workflows",
+        "importance": "high"
+      },
+      {
+        "name": "Authentication System",
+        "path": "server/src/web/routes/auth.ts + middleware/auth.ts",
+        "description": "JWT-based authentication with dual auth modes (CLI_API_TOKEN + Telegram initData) - CURRENTLY MAPS ALL USERS TO SINGLE OWNER ID",
+        "importance": "high"
+      }
+    ]
+  },
+  "assets": {
+    "documentation": [
+      {
+        "path": "README.md",
+        "scope": "project-overview",
+        "contains": [
+          "feature list",
+          "installation methods",
+          "quickstart guide",
+          "multi-agent support",
+          "Telegram Mini App setup"
+        ],
+        "relevance_score": 0.80
+      },
+      {
+        "path": ".workflow/project.json",
+        "scope": "project-state",
+        "contains": [
+          "architecture overview",
+          "technology stack",
+          "key components",
+          "patterns"
+        ],
+        "relevance_score": 0.90
+      }
+    ],
+    "source_code": [
+      {
+        "path": "server/src/web/routes/auth.ts",
+        "role": "authentication-core",
+        "dependencies": [
+          "ownerId.ts",
+          "telegramInitData.ts",
+          "middleware/auth.ts"
+        ],
+        "exports": [
+          "createAuthRoutes"
+        ],
+        "current_issue": "Maps ALL authenticated users (CLI token + Telegram) to single ownerId via getOrCreateOwnerId() - MUST be replaced with per-user ID management",
+        "relevance_score": 0.99
+      },
+      {
+        "path": "server/src/web/middleware/auth.ts",
+        "role": "jwt-verification",
+        "dependencies": [
+          "jose",
+          "zod"
+        ],
+        "exports": [
+          "createAuthMiddleware",
+          "WebAppEnv"
+        ],
+        "current_state": "Extracts userId from JWT and stores in c.set('userId') but NOT enforced in data access layer",
+        "relevance_score": 0.95
+      },
+      {
+        "path": "server/src/web/ownerId.ts",
+        "role": "single-user-bottleneck",
+        "dependencies": [
+          "configuration"
+        ],
+        "exports": [
+          "getOrCreateOwnerId"
+        ],
+        "critical_issue": "Generates/caches ONE ownerId for entire system - MUST be replaced with multi-user ID system or deprecated",
+        "relevance_score": 0.95
+      },
+      {
+        "path": "server/src/store/index.ts",
+        "role": "data-persistence",
+        "dependencies": [
+          "bun:sqlite"
+        ],
+        "exports": [
+          "Store",
+          "StoredSession",
+          "StoredMachine",
+          "DecryptedMessage"
+        ],
+        "schema_gap": "sessions/machines/messages tables have NO user_id column - REQUIRES schema migration with ALTER TABLE",
+        "query_gap": "All queries lack WHERE user_id = ? filtering - getSessions(), getMessages(), etc return ALL data",
+        "relevance_score": 0.99
+      },
+      {
+        "path": "server/src/web/routes/guards.ts",
+        "role": "route-guards",
+        "dependencies": [
+          "sync/syncEngine"
+        ],
+        "exports": [
+          "requireSyncEngine",
+          "requireSession",
+          "requireSessionFromParam"
+        ],
+        "missing_validation": "NO ownership validation - requireSession MUST verify session.userId === c.get('userId')",
+        "relevance_score": 0.90
+      },
+      {
+        "path": "server/src/sync/syncEngine.ts",
+        "role": "in-memory-state-manager",
+        "dependencies": [
+          "store/index.ts",
+          "socket.io"
+        ],
+        "exports": [
+          "SyncEngine",
+          "Session",
+          "Machine",
+          "DecryptedMessage"
+        ],
+        "isolation_gap": "In-memory Maps (sessions, machines) lack user filtering - getSessions() returns ALL sessions",
+        "broadcast_gap": "Event broadcasting notifies ALL listeners regardless of user ownership",
+        "relevance_score": 0.95
+      },
+      {
+        "path": "server/src/web/routes/sessions.ts",
+        "role": "session-api",
+        "dependencies": [
+          "sync/syncEngine",
+          "guards.ts"
+        ],
+        "exports": [
+          "createSessionRoutes"
+        ],
+        "data_leak": "GET /sessions returns ALL sessions without user filtering - MUST add user-scoped queries",
+        "relevance_score": 0.90
+      },
+      {
+        "path": "server/src/web/routes/messages.ts",
+        "role": "message-api",
+        "dependencies": [
+          "sync/syncEngine",
+          "guards.ts"
+        ],
+        "exports": [
+          "createMessageRoutes"
+        ],
+        "access_control_gap": "Message CRUD needs session ownership validation before allowing operations",
+        "relevance_score": 0.85
+      },
+      {
+        "path": "server/src/socket/handlers/cli.ts",
+        "role": "realtime-handlers",
+        "dependencies": [
+          "sync/syncEngine"
+        ],
+        "exports": [
+          "registerCliHandlers"
+        ],
+        "validation_gap": "Socket handlers lack user ownership checks on session/machine operations",
+        "relevance_score": 0.85
+      },
+      {
+        "path": "server/src/web/cliApiToken.ts",
+        "role": "cli-token-management",
+        "dependencies": [
+          "configuration"
+        ],
+        "exports": [
+          "getOrCreateCliApiToken"
+        ],
+        "multi_user_concern": "Currently server-wide single token - multi-user may need per-user API tokens",
+        "relevance_score": 0.75
+      },
+      {
+        "path": "cli/src/modules/common/pathSecurity.ts",
+        "role": "path-validation",
+        "dependencies": [],
+        "exports": [
+          "validatePath"
+        ],
+        "pattern_reference": "Path traversal protection for RPC - validates paths within session workingDirectory (good pattern for server-side validation)",
+        "relevance_score": 0.70
+      }
+    ],
+    "config": [
+      {
+        "path": "server/package.json",
+        "relevance_score": 0.75
+      },
+      {
+        "path": "cli/package.json",
+        "relevance_score": 0.70
+      }
+    ],
+    "tests": []
+  },
+  "dependencies": {
+    "internal": [
+      {
+        "from": "server/src/web/routes/auth.ts",
+        "to": "server/src/web/ownerId.ts",
+        "type": "single-user-bottleneck",
+        "description": "Auth route calls getOrCreateOwnerId() which returns same ID for all users"
+      },
+      {
+        "from": "server/src/web/middleware/auth.ts",
+        "to": "server/src/web/routes/*.ts",
+        "type": "user-context-propagation",
+        "description": "Middleware sets c.set('userId') but routes don't use it for data filtering"
+      },
+      {
+        "from": "server/src/web/routes/sessions.ts",
+        "to": "server/src/sync/syncEngine.ts",
+        "type": "missing-user-filter",
+        "description": "Session routes call engine.getSessions() without userId parameter"
+      },
+      {
+        "from": "server/src/sync/syncEngine.ts",
+        "to": "server/src/store/index.ts",
+        "type": "missing-user-filter",
+        "description": "SyncEngine calls Store methods without userId filtering"
+      },
+      {
+        "from": "server/src/socket/handlers/cli.ts",
+        "to": "server/src/sync/syncEngine.ts",
+        "type": "missing-ownership-check",
+        "description": "Socket handlers perform session operations without validating user ownership"
+      }
+    ],
+    "external": [
+      {
+        "package": "jose",
+        "version": "^5.9.6",
+        "usage": "JWT signing/verification for session tokens (already supports uid claim, good foundation)"
+      },
+      {
+        "package": "zod",
+        "version": "^3.24.1",
+        "usage": "Schema validation for auth payloads and JWT claims"
+      },
+      {
+        "package": "hono",
+        "version": "^4.x",
+        "usage": "Web framework providing middleware context for userId storage (c.set/c.get pattern)"
+      },
+      {
+        "package": "bun:sqlite",
+        "version": "built-in",
+        "usage": "SQLite database (file-based, supports WAL mode for concurrency, foreign keys enabled)"
+      },
+      {
+        "package": "socket.io",
+        "version": "^4.x",
+        "usage": "Real-time communication with auth middleware support"
+      }
+    ]
+  },
+  "brainstorm_artifacts": {},
+  "conflict_detection": {
+    "risk_level": "resolved",
+    "risk_factors": {
+      "existing_implementations": [
+        "server/src/web/ownerId.ts (single-user ID system)",
+        "server/src/store/index.ts (schema without user_id columns)",
+        "server/src/sync/syncEngine.ts (no user filtering)",
+        "server/src/web/routes/auth.ts (maps all users to single ownerId)"
+      ],
+      "api_changes": true,
+      "architecture_changes": true,
+      "data_model_changes": true,
+      "breaking_changes": [
+        "Database schema migration: Add user_id column to sessions, machines, messages tables",
+        "All Store methods require userId parameter for scoped queries",
+        "SyncEngine methods need user context filtering",
+        "Route guards must validate session/machine ownership",
+        "CLI_API_TOKEN authentication may need per-user token strategy",
+        "Existing data migration strategy required (assign to default user or fresh start)"
+      ]
+    },
+    "affected_modules": [
+      "server/src/web/routes (auth, sessions, messages, machines, permissions, git)",
+      "server/src/web/middleware (auth middleware user context propagation)",
+      "server/src/store (schema migration + query user-scoping)",
+      "server/src/sync (in-memory cache user filtering + event broadcast filtering)",
+      "server/src/socket (Socket.IO user ownership validation)",
+      "server/src/web/ownerId.ts (deprecate or repurpose as admin user)",
+      "server/src/web/cliApiToken.ts (potential per-user token generation)"
+    ],
+    "mitigation_strategy": "Incremental migration with backward compatibility: (1) Create users table and add user_id columns with NULL default, (2) Implement getOrCreateUser() to replace getOrCreateOwnerId(), (3) Add user-scoped queries to Store methods, (4) Update route guards with ownership validation, (5) Migrate existing data to default user, (6) Add NOT NULL constraint after migration, (7) Update SyncEngine filtering and Socket.IO broadcast logic",
+    "historical_conflicts": [],
+    "resolved_conflicts": [
+      {
+        "conflict_id": "CON-001",
+        "strategy_name": "创建users表并替换ownerId机制为per-user ID管理",
+        "user_note": "考虑使用MySQL/PostgreSQL数据库替代SQLite"
+      },
+      {
+        "conflict_id": "CON-002",
+        "strategy_name": "ALTER TABLE添加user_id列并修改所有查询增加WHERE过滤"
+      },
+      {
+        "conflict_id": "CON-003",
+        "strategy_name": "扩展requireSession/requireMachine守卫添加ownership验证"
+      },
+      {
+        "conflict_id": "CON-004",
+        "strategy_name": "SyncEngine方法添加userId参数,SSE/Socket.IO按userId过滤监听器"
+      },
+      {
+        "conflict_id": "CON-005",
+        "strategy_name": "生成per-user CLI tokens并废弃共享token"
+      }
+    ],
+    "resolved_at": "2025-12-27T09:30:00.000Z"
+  },
+  "exploration_results": {
+    "manifest_path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/explorations-manifest.json",
+    "exploration_count": 4,
+    "complexity": "High",
+    "angles": [
+      "security",
+      "auth-patterns",
+      "dataflow",
+      "validation"
+    ],
+    "explorations": [
+      {
+        "angle": "security",
+        "file": "exploration-security.json",
+        "path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/exploration-security.json",
+        "index": 1,
+        "summary": {
+          "relevant_files_count": 11,
+          "key_patterns": "JWT-based authentication (15min expiry), dual auth modes (CLI_API_TOKEN + Telegram), path security validation, optimistic concurrency control",
+          "integration_points": "Auth middleware → Route handlers (c.set/c.get userId), JWT issuance → Database queries, Socket.IO auth → Session operations, CLI API Token → User mapping, Session creation → Owner assignment"
+        }
+      },
+      {
+        "angle": "auth-patterns",
+        "file": "exploration-auth-patterns.json",
+        "path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/exploration-auth-patterns.json",
+        "index": 2,
+        "summary": {
+          "relevant_files_count": 12,
+          "key_patterns": "POST /api/auth with {accessToken} or {initData} → validate → getOrCreateOwnerId() → SignJWT({uid}) → return {token, user}. Middleware extracts JWT → sets c.set('userId'). Single-user assumption: ownerId.ts caches single ID for all users",
+          "integration_points": "auth.ts route → ownerId.ts (bottleneck) → JWT generation → middleware → c.set('userId') → route handlers. SyncEngine → Store → SQLite (no user_id foreign keys)"
+        }
+      },
+      {
+        "angle": "dataflow",
+        "file": "exploration-dataflow.json",
+        "path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/exploration-dataflow.json",
+        "index": 3,
+        "summary": {
+          "relevant_files_count": 10,
+          "key_patterns": "CLI → REST/Socket.IO → SyncEngine (in-memory cache) → Store (SQLite) → Web/Telegram clients. Authentication: JWT token → userId in request context (not propagated to Store). Data persistence: Global queries without user filtering. In-memory cache: Single global cache, no user partitioning. Event broadcasting: Global broadcast without user filtering",
+          "integration_points": "Authentication entry (auth.ts:39 c.set('userId')), Database queries (Store methods need userId parameter), SyncEngine cache (user filtering needed), REST API guards (requireSession needs ownership check), Socket.IO handlers (user validation needed), Session/machine creation (userId association required), Schema migration (ALTER TABLE add user_id columns)"
+        }
+      },
+      {
+        "angle": "validation",
+        "file": "exploration-validation.json",
+        "path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/exploration-validation.json",
+        "index": 4,
+        "summary": {
+          "relevant_files_count": 11,
+          "key_patterns": "Zod schema validation (input), JWT authentication (identity verification with c.set('userId')), Guard functions (resource existence checks - NO user ownership validation), Path security validation (CLI-side path traversal protection). Missing: User-scoped database queries, Ownership validation guards, User isolation in in-memory state, Audit logging",
+          "integration_points": "Database schema migration (ALTER TABLE add user_id), Query user-scoping (add WHERE user_id = ? to all Store methods), Guard enhancement (requireUserOwnsSession/Machine), SyncEngine user-scoping (userId parameter filtering), Route user validation (all routes need ownership checks), Authentication user management (replace getOrCreateOwnerId with per-user system), Socket.IO/SSE user filtering (event broadcast filtering)"
+        }
+      }
+    ],
+    "aggregated_insights": {
+      "critical_files": [
+        {
+          "path": "server/src/web/routes/auth.ts",
+          "relevance": 0.97,
+          "mentioned_by_angles": [
+            "security",
+            "auth-patterns",
+            "validation"
+          ],
+          "issue": "Maps ALL authenticated users to single ownerId - CRITICAL SECURITY GAP"
+        },
+        {
+          "path": "server/src/store/index.ts",
+          "relevance": 0.96,
+          "mentioned_by_angles": [
+            "security",
+            "auth-patterns",
+            "dataflow",
+            "validation"
+          ],
+          "issue": "NO user_id columns in sessions/machines/messages tables, all queries lack user filtering"
+        },
+        {
+          "path": "server/src/web/ownerId.ts",
+          "relevance": 0.93,
+          "mentioned_by_angles": [
+            "security",
+            "auth-patterns",
+            "validation"
+          ],
+          "issue": "Single-user bottleneck - generates ONE ownerId for entire system"
+        },
+        {
+          "path": "server/src/sync/syncEngine.ts",
+          "relevance": 0.92,
+          "mentioned_by_angles": [
+            "security",
+            "dataflow",
+            "validation"
+          ],
+          "issue": "In-memory cache lacks user filtering, event broadcasting to ALL users"
+        },
+        {
+          "path": "server/src/web/middleware/auth.ts",
+          "relevance": 0.92,
+          "mentioned_by_angles": [
+            "security",
+            "auth-patterns",
+            "dataflow",
+            "validation"
+          ],
+          "issue": "Extracts userId but not enforced in downstream data access"
+        },
+        {
+          "path": "server/src/web/routes/guards.ts",
+          "relevance": 0.88,
+          "mentioned_by_angles": [
+            "security",
+            "validation"
+          ],
+          "issue": "NO ownership validation - requireSession doesn't check userId"
+        },
+        {
+          "path": "server/src/web/routes/sessions.ts",
+          "relevance": 0.85,
+          "mentioned_by_angles": [
+            "security",
+            "dataflow",
+            "validation"
+          ],
+          "issue": "GET /sessions returns ALL sessions - data leak"
+        },
+        {
+          "path": "server/src/socket/handlers/cli.ts",
+          "relevance": 0.80,
+          "mentioned_by_angles": [
+            "security",
+            "dataflow"
+          ],
+          "issue": "Socket handlers lack user ownership checks"
+        }
+      ],
+      "conflict_indicators": [
+        {
+          "type": "architecture_violation",
+          "description": "Current single-user architecture (ownerId.ts caching single ID) fundamentally conflicts with multi-user data isolation requirements",
+          "source_angle": "security + auth-patterns",
+          "severity": "critical",
+          "resolution": "Replace getOrCreateOwnerId() with per-user ID management system"
+        },
+        {
+          "type": "schema_incompatibility",
+          "description": "Database schema lacks user_id columns in core tables (sessions, machines, messages), preventing user-scoped queries",
+          "source_angle": "dataflow + validation",
+          "severity": "critical",
+          "resolution": "ALTER TABLE migration to add user_id columns with foreign key constraints"
+        },
+        {
+          "type": "data_access_gap",
+          "description": "Store methods (getSessions, getMessages, etc.) return ALL data without user filtering - violates isolation principle",
+          "source_angle": "dataflow + validation",
+          "severity": "high",
+          "resolution": "Add userId parameter to all Store methods and WHERE user_id = ? clauses"
+        },
+        {
+          "type": "authorization_missing",
+          "description": "Route guards check resource existence but NOT ownership - allows cross-user data access",
+          "source_angle": "security + validation",
+          "severity": "high",
+          "resolution": "Extend requireSession/requireMachine guards to validate session.userId === c.get('userId')"
+        },
+        {
+          "type": "broadcast_leak",
+          "description": "SyncEngine and Socket.IO broadcast events to ALL listeners regardless of user ownership",
+          "source_angle": "dataflow",
+          "severity": "medium",
+          "resolution": "Filter event listeners by userId before broadcasting"
+        }
+      ],
+      "clarification_needs": [
+        {
+          "question": "How should existing sessions/machines be migrated when adding userId column to database schema?",
+          "context": "Current database has sessions/machines/messages with NO userId column. Adding this column requires deciding how to handle existing data.",
+          "options": [
+            "Assign all existing sessions to first authenticated user (simple but may cause confusion)",
+            "Mark existing sessions as 'legacy' (userId = NULL) and restrict access (safer but loses history)",
+            "Delete all existing sessions during migration (clean slate but destructive)",
+            "Create synthetic 'owner' user and assign all existing sessions to it (preserves data, requires user management)"
+          ],
+          "recommended": 3,
+          "source_angle": "security"
+        },
+        {
+          "question": "Should CLI_API_TOKEN remain server-wide shared token or become per-user tokens?",
+          "context": "Current design: single CLI_API_TOKEN for entire server. Multi-user options: shared token + secondary auth, per-user tokens, or OAuth2.",
+          "options": [
+            "Keep shared CLI_API_TOKEN, add secondary user authentication layer",
+            "Generate per-user API tokens stored in server database",
+            "Implement OAuth2 authorization code flow for CLI",
+            "Use Telegram authentication for CLI users too"
+          ],
+          "recommended": 1,
+          "source_angle": "auth-patterns"
+        },
+        {
+          "question": "How should cross-user session access attempts be handled?",
+          "context": "When user A tries to access user B's session via API, system needs defined behavior.",
+          "options": [
+            "Return 403 Forbidden with clear error message",
+            "Return 404 Not Found to hide session existence",
+            "Allow read-only access but deny write operations",
+            "Check session metadata for explicit sharing permissions"
+          ],
+          "recommended": 1,
+          "source_angle": "security + validation"
+        },
+        {
+          "question": "Should user_id be added to messages table directly or inherited via session relationship?",
+          "context": "Messages have foreign key to sessions. Direct column is faster but denormalized, relationship-based is normalized but requires joins.",
+          "options": [
+            "Add user_id column directly to messages table (denormalized, faster queries)",
+            "Query user_id through session relationship via JOIN (normalized, slower)",
+            "Add user_id to messages with CHECK constraint matching session.user_id (both)",
+            "Use database views to abstract the relationship (virtual denormalization)"
+          ],
+          "recommended": 2,
+          "source_angle": "dataflow"
+        }
+      ],
+      "constraints": [
+        {
+          "constraint": "SQLite schema changes require careful migration without downtime - existing production data must be preserved",
+          "source_angle": "security + dataflow"
+        },
+        {
+          "constraint": "Backward compatibility: existing CLI_API_TOKEN deployments expect single shared token behavior",
+          "source_angle": "auth-patterns"
+        },
+        {
+          "constraint": "JWT 15min expiration may be too short for long-running sessions - refresh token mechanism not implemented",
+          "source_angle": "auth-patterns"
+        },
+        {
+          "constraint": "Single SQLite file shared by all users (multi-tenancy within same DB) - cannot use database-per-user isolation",
+          "source_angle": "dataflow + validation"
+        },
+        {
+          "constraint": "Optimistic concurrency control (version-based updates) must not be broken - version check AFTER user ownership validation",
+          "source_angle": "security + dataflow"
+        },
+        {
+          "constraint": "No user management UI exists - admin must manually configure users or implement registration system",
+          "source_angle": "auth-patterns + validation"
+        }
+      ],
+      "all_patterns": [
+        {
+          "patterns": "JWT-based authentication with HS256, dual auth modes (CLI_API_TOKEN + Telegram initData), path security validation, optimistic concurrency control with metadata_version",
+          "source_angle": "security"
+        },
+        {
+          "patterns": "Auth flow: POST /api/auth → validate credentials → getOrCreateOwnerId() → SignJWT({uid}) → return {token}. Middleware: JWT verify → c.set('userId'). Single-user assumption via ownerId.ts caching",
+          "source_angle": "auth-patterns"
+        },
+        {
+          "patterns": "Data flow: CLI → REST/Socket.IO → SyncEngine (in-memory cache) → Store (SQLite) → Web clients. Authentication pattern: JWT token → userId in context (not propagated). Global queries without user filtering",
+          "source_angle": "dataflow"
+        },
+        {
+          "patterns": "Validation: Zod schemas for input, JWT for identity, guard functions for resource existence (NO ownership validation), path security for RPC operations",
+          "source_angle": "validation"
+        }
+      ],
+      "all_integration_points": [
+        {
+          "points": "Auth middleware → Route handlers (c.set/c.get userId), JWT issuance → Database queries, Socket.IO auth → Session operations, CLI token → User mapping, Session creation → Owner assignment",
+          "source_angle": "security"
+        },
+        {
+          "points": "auth.ts → ownerId.ts (bottleneck) → JWT generation → middleware → route handlers. SyncEngine → Store → SQLite (missing user_id foreign keys)",
+          "source_angle": "auth-patterns"
+        },
+        {
+          "points": "Authentication entry (auth middleware c.set), Database query layer (Store methods need userId), SyncEngine cache (user filtering), REST guards (ownership check), Socket.IO handlers (user validation), Schema migration (ALTER TABLE)",
+          "source_angle": "dataflow"
+        },
+        {
+          "points": "Schema migration (add user_id), Query user-scoping (WHERE user_id = ?), Guard enhancement (requireUserOwnsSession), SyncEngine filtering (userId parameter), Route validation (ownership checks), Auth user management (replace getOrCreateOwnerId), Socket.IO/SSE filtering (event broadcast)",
+          "source_angle": "validation"
+        }
+      ]
+    }
+  }
+}

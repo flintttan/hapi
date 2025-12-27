@@ -1,0 +1,141 @@
+{
+  "project_name": "hapi",
+  "initialized_at": "2025-12-27T08:55:00.000Z",
+  "overview": {
+    "description": "Local-first AI coding assistant platform enabling remote control of Claude Code/Codex/Gemini sessions via Web/PWA/Telegram Mini App. Multi-agent workspace with CLI wrapper, real-time server, and React-based control interface.",
+    "technology_stack": {
+      "languages": [
+        {
+          "name": "TypeScript",
+          "file_count": 307,
+          "primary": true
+        },
+        {
+          "name": "JSON",
+          "file_count": 8,
+          "primary": false
+        }
+      ],
+      "frameworks": [
+        "React 19",
+        "Bun",
+        "Vite",
+        "TanStack Router",
+        "TanStack Query",
+        "Tailwind CSS",
+        "Socket.IO",
+        "Hono",
+        "Fastify",
+        "Grammy (Telegram Bot)"
+      ],
+      "build_tools": [
+        "Bun",
+        "Vite",
+        "TypeScript",
+        "Vitest",
+        "Concurrently"
+      ],
+      "test_frameworks": [
+        "Vitest"
+      ]
+    },
+    "architecture": {
+      "style": "Distributed client-server microservices with monorepo workspace architecture",
+      "layers": [
+        "presentation",
+        "business-logic",
+        "data-access"
+      ],
+      "patterns": [
+        "Client-Server",
+        "Event-Driven Architecture",
+        "Real-time Messaging (Socket.IO + SSE)",
+        "MCP (Model Context Protocol)",
+        "RPC Registry",
+        "Store (Repository Pattern)",
+        "Singleton Configuration",
+        "Factory (Agent Runners)"
+      ]
+    },
+    "key_components": [
+      {
+        "name": "CLI Agent Wrapper",
+        "path": "cli/src",
+        "description": "Multi-agent CLI wrapper for Claude Code, Codex, and Gemini with session management, daemon support, and MCP stdio bridge",
+        "importance": "high"
+      },
+      {
+        "name": "API Communication Layer",
+        "path": "cli/src/api",
+        "description": "Socket.IO + REST client for bot communication with RPC support and optimistic concurrency control",
+        "importance": "high"
+      },
+      {
+        "name": "Claude SDK Integration",
+        "path": "cli/src/claude",
+        "description": "Claude Code integration layer with dual-mode operation (interactive/remote), session persistence, and message streaming",
+        "importance": "high"
+      },
+      {
+        "name": "Real-time Server",
+        "path": "server/src",
+        "description": "Hono-based HTTP server with Socket.IO, SSE streaming, Telegram bot, and SQLite persistence",
+        "importance": "high"
+      },
+      {
+        "name": "Sync Engine",
+        "path": "server/src/sync",
+        "description": "Core session/message manager with in-memory cache, versioning, permission handling, and RPC routing",
+        "importance": "high"
+      },
+      {
+        "name": "Socket.IO Handlers",
+        "path": "server/src/socket",
+        "description": "Real-time event handlers for CLI connections, terminal sessions, and RPC registry",
+        "importance": "high"
+      },
+      {
+        "name": "SQLite Store",
+        "path": "server/src/store",
+        "description": "Persistence layer for sessions, messages, machines, and todo extraction with migration support",
+        "importance": "high"
+      },
+      {
+        "name": "React Web App",
+        "path": "web/src",
+        "description": "PWA/Telegram Mini App with session list, chat interface, file browser, git diff viewer, and permission workflows",
+        "importance": "high"
+      },
+      {
+        "name": "Assistant UI Components",
+        "path": "web/src/components/AssistantChat",
+        "description": "Chat message rendering with tool cards, status indicators, and streaming message updates",
+        "importance": "medium"
+      },
+      {
+        "name": "Agent Runners",
+        "path": "cli/src/agent",
+        "description": "Multi-agent backend support (ACP protocol) for Gemini and future agent integrations",
+        "importance": "medium"
+      }
+    ]
+  },
+  "features": [],
+  "development_index": {
+    "feature": [],
+    "enhancement": [],
+    "bugfix": [],
+    "refactor": [],
+    "docs": []
+  },
+  "statistics": {
+    "total_features": 0,
+    "total_sessions": 0,
+    "last_updated": "2025-12-27T08:55:00.000Z"
+  },
+  "_metadata": {
+    "initialized_by": "cli-explore-agent",
+    "analysis_timestamp": "2025-12-27T08:55:00.000Z",
+    "analysis_mode": "bash-fallback"
+  }
+}

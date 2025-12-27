@@ -1,0 +1,135 @@
+{
+  "project_structure": "HAPI follows a client-server architecture with validation split across layers:\n\n**Server Layer (server/src/):**\n- web/middleware/auth.ts: JWT middleware extracting userId from token, stores in Hono context\n- web/routes/auth.ts: Authentication endpoint generating JWT tokens with uid claim\n- web/routes/guards.ts: Session/SyncEngine existence guards (no user-scoping currently)\n- web/routes/permissions.ts: Permission approval/denial with Zod validation\n- web/ownerId.ts: Single-user owner ID generation and caching\n- store/index.ts: SQLite database layer with NO user_id columns (data shared across all users)\n- sync/syncEngine.ts: In-memory session/machine state management\n\n**Client Layer (cli/src/):**\n- modules/common/pathSecurity.ts: Path traversal validation for session working directory\n- modules/common/registerCommonHandlers.ts: RPC handler registration with path validation\n\n**Current State:** All validation is session-scoped or schema-based. No user-level data isolation exists.",
+  "relevant_files": [
+    {
+      "path": "server/src/web/middleware/auth.ts",
+      "relevance": 0.95,
+      "rationale": "JWT middleware that extracts userId but doesn't enforce data isolation. Critical integration point for adding user-scoped guards."
+    },
+    {
+      "path": "server/src/web/routes/guards.ts",
+      "relevance": 0.90,
+      "rationale": "Session guards that MUST be extended to validate user ownership of sessions/machines before access."
+    },
+    {
+      "path": "server/src/store/index.ts",
+      "relevance": 0.95,
+      "rationale": "Database layer with ALL queries lacking user_id filters. Schema must add user_id columns and queries must be user-scoped."
+    },
+    {
+      "path": "server/src/web/routes/auth.ts",
+      "relevance": 0.85,
+      "rationale": "Authentication endpoint using single-user ownerId. Must support per-user registration or map Telegram users to unique user IDs."
+    },
+    {
+      "path": "server/src/web/ownerId.ts",
+      "relevance": 0.80,
+      "rationale": "Single-user owner ID system. Needs to be replaced with multi-user user ID management or kept as admin user ID."
+    },
+    {
+      "path": "server/src/web/routes/permissions.ts",
+      "relevance": 0.75,
+      "rationale": "Permission routes validate session existence but don't verify user owns the session. Must add user ownership checks."
+    },
+    {
+      "path": "server/src/web/routes/sessions.ts",
+      "relevance": 0.85,
+      "rationale": "Session CRUD routes that need user-scoped queries to prevent cross-user session access."
+    },
+    {
+      "path": "server/src/web/routes/machines.ts",
+      "relevance": 0.85,
+      "rationale": "Machine management routes requiring user ownership validation before machine operations."
+    },
+    {
+      "path": "server/src/sync/syncEngine.ts",
+      "relevance": 0.80,
+      "rationale": "In-memory state management that needs user-scoped filtering for getSessions(), getMachines(), etc."
+    },
+    {
+      "path": "cli/src/modules/common/pathSecurity.ts",
+      "relevance": 0.70,
+      "rationale": "Path validation ensuring operations stay within session working directory. Model for server-side validation patterns."
+    },
+    {
+      "path": "server/src/web/routes/git.ts",
+      "relevance": 0.75,
+      "rationale": "Git operation routes that need session ownership validation before allowing file access."
+    },
+    {
+      "path": "server/src/web/routes/messages.ts",
+      "relevance": 0.80,
+      "rationale": "Message CRUD requiring user-scoped session validation to prevent cross-user message access."
+    }
+  ],
+  "patterns": "**Current Validation Patterns:**\n\n1. **Zod Schema Validation** (Input validation)\n   - Pattern: `const schema = z.object({...}); const parsed = schema.safeParse(data); if (!parsed.success) return error;`\n   - Examples: authBodySchema (auth.ts:18), approveBodySchema (permissions.ts:9), filePathSchema (git.ts)\n   - Usage: Request body/query parameter validation\n\n2. **JWT Authentication** (Identity verification)\n   - Pattern: Middleware extracts userId from JWT, stores in `c.set('userId', uid)` (auth.ts:39)\n   - JWT contains `uid` claim, verified via jose library\n   - Token issued with 15min expiration (auth.ts:72)\n\n3. **Guard Functions** (Resource existence checks)\n   - Pattern: `requireSyncEngine()`, `requireSession()`, `requireSessionFromParam()` (guards.ts)\n   - Returns resource OR 404/503 Response\n   - **CRITICAL GAP:** No user ownership validation - any authenticated user can access any session\n\n4. **Path Security Validation** (CLI-side)\n   - Pattern: `validatePath(targetPath, workingDirectory)` returns `{valid: boolean, error?: string}`\n   - Prevents path traversal attacks (pathSecurity.ts:14)\n   - Case-insensitive on Windows, respects path separators\n\n**Missing Patterns (Required for Multi-User):**\n- User-scoped database queries (WHERE clauses with user_id)\n- Ownership validation guards (verify session/machine belongs to requesting user)\n- User isolation in in-memory state (SyncEngine filtering by user)\n- Audit logging for authorization failures",
+  "dependencies": "**Authentication & Authorization:**\n- zod@3.x: Schema validation for request bodies and JWT payloads\n- jose@5.x: JWT signing and verification (HS256 algorithm)\n- hono@4.x: Web framework providing context for userId storage\n\n**Database:**\n- bun:sqlite: Native SQLite database (no user_id columns currently)\n- Prepared statements used throughout (prevents SQL injection)\n\n**Validation Libraries:**\n- No additional validation libraries beyond Zod\n- Custom validation in pathSecurity.ts for file path safety\n\n**Session Management:**\n- socket.io: Real-time session state synchronization\n- In-memory Maps in SyncEngine (sessions, machines) - no user filtering\n\n**Security:**\n- crypto.randomBytes: Used for owner ID generation\n- safeCompareStrings: Timing-safe string comparison for tokens\n- Telegram initData validation: validateTelegramInitData() in telegramInitData.ts",
+  "integration_points": "**Critical Integration Points for User-Scoped Validation:**\n\n1. **Database Schema Migration** (store/index.ts:181)\n   - Line 183-225: ALTER TABLE statements to add user_id columns to sessions, machines, messages\n   - Add foreign key constraints: `FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE`\n   - Add indexes: `CREATE INDEX idx_sessions_user_id ON sessions(user_id)`\n\n2. **Query User-Scoping** (store/index.ts)\n   - Line 240: `SELECT * FROM sessions WHERE tag = ?` → Add `AND user_id = ?`\n   - Line 373: `SELECT * FROM sessions WHERE id = ?` → Add `AND user_id = ?`\n   - Line 378: `SELECT * FROM sessions ORDER BY updated_at DESC` → Add `WHERE user_id = ?`\n   - Line 383: `SELECT * FROM machines WHERE id = ?` → Add `AND user_id = ?`\n   - Line 493: `SELECT * FROM machines ORDER BY updated_at DESC` → Add `WHERE user_id = ?`\n   - All INSERT statements need user_id parameter added\n\n3. **Guard Enhancement** (web/routes/guards.ts:16)\n   - Add `requireUserOwnsSession(c, engine, sessionId)` guard function\n   - Add `requireUserOwnsMachine(c, engine, machineId)` guard function\n   - Pattern: Verify `session.userId === c.get('userId')` before returning resource\n   - Return 403 Forbidden if ownership check fails\n\n4. **SyncEngine User-Scoping** (sync/syncEngine.ts:222)\n   - Line 222: `getSessions()` needs userId parameter to filter results\n   - Line 234: `getMachines()` needs userId parameter\n   - Line 513: `getOrCreateSession()` needs userId to assign ownership\n   - Line 518: `getOrCreateMachine()` needs userId to assign ownership\n   - All methods accessing sessions/machines must validate user ownership\n\n5. **Route User Validation** (All route files)\n   - sessions.ts: Add userId checks before session operations\n   - permissions.ts:23: Insert ownership validation before `requireSessionFromParam`\n   - machines.ts: Validate machine ownership before RPC calls\n   - git.ts: Verify session ownership before file operations\n   - messages.ts: Validate session ownership before message access\n\n6. **Authentication User Management** (web/routes/auth.ts:40)\n   - Replace `getOrCreateOwnerId()` with user-specific ID lookup/creation\n   - Map Telegram users to unique user IDs in database\n   - Support CLI_API_TOKEN with configurable user assignment\n\n7. **Socket.IO User Filtering** (socket/server.ts)\n   - Namespace filtering to only broadcast events for user's sessions/machines\n   - Add userId to socket connection data for event filtering\n\n8. **SSE User Filtering** (sse/sseManager.ts)\n   - Filter broadcasted events by user ownership before sending to SSE clients",
+  "constraints": "**Technical Constraints:**\n\n1. **Backward Compatibility with Existing Data**\n   - Current SQLite database has no user_id columns - migration must handle existing sessions/machines\n   - Decision needed: Assign all existing data to owner user OR require fresh start\n   - Owner ID system (ownerId.ts) currently supports single user - preserve as admin user?\n\n2. **Single Database File Architecture**\n   - All users share same SQLite database file (~/.hapi/data.db)\n   - CANNOT use database-per-user isolation\n   - MUST implement row-level isolation via user_id columns\n   - WAL mode and foreign keys already enabled (store/index.ts:165-167)\n\n3. **Performance Considerations**\n   - All queries must add user_id filter to WHERE clauses\n   - Indexes required on user_id columns to maintain query performance\n   - In-memory Maps in SyncEngine need efficient user-scoped filtering\n   - Prepared statement caching strategy must account for user parameters\n\n4. **JWT Token Architecture**\n   - Current 15min expiration may be too short for long-running sessions\n   - Refresh token mechanism not implemented - users must re-authenticate\n   - Token contains only uid claim - no role/permission claims\n\n5. **Telegram Multi-User Support**\n   - ALLOWED_CHAT_IDS allowlist currently for single-user (configuration.ts)\n   - Must support multiple Telegram users mapping to unique database user IDs\n   - Telegram user ID collision risk (different bots, same user ID)\n\n6. **CLI Authentication Model**\n   - CLI_API_TOKEN currently single-user (one token = one owner)\n   - Multi-user requires: token-per-user OR token with user claim OR separate auth mechanism\n\n7. **Path Security Complexity**\n   - Path validation only enforces working directory boundaries (pathSecurity.ts)\n   - Multi-user adds cross-user file access risk via session directory sharing\n   - Need additional validation: user can only spawn sessions in their own directories\n\n8. **Socket.IO Namespace Design**\n   - Current `/cli` namespace broadcasts to all connected clients\n   - Need user-scoped rooms: `user:${userId}` to prevent cross-user event leaks\n\n9. **Optimistic Concurrency Control**\n   - Version fields (metadata_version, agent_state_version) don't consider user_id\n   - Race condition risk: two users simultaneously updating same resource\n   - Need to validate user ownership BEFORE version check\n\n10. **Error Message Information Leakage**\n   - Current 404 \"Session not found\" doesn't distinguish between non-existent and unauthorized\n   - Should return 404 for both to prevent user enumeration\n   - Audit logging needed to track authorization failures",
+  "clarification_needs": [
+    {
+      "question": "How should existing sessions and machines without user_id be handled during migration?",
+      "context": "Current database has sessions/machines with no user ownership. Migration must decide their fate for multi-user system.",
+      "options": [
+        "Assign all existing data to owner user (preserve current owner as admin user)",
+        "Delete all existing data and require fresh start for all users",
+        "Mark existing data as 'orphaned' and allow owner to claim ownership",
+        "Create migration script that prompts for user assignment per session"
+      ],
+      "recommended": 0
+    },
+    {
+      "question": "What authentication model should CLI_API_TOKEN support in multi-user mode?",
+      "context": "Current CLI_API_TOKEN authenticates to single owner. Multi-user needs token-to-user mapping strategy.",
+      "options": [
+        "Keep single shared token, map all CLI users to owner user (no multi-user for CLI)",
+        "Generate unique token per user, store in tokens table with user_id foreign key",
+        "Use JWT tokens for CLI with embedded user claims (replace simple bearer token)",
+        "Implement OAuth2 flow for CLI with authorization code grant"
+      ],
+      "recommended": 1
+    },
+    {
+      "question": "Should user isolation extend to machine (daemon) ownership?",
+      "context": "Machines represent CLI daemons that spawn sessions. Currently one machine can serve all users. Multi-user could scope machines per user or share them.",
+      "options": [
+        "User-scoped machines: Each user sees only their own machines and spawned sessions",
+        "Shared machines with user-scoped sessions: All users share machines but sessions isolated",
+        "Admin-managed machines: Only admin user can register machines, all users can use them",
+        "Hybrid: User can register own machines OR use shared pool of admin machines"
+      ],
+      "recommended": 0
+    },
+    {
+      "question": "How should cross-user session directory access be prevented?",
+      "context": "Path validation currently only enforces working directory boundaries. Multi-user needs to prevent users from spawning sessions in other users' directories.",
+      "options": [
+        "Add user_home_paths whitelist to configuration, validate session paths against user's allowed paths",
+        "Require all sessions spawned in subdirectories of ~/.hapi/users/{userId}/sessions/",
+        "No additional validation - rely on OS-level file permissions to prevent cross-user access",
+        "Implement virtual filesystem mapping where each user has isolated session directory namespace"
+      ],
+      "recommended": 1
+    },
+    {
+      "question": "What level of audit logging is required for authorization failures?",
+      "context": "Multi-user systems need audit trails for security and debugging. Authorization failures should be logged but storage and retention strategy is unclear.",
+      "options": [
+        "No audit logging - return 404 for unauthorized access to prevent enumeration",
+        "Log to file only (server logs) with timestamp, userId, resource type, resource ID",
+        "Store in database audit_log table with retention policy (e.g., 90 days)",
+        "Full audit system with both database storage and external logging service integration"
+      ],
+      "recommended": 2
+    }
+  ],
+  "_metadata": {
+    "timestamp": "2025-12-27T09:07:30.000Z",
+    "task_description": "GOAL: Add multi-user support to HAPI with data isolation\nSCOPE: User authentication system, session management, data isolation layer, migration from single-user to multi-user architecture\nCONTEXT: Current HAPI implementation is designed for single personal user, need to extend to support multiple users with isolated data access",
+    "source": "cli-explore-agent",
+    "exploration_angle": "validation",
+    "exploration_index": 4,
+    "total_explorations": 4,
+    "duration_seconds": 125
+  }
+}

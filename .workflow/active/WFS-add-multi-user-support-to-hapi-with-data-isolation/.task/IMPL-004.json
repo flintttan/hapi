@@ -1,0 +1,228 @@
+{
+  "id": "IMPL-004",
+  "title": "Extend route guards with user ownership validation",
+  "status": "pending",
+  "context_package_path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json",
+  "meta": {
+    "type": "feature",
+    "agent": "@code-developer",
+    "execution_group": null,
+    "module": "server"
+  },
+  "context": {
+    "requirements": [
+      "Extend 3 guard functions: [requireSession(sessionId, userId), requireMachine(machineId, userId), requireSessionFromParam(userId)]",
+      "Add 1 new guard: requireUserOwnsResource(resourceType, resourceId, userId) generic ownership validator",
+      "Implement 3 error responses: [403 Forbidden for ownership mismatch, 404 Not Found for non-existent resource, 401 Unauthorized for missing userId]",
+      "Update 12 route handlers: Apply ownership validation to all session/machine API endpoints"
+    ],
+    "focus_paths": [
+      "server/src/web/routes/guards.ts",
+      "server/src/web/routes/sessions.ts",
+      "server/src/web/routes/messages.ts",
+      "server/src/web/routes/machines.ts"
+    ],
+    "acceptance": [
+      "3 guards updated with userId validation: verify by grep 'userId.*string' server/src/web/routes/guards.ts | wc -l >= 3",
+      "1 generic guard created: verify by grep 'requireUserOwnsResource' server/src/web/routes/guards.ts",
+      "12 routes use ownership guards: verify by grep 'requireSession\\|requireMachine\\|requireUserOwnsResource' server/src/web/routes/{sessions,messages,machines}.ts | wc -l >= 12",
+      "Ownership tests pass: verify by bun test server/src/web/routes/__tests__/guards.test.ts (exit code 0)"
+    ],
+    "depends_on": ["IMPL-003"],
+    "inherited": {
+      "from": "IMPL-003",
+      "context": ["Store methods now require userId parameter and enforce data isolation via WHERE user_id = ? clauses"]
+    },
+    "shared_context": {
+      "tech_stack": ["TypeScript", "Hono", "Zod"],
+      "auth_context": "Middleware sets c.get('userId') from JWT verification, guards use this to validate resource ownership",
+      "conventions": ["Return 404 for unauthorized access to hide resource existence", "Use 403 only if resource exists but user lacks permission", "Log security events for audit trail"]
+    },
+    "artifacts": []
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_context_package",
+        "action": "Load context package for route and guard analysis",
+        "commands": ["Read(.workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json)"],
+        "output_to": "context_package",
+        "on_error": "fail"
+      },
+      {
+        "step": "analyze_current_guards",
+        "action": "Review existing guard implementations and usage patterns",
+        "commands": [
+          "Read(server/src/web/routes/guards.ts)",
+          "bash(grep -n 'requireSession\\|requireMachine' server/src/web/routes/*.ts)"
+        ],
+        "output_to": "current_guards"
+      },
+      {
+        "step": "identify_unprotected_routes",
+        "action": "Find all routes that access sessions/machines without ownership validation",
+        "commands": ["bash(grep -E '(getSession|getMachine|updateSession|updateMachine|deleteSession|deleteMachine)' server/src/web/routes/*.ts -n)"],
+        "output_to": "unprotected_routes"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "Update requireSession guard with userId validation",
+        "description": "Extend requireSession to verify session ownership by authenticated user",
+        "modification_points": [
+          "Modify 1 function: requireSession(sessionId: string, userId: string) in server/src/web/routes/guards.ts lines 20-35",
+          "Add userId parameter to function signature",
+          "Add ownership check: Verify session.userId === userId after fetching session",
+          "Update return type: Return session object or throw 404 error"
+        ],
+        "logic_flow": [
+          "Extract userId from c.get('userId') in calling route",
+          "Call syncEngine.getSession(sessionId) to fetch session",
+          "If session not found, throw 404 Not Found error",
+          "If session.userId !== userId, throw 404 Not Found (hide existence)",
+          "If session.userId === userId, return session object",
+          "Log unauthorized access attempts for security audit"
+        ],
+        "depends_on": [],
+        "output": "requireSession_updated"
+      },
+      {
+        "step": 2,
+        "title": "Update requireMachine guard with userId validation",
+        "description": "Extend requireMachine to verify machine ownership by authenticated user",
+        "modification_points": [
+          "Modify 1 function: requireMachine(machineId: string, userId: string) in server/src/web/routes/guards.ts lines 37-52",
+          "Add userId parameter to function signature",
+          "Add ownership check: Verify machine.userId === userId after fetching machine",
+          "Update return type: Return machine object or throw 404 error"
+        ],
+        "logic_flow": [
+          "Extract userId from c.get('userId') in calling route",
+          "Call syncEngine.getMachine(machineId) to fetch machine",
+          "If machine not found, throw 404 Not Found error",
+          "If machine.userId !== userId, throw 404 Not Found (hide existence)",
+          "If machine.userId === userId, return machine object",
+          "Log unauthorized access attempts for security audit"
+        ],
+        "depends_on": [],
+        "output": "requireMachine_updated"
+      },
+      {
+        "step": 3,
+        "title": "Create requireUserOwnsResource generic guard",
+        "description": "Implement reusable ownership validation guard for any resource type",
+        "modification_points": [
+          "Create 1 new function: requireUserOwnsResource<T>(resourceType: 'session'|'machine', resourceId: string, userId: string): T in server/src/web/routes/guards.ts",
+          "Support 2 resource types: [session, machine]",
+          "Delegate to specific guards: Call requireSession or requireMachine based on resourceType"
+        ],
+        "logic_flow": [
+          "Accept generic resource type and ID parameters",
+          "Switch on resourceType to determine which guard to call",
+          "For 'session': Call requireSession(resourceId, userId)",
+          "For 'machine': Call requireMachine(resourceId, userId)",
+          "Return typed resource object",
+          "Throw 400 Bad Request for unknown resource types"
+        ],
+        "depends_on": [1, 2],
+        "output": "generic_ownership_guard"
+      },
+      {
+        "step": 4,
+        "title": "Update session route handlers with ownership guards",
+        "description": "Apply ownership validation to 5 session API endpoints",
+        "modification_points": [
+          "Update 5 route handlers in server/src/web/routes/sessions.ts: [GET /sessions/:id lines 30-40, PUT /sessions/:id lines 42-55, DELETE /sessions/:id lines 57-65, GET /sessions/:id/messages lines 67-75, POST /sessions/:id/messages lines 77-90]",
+          "Add userId extraction: const userId = c.get('userId') as string in each handler",
+          "Add guard calls: await requireSession(sessionId, userId) before accessing session data",
+          "Pass userId to Store methods: All Store calls now include userId parameter"
+        ],
+        "logic_flow": [
+          "Extract sessionId from route params",
+          "Extract userId from c.get('userId')",
+          "Call requireSession(sessionId, userId) to validate ownership",
+          "If guard passes, proceed with Store method calls passing userId",
+          "If guard throws, error middleware returns 404 to client",
+          "Return API response with session data"
+        ],
+        "depends_on": [1],
+        "output": "session_routes_protected"
+      },
+      {
+        "step": 5,
+        "title": "Update machine route handlers with ownership guards",
+        "description": "Apply ownership validation to 4 machine API endpoints",
+        "modification_points": [
+          "Update 4 route handlers in server/src/web/routes/machines.ts: [GET /machines/:id lines 25-35, PUT /machines/:id lines 37-50, DELETE /machines/:id lines 52-60, GET /machines lines 62-70]",
+          "Add userId extraction: const userId = c.get('userId') as string in each handler",
+          "Add guard calls: await requireMachine(machineId, userId) for single-machine operations",
+          "Update getMachines list: Filter by userId using Store.getMachines(userId)"
+        ],
+        "logic_flow": [
+          "For single-machine routes: Extract machineId and userId, call requireMachine(machineId, userId)",
+          "For machine list route: Extract userId, call Store.getMachines(userId) directly",
+          "Pass userId to all Store method calls",
+          "Return filtered/validated machine data",
+          "Log access attempts for audit trail"
+        ],
+        "depends_on": [2],
+        "output": "machine_routes_protected"
+      },
+      {
+        "step": 6,
+        "title": "Update message route handlers with ownership guards",
+        "description": "Apply session ownership validation to 3 message API endpoints",
+        "modification_points": [
+          "Update 3 route handlers in server/src/web/routes/messages.ts: [PUT /messages/:id lines 20-35, DELETE /messages/:id lines 37-45, GET /sessions/:sessionId/messages lines 47-55]",
+          "Add session ownership check: Verify message belongs to session owned by user",
+          "Add userId to Store calls: Pass userId to all message Store methods"
+        ],
+        "logic_flow": [
+          "Extract messageId or sessionId from route params",
+          "Extract userId from c.get('userId')",
+          "For message operations: First verify session ownership via requireSession",
+          "Then call Store.updateMessage(messageId, updates, userId) or Store.deleteMessage(messageId, userId)",
+          "For message listing: Call requireSession(sessionId, userId), then Store.getMessages(sessionId, userId)",
+          "Return message data or 404 if unauthorized"
+        ],
+        "depends_on": [1],
+        "output": "message_routes_protected"
+      },
+      {
+        "step": 7,
+        "title": "Create guard test suite",
+        "description": "Verify ownership validation with comprehensive security tests",
+        "modification_points": [
+          "Create 1 test file: server/src/web/routes/__tests__/guards.test.ts with 120-150 lines",
+          "Implement 6 test cases: [requireSession blocks unauthorized access, requireMachine blocks unauthorized access, requireUserOwnsResource handles both types, Guards return 404 not 403, Authorized access succeeds, Audit logging works]",
+          "Use 2 test users and mock SyncEngine"
+        ],
+        "logic_flow": [
+          "Setup: Create mock SyncEngine with test sessions/machines for 2 users",
+          "Test requireSession: UserA tries to access UserB's session, expects 404",
+          "Test requireMachine: UserA tries to access UserB's machine, expects 404",
+          "Test authorized access: UserA accesses own session, expects success",
+          "Test generic guard: Verify requireUserOwnsResource delegates correctly",
+          "Test audit logging: Verify unauthorized attempts are logged",
+          "Cleanup: Reset mocks after tests"
+        ],
+        "depends_on": [3],
+        "output": "guard_security_tests"
+      }
+    ],
+    "target_files": [
+      "server/src/web/routes/guards.ts:requireSession:20-35",
+      "server/src/web/routes/guards.ts:requireMachine:37-52",
+      "server/src/web/routes/sessions.ts:GET /sessions/:id:30-40",
+      "server/src/web/routes/sessions.ts:PUT /sessions/:id:42-55",
+      "server/src/web/routes/sessions.ts:DELETE /sessions/:id:57-65",
+      "server/src/web/routes/machines.ts:GET /machines/:id:25-35",
+      "server/src/web/routes/machines.ts:PUT /machines/:id:37-50",
+      "server/src/web/routes/machines.ts:DELETE /machines/:id:52-60",
+      "server/src/web/routes/messages.ts:PUT /messages/:id:20-35",
+      "server/src/web/routes/messages.ts:DELETE /messages/:id:37-45",
+      "server/src/web/routes/__tests__/guards.test.ts"
+    ]
+  }
+}

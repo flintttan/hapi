@@ -1,0 +1,129 @@
+{
+  "project_structure": "HAPI follows a 3-tier architecture: (1) CLI client (cli/src) with auth commands and session management, (2) Server (server/src) with auth routes, middleware, and data store, (3) Web frontend (web/src) with React hooks for authentication. Authentication flow: CLI/Web -> /api/auth endpoint -> JWT generation -> middleware verification -> route handlers. Data storage: Single SQLite database (Store class) with sessions, machines, messages tables. Current limitation: Single owner-id.json file means all users map to same ownerId.",
+  "relevant_files": [
+    {
+      "path": "server/src/web/routes/auth.ts",
+      "relevance": 0.95,
+      "rationale": "Core authentication endpoint - currently maps all auth methods (CLI token, Telegram) to single ownerId via getOrCreateOwnerId(), needs user-specific ID generation"
+    },
+    {
+      "path": "server/src/web/middleware/auth.ts",
+      "relevance": 0.90,
+      "rationale": "JWT verification middleware - extracts userId from token and sets c.set('userId'), critical for downstream user context propagation"
+    },
+    {
+      "path": "server/src/web/ownerId.ts",
+      "relevance": 0.95,
+      "rationale": "Single-user assumption bottleneck - generates/caches one ownerId for entire system, must be replaced with per-user ID management"
+    },
+    {
+      "path": "server/src/web/cliApiToken.ts",
+      "relevance": 0.75,
+      "rationale": "CLI token management - currently shared token for all CLI users, needs per-user token generation or user-scoped validation"
+    },
+    {
+      "path": "server/src/web/telegramInitData.ts",
+      "relevance": 0.80,
+      "rationale": "Telegram authentication - validates initData and extracts Telegram user.id, provides natural user identifier for Telegram users"
+    },
+    {
+      "path": "server/src/store/index.ts",
+      "relevance": 0.85,
+      "rationale": "Data layer - currently no user_id column in sessions/machines/messages tables, needs schema migration to add user ownership"
+    },
+    {
+      "path": "server/src/sync/syncEngine.ts",
+      "relevance": 0.70,
+      "rationale": "Session and message management - getSessions(), getMessages() have no user filtering, needs user-scoped queries"
+    },
+    {
+      "path": "server/src/configuration.ts",
+      "relevance": 0.65,
+      "rationale": "Configuration management - dataDir is currently global, may need user-specific subdirectories for data isolation"
+    },
+    {
+      "path": "web/src/hooks/useAuth.ts",
+      "relevance": 0.70,
+      "rationale": "Frontend auth hook - handles JWT refresh and user state, already extracts user object from AuthResponse"
+    },
+    {
+      "path": "server/src/web/routes/sessions.ts",
+      "relevance": 0.75,
+      "rationale": "Session route handlers - needs user-scoped session listing/retrieval using c.get('userId') from auth middleware"
+    },
+    {
+      "path": "server/src/web/routes/messages.ts",
+      "relevance": 0.75,
+      "rationale": "Message route handlers - needs user-scoped message access validation via session ownership"
+    },
+    {
+      "path": "server/src/web/routes/guards.ts",
+      "relevance": 0.60,
+      "rationale": "Route guards for session validation - currently no user ownership check, needs requireUserOwnsSession() guard"
+    },
+    {
+      "path": "cli/src/commands/auth.ts",
+      "relevance": 0.55,
+      "rationale": "CLI auth command - handles token storage and authentication flow from CLI side"
+    }
+  ],
+  "patterns": "**Auth Flow Pattern**: POST /api/auth with {accessToken} or {initData} -> validate credentials -> getOrCreateOwnerId() -> SignJWT({uid: userId}) -> return {token, user}. **Middleware Pattern**: auth.ts middleware extracts JWT token from Authorization header or query param, verifies with jwtVerify(), parses payload for uid, sets c.set('userId', uid) for downstream use. **Single-User Assumption**: ownerId.ts caches single owner-id.json value, all users resolve to same ID (line 40: userId = await getOrCreateOwnerId()). **Token Strategy**: CLI uses shared CLI_API_TOKEN (env or auto-generated), Telegram uses per-user initData validation with user.id. **Data Access**: Store methods lack user_id filtering - getSessions(), getMessages() return all records regardless of user. **JWT Payload**: Currently {uid: number} with 15min expiration, no user metadata. **Code Examples**: server/src/web/routes/auth.ts:40 - CLI auth maps to ownerId, line 62 - Telegram auth maps to ownerId, server/src/web/middleware/auth.ts:39 - sets userId context, server/src/store/index.ts:377 - getSessions() has no WHERE user_id clause.",
+  "dependencies": "**External**: jose (JWT sign/verify), zod (schema validation), bun:sqlite (Database class), hono (web framework with c.set/c.get context). **Internal**: configuration.ts (cliApiToken, telegramBotToken, allowedChatIds), store/index.ts (sessions/machines/messages persistence), ownerId.ts (single owner ID generation), telegramInitData.ts (Telegram user validation), utils/crypto.ts (safeCompareStrings for token validation). **Auth Chain**: auth.ts route -> ownerId.ts (bottleneck) -> JWT generation -> middleware -> c.set('userId') -> route handlers. **Data Chain**: SyncEngine -> Store -> SQLite (no user_id foreign keys).",
+  "integration_points": "**Auth Middleware Entry**: server/src/web/middleware/auth.ts:39 - c.set('userId', parsed.data.uid) provides user context to all protected routes. **Route Handler Access**: All routes using WebAppEnv can call c.get('userId') to get authenticated user ID. **Database User Column**: server/src/store/index.ts:183-224 - sessions/machines/messages tables need user_id INTEGER column with foreign key to new users table. **User Creation Points**: server/src/web/routes/auth.ts:40 (CLI auth), line 62 (Telegram auth) - replace getOrCreateOwnerId() with getOrCreateUser(authSource, identifier). **Session Ownership**: server/src/web/routes/guards.ts - add requireUserOwnsSession(c, engine, sessionId, userId) guard. **Data Filtering**: server/src/store/index.ts:377 getSessions() -> getSessions(userId), line 539 getMessages(sessionId) -> add user ownership validation. **User Table Schema**: New users table with id (primary key), telegram_user_id (nullable unique), cli_user_identifier (nullable), created_at, updated_at. **Migration Path**: (1) Create users table, (2) Add user_id to sessions/machines/messages, (3) Migrate existing data to default user, (4) Update Store methods with user filtering, (5) Update auth.ts to create user records, (6) Add ownership guards to routes.",
+  "constraints": "**Backward Compatibility**: Existing single-user deployments must continue working - migration script should create default user and assign existing data. **Token Lifetime**: JWTs expire in 15min (auth.ts:71), auto-refresh logic in useAuth.ts handles renewal. **Telegram User Mapping**: Telegram initData contains user.id (integer), use as telegram_user_id for consistent user identification across sessions. **CLI User Identity**: CLI uses shared CLI_API_TOKEN, need additional user identifier (machine ID, username, or separate user accounts per CLI_API_TOKEN). **Database Constraints**: SQLite foreign keys enabled (PRAGMA foreign_keys = ON), cascading deletes on session/message foreign keys. **Session Isolation**: Sessions table currently has machine_id but no user_id, both needed for proper multi-tenancy. **Global Owner File**: server/src/web/ownerId.ts:28 stores single owner-id.json, must not be deleted (backward compat) but should become deprecated. **No User Management UI**: Current system has no user registration/login UI beyond Telegram Mini App, adding multi-user requires user management endpoints. **Allowlist Security**: configuration.ts:58 isChatIdAllowed() currently global allowlist, should become per-user permission check or removed after multi-user migration.",
+  "clarification_needs": [
+    {
+      "question": "How should CLI users be identified in a multi-user system?",
+      "context": "Currently CLI uses shared CLI_API_TOKEN from environment/settings. In multi-user setup, need per-user identification. Options: (1) One CLI_API_TOKEN per user account (requires token provisioning), (2) Username/password authentication for CLI, (3) Machine ID + CLI token combination, (4) OAuth-style device flow.",
+      "options": [
+        "Per-user CLI_API_TOKEN (generate unique token for each user, store in users table cli_token column)",
+        "Username/password for CLI (add CLI login command with credential storage)",
+        "Machine ID + shared token (use machineId as user identifier with existing CLI_API_TOKEN)",
+        "Keep shared token + add user selection (CLI prompts which user to authenticate as on shared machines)"
+      ],
+      "recommended": 0
+    },
+    {
+      "question": "Should existing single-user data be migrated to a default user or require user assignment?",
+      "context": "Migration path needs to handle existing sessions/messages/machines. Options: (1) Auto-create 'default' user and assign all existing data, (2) Prompt for user assignment during migration, (3) Keep legacy single-user mode as fallback.",
+      "options": [
+        "Auto-migrate to default user (create user with id=1, username='default', assign all existing data)",
+        "Prompt during migration (CLI tool asks which user owns existing data)",
+        "Dual-mode operation (detect single vs multi-user based on users table, maintain backward compat)",
+        "Fresh start (require manual data export/import, no automatic migration)"
+      ],
+      "recommended": 0
+    },
+    {
+      "question": "How should user data isolation be enforced at the database level?",
+      "context": "Need to prevent cross-user data access. Options: (1) Application-level filtering (all queries include WHERE user_id=?), (2) Row-level security triggers, (3) Per-user database files, (4) Database views with user context.",
+      "options": [
+        "Application-level WHERE clauses (add user_id parameter to all Store methods)",
+        "SQLite triggers for validation (BEFORE INSERT/UPDATE triggers check user_id consistency)",
+        "Separate database per user (isolation via file-system, user1.db, user2.db)",
+        "Parameterized views (CREATE VIEW user_sessions AS SELECT * FROM sessions WHERE user_id = current_user_id())"
+      ],
+      "recommended": 0
+    },
+    {
+      "question": "Should user management include registration/login UI or remain API-only?",
+      "context": "Adding multi-user support requires user account creation. Current system only has Telegram auto-registration. Options: (1) Telegram-only (users auto-created from Telegram auth), (2) Add web registration UI, (3) Admin-provisioned accounts, (4) Hybrid approach.",
+      "options": [
+        "Telegram-only registration (users created automatically from Telegram initData, CLI uses machine-based auth)",
+        "Add web registration UI (username/password signup page, email verification optional)",
+        "Admin-provisioned accounts (server admin creates user accounts via CLI tool or config file)",
+        "Hybrid (Telegram auto-registration + optional web login for non-Telegram users)"
+      ],
+      "recommended": 3
+    }
+  ],
+  "_metadata": {
+    "timestamp": "2025-12-27T09:05:48.000Z",
+    "task_description": "GOAL: Add multi-user support to HAPI with data isolation\nSCOPE: User authentication system, session management, data isolation layer, migration from single-user to multi-user architecture\nCONTEXT: Current HAPI implementation is designed for single personal user, need to extend to support multiple users with isolated data access",
+    "source": "cli-explore-agent",
+    "exploration_angle": "auth-patterns",
+    "exploration_index": 2,
+    "total_explorations": 4,
+    "duration_seconds": 180
+  }
+}

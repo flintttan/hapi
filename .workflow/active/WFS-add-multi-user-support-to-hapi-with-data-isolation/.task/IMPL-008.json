@@ -1,0 +1,260 @@
+{
+  "id": "IMPL-008",
+  "title": "Integration testing and end-to-end multi-user workflow validation",
+  "status": "pending",
+  "context_package_path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json",
+  "meta": {
+    "type": "test-gen",
+    "agent": "@code-developer",
+    "execution_group": null,
+    "module": "server",
+    "test_framework": "vitest",
+    "coverage_target": "80%"
+  },
+  "context": {
+    "requirements": [
+      "Create 1 integration test suite: server/src/__tests__/integration/multi-user-isolation.test.ts with 200-250 lines",
+      "Implement 12 end-to-end test scenarios: [User registration and authentication, Session creation and isolation, Machine creation and isolation, Message creation and ownership, Cross-user access blocked at all layers, Event broadcasting filtered by userId, CLI token generation and usage, Store-SyncEngine-API consistency, Database foreign key cascades, Migration script validation, Concurrent multi-user operations, Performance under multi-user load]",
+      "Add performance benchmarks: 3 metrics [Query response time <50ms, Event broadcast latency <100ms, Concurrent user capacity >=10]",
+      "Create test data generator: 1 utility function to create realistic multi-user test data"
+    ],
+    "focus_paths": [
+      "server/src/__tests__/integration",
+      "server/src/store/index.ts",
+      "server/src/sync/syncEngine.ts",
+      "server/src/web/routes"
+    ],
+    "acceptance": [
+      "1 integration test suite created: verify by ls server/src/__tests__/integration/multi-user-isolation.test.ts",
+      "12 test scenarios pass: verify by bun test server/src/__tests__/integration/multi-user-isolation.test.ts (exit code 0, 12 passed)",
+      "Code coverage >=80%: verify by bun test --coverage | grep 'All files.*8[0-9]\\|9[0-9]%'",
+      "Performance benchmarks met: verify by grep 'Performance.*passed' test output"
+    ],
+    "depends_on": ["IMPL-001", "IMPL-002", "IMPL-003", "IMPL-004", "IMPL-005", "IMPL-006", "IMPL-007"],
+    "inherited": {
+      "from": "IMPL-001",
+      "context": ["Database schema with users, user_id columns, and foreign key constraints"]
+    },
+    "shared_context": {
+      "tech_stack": ["Vitest", "TypeScript", "Supertest (HTTP testing)", "Socket.IO client"],
+      "testing_strategy": "Integration tests validate complete user isolation across all system layers (database, cache, API, events)",
+      "conventions": ["Use test database separate from production", "Clean up test data after each test", "Use realistic user scenarios"]
+    },
+    "artifacts": []
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_context_package",
+        "action": "Load context package for integration testing scope",
+        "commands": ["Read(.workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json)"],
+        "output_to": "context_package",
+        "on_error": "fail"
+      },
+      {
+        "step": "review_existing_tests",
+        "action": "Analyze existing test patterns and setup utilities",
+        "commands": [
+          "bash(find server/src -name '*.test.ts' -type f | head -5)",
+          "bash(grep 'describe\\|it\\|test' server/src/**/*.test.ts | head -20)"
+        ],
+        "output_to": "existing_test_patterns"
+      },
+      {
+        "step": "identify_test_coverage_gaps",
+        "action": "Find areas needing integration test coverage",
+        "commands": ["bash(bun test --coverage --reporter=json 2>/dev/null | grep -E 'uncoveredLineCount|pct' || echo 'No coverage data')"],
+        "output_to": "coverage_gaps"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "Create integration test infrastructure",
+        "description": "Set up test database, utilities, and fixtures for multi-user testing",
+        "modification_points": [
+          "Create 3 test utility files: [server/src/__tests__/helpers/testDatabase.ts (test DB setup), server/src/__tests__/helpers/testUsers.ts (user fixtures), server/src/__tests__/helpers/testAuth.ts (auth helpers)]",
+          "Implement 1 test database factory: createTestDatabase() with isolated SQLite instance",
+          "Create 2 user fixtures: [testUserA with Telegram auth, testUserB with CLI token auth]",
+          "Add cleanup utilities: 1 function to reset test database between tests"
+        ],
+        "logic_flow": [
+          "createTestDatabase: Create in-memory SQLite database for tests",
+          "Run migration scripts to create users, cli_tokens, sessions, machines, messages tables",
+          "createTestUsers: Generate 2 test users with different auth methods",
+          "createAuthHelpers: Functions to generate JWT tokens for test users",
+          "Implement afterEach cleanup: Clear all tables except schema_migrations",
+          "Export test fixtures for use in test suites"
+        ],
+        "depends_on": [],
+        "output": "test_infrastructure"
+      },
+      {
+        "step": 2,
+        "title": "Implement user authentication and registration tests",
+        "description": "Test complete user onboarding flow for both auth methods",
+        "modification_points": [
+          "Create 4 test cases in multi-user-isolation.test.ts: [Telegram user registration creates user record, CLI token auth creates CLI user, JWT contains correct userId claim, Auth middleware sets userId in context]",
+          "Use Supertest for HTTP API testing",
+          "Validate database state after each operation"
+        ],
+        "logic_flow": [
+          "Test Telegram registration: POST /api/auth with valid initData",
+          "Verify user created in users table with telegram_id",
+          "Verify JWT token returned with correct userId",
+          "Test CLI token auth: POST /api/auth with CLI_API_TOKEN",
+          "Verify CLI user created with telegram_id = null",
+          "Test JWT validation: Send request with JWT, verify c.get('userId') set",
+          "Test auth failures: Invalid tokens, expired JWTs"
+        ],
+        "depends_on": [1],
+        "output": "auth_tests"
+      },
+      {
+        "step": 3,
+        "title": "Implement data isolation tests across all layers",
+        "description": "Verify user A cannot access user B's data at database, cache, and API layers",
+        "modification_points": [
+          "Create 6 test cases: [Session isolation at Store layer, Session isolation at SyncEngine layer, Session isolation at API layer, Machine isolation (all layers), Message isolation (all layers), Cross-user write attempts blocked]",
+          "Test all CRUD operations for sessions, machines, messages",
+          "Validate 404 responses for cross-user access attempts"
+        ],
+        "logic_flow": [
+          "Setup: Create 2 users, each creates 2 sessions, 2 machines",
+          "Test Store isolation: UserA calls Store.getSessions(userA.id), verify only userA sessions returned",
+          "Test SyncEngine isolation: UserA calls SyncEngine.getSessions(userA.id), same verification",
+          "Test API isolation: UserA calls GET /api/sessions with userA JWT, verify own sessions only",
+          "Test cross-user read: UserA calls GET /api/sessions/{userB_session_id}, verify 404",
+          "Test cross-user write: UserA tries PUT /api/sessions/{userB_session_id}, verify 404",
+          "Test cross-user delete: UserA tries DELETE /api/sessions/{userB_session_id}, verify 404",
+          "Repeat for machines and messages"
+        ],
+        "depends_on": [1],
+        "output": "isolation_tests"
+      },
+      {
+        "step": 4,
+        "title": "Implement event broadcasting isolation tests",
+        "description": "Verify Socket.IO and SSE events are filtered by userId",
+        "modification_points": [
+          "Create 3 test cases: [Socket.IO user rooms isolate events, SSE streams filter by userId, Permission events respect userId boundaries]",
+          "Use Socket.IO client for real-time event testing",
+          "Validate event payloads include userId"
+        ],
+        "logic_flow": [
+          "Setup: Connect 2 Socket.IO clients with different user JWTs",
+          "Verify each client joined correct user room: 'user:{userId}'",
+          "UserA creates session via API, verify only userA socket receives 'session:created' event",
+          "Verify userB socket does NOT receive the event",
+          "Test SSE: Open 2 SSE connections with different user JWTs",
+          "Emit events, verify each stream receives only own events",
+          "Test permission events: Grant permission for userA session, verify only userA receives event"
+        ],
+        "depends_on": [1],
+        "output": "event_isolation_tests"
+      },
+      {
+        "step": 5,
+        "title": "Implement CLI token workflow tests",
+        "description": "Test per-user CLI token generation, validation, and revocation",
+        "modification_points": [
+          "Create 4 test cases: [Generate CLI token for user, Authenticate with per-user token, Revoke token prevents access, User cannot revoke other user's tokens]",
+          "Test dual-mode authentication (per-user + legacy shared token)",
+          "Validate token hashing and storage"
+        ],
+        "logic_flow": [
+          "UserA generates CLI token: POST /api/cli-tokens with userA JWT",
+          "Receive token in response, verify stored in cli_tokens table with hashed value",
+          "Use token to authenticate: POST /api/auth with token, verify userId correct",
+          "Create session with token-authenticated request, verify ownership",
+          "UserA revokes token: DELETE /api/cli-tokens/{tokenId}",
+          "Verify token deleted, authentication fails with revoked token",
+          "UserA tries to revoke userB's token, verify 404 response"
+        ],
+        "depends_on": [1],
+        "output": "cli_token_tests"
+      },
+      {
+        "step": 6,
+        "title": "Implement database integrity tests",
+        "description": "Verify foreign key cascades, constraints, and migration correctness",
+        "modification_points": [
+          "Create 4 test cases: [Foreign key cascade deletes user data, Unique constraints enforced, Migration script idempotent, Schema version tracking works]",
+          "Test constraint violations throw appropriate errors",
+          "Validate data consistency after cascading deletes"
+        ],
+        "logic_flow": [
+          "Test FK cascade: Create user with sessions, machines, messages, CLI tokens",
+          "Delete user: DELETE FROM users WHERE id = userId",
+          "Verify all related records deleted via CASCADE",
+          "Test unique constraints: Try to create duplicate telegram_id, verify error",
+          "Test migration idempotency: Run migration script twice, verify no errors",
+          "Test schema versioning: Check schema_migrations table tracks version correctly"
+        ],
+        "depends_on": [1],
+        "output": "database_integrity_tests"
+      },
+      {
+        "step": 7,
+        "title": "Implement performance benchmark tests",
+        "description": "Validate system performance under multi-user load",
+        "modification_points": [
+          "Create 3 performance test cases: [Query response time <50ms for user-scoped queries, Event broadcast latency <100ms, Concurrent user capacity >=10 users]",
+          "Use performance.now() for timing measurements",
+          "Test with realistic data volumes (100 sessions per user)"
+        ],
+        "logic_flow": [
+          "Setup: Create 10 users, each with 100 sessions",
+          "Benchmark Store.getSessions(userId): Measure query time, verify <50ms",
+          "Benchmark SyncEngine.getSessions(userId): Measure cache lookup, verify <30ms",
+          "Benchmark event broadcast: Emit 100 events, measure average latency <100ms",
+          "Test concurrent operations: 10 users simultaneously create sessions",
+          "Verify no race conditions, all operations succeed",
+          "Measure throughput: sessions created per second",
+          "Report performance metrics in test output"
+        ],
+        "depends_on": [1],
+        "output": "performance_benchmarks"
+      },
+      {
+        "step": 8,
+        "title": "Generate coverage report and validate >=80% target",
+        "description": "Run full test suite with coverage and verify target met",
+        "modification_points": [
+          "Add coverage script to server/package.json: 'test:coverage': 'vitest run --coverage'",
+          "Configure coverage thresholds in vitest.config.ts: lines >=80%, functions >=80%, branches >=75%",
+          "Generate HTML coverage report for review"
+        ],
+        "logic_flow": [
+          "Run bun test --coverage for all test suites",
+          "Collect coverage data for server/src directory",
+          "Generate coverage report showing line, function, branch coverage",
+          "Verify coverage thresholds met (lines >=80%, functions >=80%, branches >=75%)",
+          "Identify uncovered code paths",
+          "Generate HTML report: open coverage/index.html",
+          "Add coverage badge to README.md"
+        ],
+        "depends_on": [2, 3, 4, 5, 6, 7],
+        "output": "coverage_report"
+      }
+    ],
+    "target_files": [
+      "server/src/__tests__/integration/multi-user-isolation.test.ts",
+      "server/src/__tests__/helpers/testDatabase.ts",
+      "server/src/__tests__/helpers/testUsers.ts",
+      "server/src/__tests__/helpers/testAuth.ts",
+      "server/package.json",
+      "vitest.config.ts"
+    ],
+    "reusable_test_tools": [
+      "server/src/__tests__/helpers/testDatabase.ts",
+      "server/src/__tests__/helpers/testUsers.ts",
+      "server/src/__tests__/helpers/testAuth.ts"
+    ],
+    "test_commands": {
+      "run_tests": "bun test",
+      "run_coverage": "bun test --coverage",
+      "run_specific": "bun test server/src/__tests__/integration/multi-user-isolation.test.ts"
+    }
+  }
+}

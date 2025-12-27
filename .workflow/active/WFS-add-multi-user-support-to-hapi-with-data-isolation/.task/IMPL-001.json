@@ -1,0 +1,143 @@
+{
+  "id": "IMPL-001",
+  "title": "Create users table and database schema migration",
+  "status": "pending",
+  "context_package_path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json",
+  "meta": {
+    "type": "feature",
+    "agent": "@code-developer",
+    "execution_group": null,
+    "module": "server"
+  },
+  "context": {
+    "requirements": [
+      "Create 1 users table with 4 columns: [id (primary key), telegram_id (nullable), username, created_at]",
+      "Add user_id column to 3 existing tables: [sessions, machines, messages]",
+      "Create 1 migration script: [server/scripts/migrate-add-users.ts]",
+      "Add foreign key constraints: [3 FK constraints linking user_id to users.id]",
+      "Support 2 database engines: [SQLite for existing deployments, optional MySQL/PostgreSQL for future scaling]"
+    ],
+    "focus_paths": [
+      "server/src/store/index.ts",
+      "server/scripts",
+      "server/src/store"
+    ],
+    "acceptance": [
+      "1 users table created: verify by SELECT name FROM sqlite_master WHERE type='table' AND name='users'",
+      "3 tables have user_id column: verify by PRAGMA table_info(sessions|machines|messages) | grep user_id",
+      "3 foreign keys exist: verify by SELECT COUNT(*) FROM pragma_foreign_key_list WHERE table IN ('sessions','machines','messages')",
+      "Migration script executable: verify by bun run server/scripts/migrate-add-users.ts (exit code 0)",
+      "Database schema documentation updated: verify by grep 'users table' server/README.md or inline comments"
+    ],
+    "depends_on": [],
+    "shared_context": {
+      "tech_stack": ["TypeScript", "bun:sqlite", "Zod"],
+      "database_strategy": "SQLite primary (file-based, WAL mode), MySQL/PostgreSQL optional via configuration",
+      "conventions": ["Follow existing Store class patterns in server/src/store/index.ts", "Use prepared statements for all queries", "Enable foreign key constraints"]
+    },
+    "artifacts": []
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_context_package",
+        "action": "Load context package for smart context and database schema",
+        "commands": ["Read(.workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json)"],
+        "output_to": "context_package",
+        "on_error": "fail"
+      },
+      {
+        "step": "analyze_existing_schema",
+        "action": "Review current database schema in Store class",
+        "commands": ["Read(server/src/store/index.ts)", "Extract CREATE TABLE statements"],
+        "output_to": "current_schema"
+      },
+      {
+        "step": "identify_migration_patterns",
+        "action": "Search for existing migration scripts or database initialization code",
+        "commands": ["bash(find server -name '*migrate*' -o -name '*schema*' -type f)"],
+        "output_to": "migration_patterns"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "Design users table schema",
+        "description": "Create users table with id, telegram_id, username, created_at columns supporting both CLI token users and Telegram users",
+        "modification_points": [
+          "Create users table schema: 4 columns [id TEXT PRIMARY KEY, telegram_id TEXT UNIQUE NULLABLE, username TEXT NOT NULL, created_at INTEGER NOT NULL]",
+          "Add unique constraint on telegram_id to prevent duplicate Telegram users",
+          "Add created_at timestamp for user audit trail"
+        ],
+        "logic_flow": [
+          "Define users table schema with proper constraints",
+          "Support both authenticated user types (CLI token + Telegram)",
+          "Ensure username is always present for display purposes",
+          "Allow null telegram_id for CLI-only users"
+        ],
+        "depends_on": [],
+        "output": "users_table_schema"
+      },
+      {
+        "step": 2,
+        "title": "Add user_id columns to existing tables",
+        "description": "Extend sessions, machines, messages tables with user_id foreign key column",
+        "modification_points": [
+          "Modify 3 table schemas: Add user_id TEXT column to [sessions, machines, messages] tables",
+          "Add 3 foreign key constraints: [sessions.user_id → users.id, machines.user_id → users.id, messages.user_id → users.id]",
+          "Set user_id as nullable initially to allow migration of existing data"
+        ],
+        "logic_flow": [
+          "Add user_id column to each table with NULL default",
+          "Create foreign key constraints with ON DELETE CASCADE",
+          "Update table indexes to include user_id for query performance",
+          "Prepare for future NOT NULL constraint after data migration"
+        ],
+        "depends_on": [1],
+        "output": "extended_table_schemas"
+      },
+      {
+        "step": 3,
+        "title": "Create migration script with database engine support",
+        "description": "Implement migration script supporting SQLite (primary) and MySQL/PostgreSQL (optional)",
+        "modification_points": [
+          "Create 1 migration script: server/scripts/migrate-add-users.ts with 150-200 lines",
+          "Implement 2 migration paths: [SQLite using ALTER TABLE, MySQL/PostgreSQL using standard DDL]",
+          "Add rollback capability: 1 rollback function to revert schema changes"
+        ],
+        "logic_flow": [
+          "Detect database engine from configuration",
+          "Execute engine-specific migration SQL statements",
+          "Create default admin user if no users exist",
+          "Assign existing sessions/machines/messages to admin user",
+          "Verify foreign key constraints after migration",
+          "Provide rollback mechanism for failed migrations"
+        ],
+        "depends_on": [1, 2],
+        "output": "migration_script"
+      },
+      {
+        "step": 4,
+        "title": "Update Store class constructor with migration",
+        "description": "Integrate migration into Store initialization to ensure schema is up-to-date",
+        "modification_points": [
+          "Modify 1 constructor: Store constructor in server/src/store/index.ts lines 40-80",
+          "Add migration version check: 1 new table schema_migrations with version tracking",
+          "Execute migration on first run: Call migrate-add-users.ts if version < 2"
+        ],
+        "logic_flow": [
+          "Check schema_migrations table for current version",
+          "If version < 2, execute user table migration",
+          "Update schema version to 2 after successful migration",
+          "Log migration status for debugging"
+        ],
+        "depends_on": [3],
+        "output": "store_with_migration"
+      }
+    ],
+    "target_files": [
+      "server/src/store/index.ts:constructor:40-80",
+      "server/scripts/migrate-add-users.ts"
+    ]
+  }
+}

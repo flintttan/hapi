@@ -1,0 +1,194 @@
+{
+  "id": "IMPL-003",
+  "title": "Add userId parameter to all Store methods and implement user-scoped queries",
+  "status": "pending",
+  "context_package_path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json",
+  "meta": {
+    "type": "refactor",
+    "agent": "@code-developer",
+    "execution_group": null,
+    "module": "server"
+  },
+  "context": {
+    "requirements": [
+      "Add userId parameter to 15 Store methods: [getSessions(userId), getSession(sessionId, userId), createSession(data, userId), updateSession(sessionId, updates, userId), deleteSession(sessionId, userId), getMachines(userId), getMachine(machineId, userId), createMachine(data, userId), updateMachine(machineId, updates, userId), deleteMachine(machineId, userId), getMessages(sessionId, userId), createMessage(data, userId), updateMessage(messageId, updates, userId), deleteMessage(messageId, userId), getSessionMessages(sessionId, userId)]",
+      "Modify 15 SQL queries: Add WHERE user_id = ? clause to all SELECT/UPDATE/DELETE statements",
+      "Update 5 INSERT statements: Add user_id column to INSERT queries for sessions, machines, messages creation",
+      "Maintain backward compatibility: Add migration period with dual-mode support (userId optional with deprecation warning)"
+    ],
+    "focus_paths": [
+      "server/src/store/index.ts",
+      "server/src/sync/syncEngine.ts"
+    ],
+    "acceptance": [
+      "15 methods have userId parameter: verify by grep -E '(getSessions|getSession|createSession|updateSession|deleteSession|getMachines|getMachine|createMachine|updateMachine|deleteMachine|getMessages|createMessage|updateMessage|deleteMessage|getSessionMessages).*userId' server/src/store/index.ts | wc -l = 15",
+      "15 queries use user_id filter: verify by grep 'WHERE.*user_id = ?' server/src/store/index.ts | wc -l >= 15",
+      "5 INSERT statements include user_id: verify by grep 'INSERT INTO.*(sessions|machines|messages).*user_id' server/src/store/index.ts | wc -l = 5",
+      "Data isolation verified: verify by bun test server/src/store/__tests__/user-isolation.test.ts (exit code 0)"
+    ],
+    "depends_on": ["IMPL-001", "IMPL-002"],
+    "inherited": {
+      "from": "IMPL-001",
+      "context": ["user_id columns added to sessions, machines, messages tables with foreign key constraints"]
+    },
+    "shared_context": {
+      "tech_stack": ["TypeScript", "bun:sqlite", "Prepared statements"],
+      "query_pattern": "All queries MUST include WHERE user_id = ? for data isolation",
+      "conventions": ["Use prepared statements for security", "Validate userId before database operations", "Return empty arrays for no results, not null"]
+    },
+    "artifacts": []
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_context_package",
+        "action": "Load context package for Store method inventory",
+        "commands": ["Read(.workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json)"],
+        "output_to": "context_package",
+        "on_error": "fail"
+      },
+      {
+        "step": "inventory_store_methods",
+        "action": "Identify all Store methods requiring userId parameter",
+        "commands": [
+          "Read(server/src/store/index.ts)",
+          "bash(grep -E 'get.*\\(|create.*\\(|update.*\\(|delete.*\\(' server/src/store/index.ts | grep -v 'getOrCreate')"
+        ],
+        "output_to": "store_methods_inventory"
+      },
+      {
+        "step": "analyze_query_patterns",
+        "action": "Review existing SQL query patterns for consistency",
+        "commands": ["bash(grep -E 'SELECT|INSERT|UPDATE|DELETE' server/src/store/index.ts | head -20)"],
+        "output_to": "sql_patterns"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "Update session-related Store methods",
+        "description": "Add userId parameter and user_id filtering to 5 session methods",
+        "modification_points": [
+          "Modify 5 session methods in server/src/store/index.ts: [getSessions(userId): lines 100-110, getSession(sessionId, userId): lines 112-120, createSession(data, userId): lines 122-135, updateSession(sessionId, updates, userId): lines 137-150, deleteSession(sessionId, userId): lines 152-160]",
+          "Update 3 SELECT queries: Add WHERE user_id = ? to getSessions, getSession queries",
+          "Update 1 INSERT query: Add user_id to createSession INSERT statement",
+          "Update 2 UPDATE/DELETE queries: Add WHERE user_id = ? to updateSession, deleteSession"
+        ],
+        "logic_flow": [
+          "Add userId: string parameter to all session method signatures",
+          "Modify getSessions: SELECT * FROM sessions WHERE user_id = ? ORDER BY created_at DESC",
+          "Modify getSession: SELECT * FROM sessions WHERE id = ? AND user_id = ?",
+          "Modify createSession: INSERT INTO sessions (..., user_id) VALUES (..., ?)",
+          "Modify updateSession: UPDATE sessions SET ... WHERE id = ? AND user_id = ?",
+          "Modify deleteSession: DELETE FROM sessions WHERE id = ? AND user_id = ?",
+          "Return null if session not found or userId mismatch (no data leak)"
+        ],
+        "depends_on": [],
+        "output": "session_methods_updated"
+      },
+      {
+        "step": 2,
+        "title": "Update machine-related Store methods",
+        "description": "Add userId parameter and user_id filtering to 5 machine methods",
+        "modification_points": [
+          "Modify 5 machine methods in server/src/store/index.ts: [getMachines(userId): lines 170-180, getMachine(machineId, userId): lines 182-190, createMachine(data, userId): lines 192-205, updateMachine(machineId, updates, userId): lines 207-220, deleteMachine(machineId, userId): lines 222-230]",
+          "Update 3 SELECT queries: Add WHERE user_id = ? to getMachines, getMachine queries",
+          "Update 1 INSERT query: Add user_id to createMachine INSERT statement",
+          "Update 2 UPDATE/DELETE queries: Add WHERE user_id = ? to updateMachine, deleteMachine"
+        ],
+        "logic_flow": [
+          "Add userId: string parameter to all machine method signatures",
+          "Modify getMachines: SELECT * FROM machines WHERE user_id = ? ORDER BY name",
+          "Modify getMachine: SELECT * FROM machines WHERE id = ? AND user_id = ?",
+          "Modify createMachine: INSERT INTO machines (..., user_id) VALUES (..., ?)",
+          "Modify updateMachine: UPDATE machines SET ... WHERE id = ? AND user_id = ?",
+          "Modify deleteMachine: DELETE FROM machines WHERE id = ? AND user_id = ?",
+          "Cascade delete via foreign key ensures related sessions are cleaned up"
+        ],
+        "depends_on": [],
+        "output": "machine_methods_updated"
+      },
+      {
+        "step": 3,
+        "title": "Update message-related Store methods",
+        "description": "Add userId parameter and user_id filtering to 5 message methods",
+        "modification_points": [
+          "Modify 5 message methods in server/src/store/index.ts: [getMessages(sessionId, userId): lines 240-250, createMessage(data, userId): lines 252-265, updateMessage(messageId, updates, userId): lines 267-280, deleteMessage(messageId, userId): lines 282-290, getSessionMessages(sessionId, userId): lines 292-300]",
+          "Update 2 SELECT queries: Add JOIN with sessions table to verify user_id ownership",
+          "Update 1 INSERT query: Verify session ownership before inserting message",
+          "Update 2 UPDATE/DELETE queries: Add ownership verification via session JOIN"
+        ],
+        "logic_flow": [
+          "Add userId: string parameter to all message method signatures",
+          "Modify getMessages: SELECT m.* FROM messages m JOIN sessions s ON m.session_id = s.id WHERE m.session_id = ? AND s.user_id = ?",
+          "Modify createMessage: First verify session exists with getSession(sessionId, userId), then INSERT INTO messages",
+          "Modify updateMessage: UPDATE messages SET ... WHERE id = ? AND session_id IN (SELECT id FROM sessions WHERE user_id = ?)",
+          "Modify deleteMessage: DELETE FROM messages WHERE id = ? AND session_id IN (SELECT id FROM sessions WHERE user_id = ?)",
+          "getSessionMessages: Alias for getMessages for backward compatibility",
+          "Throw error if session not found or userId mismatch"
+        ],
+        "depends_on": [1],
+        "output": "message_methods_updated"
+      },
+      {
+        "step": 4,
+        "title": "Add method parameter validation",
+        "description": "Implement userId validation for all updated Store methods",
+        "modification_points": [
+          "Add 1 validation helper: validateUserId(userId: string): void function",
+          "Add validation calls to 15 methods: Call validateUserId at start of each method",
+          "Throw descriptive errors: 3 error types [InvalidUserIdError, SessionNotFoundError, UnauthorizedAccessError]"
+        ],
+        "logic_flow": [
+          "Create validateUserId helper that checks userId is non-empty string",
+          "Add validateUserId(userId) as first line in all modified methods",
+          "Throw InvalidUserIdError if userId is empty/null/undefined",
+          "Throw SessionNotFoundError if resource not found",
+          "Throw UnauthorizedAccessError if userId mismatch in WHERE clause returns 0 rows",
+          "Include userId in error messages for debugging (sanitized)"
+        ],
+        "depends_on": [1, 2, 3],
+        "output": "validation_added"
+      },
+      {
+        "step": 5,
+        "title": "Create user isolation test suite",
+        "description": "Verify data isolation between users with comprehensive tests",
+        "modification_points": [
+          "Create 1 test file: server/src/store/__tests__/user-isolation.test.ts with 100-150 lines",
+          "Implement 8 test cases: [User A cannot read User B's sessions, User A cannot update User B's sessions, User A cannot delete User B's sessions, getSessions returns only owned sessions, Machine isolation verified, Message isolation verified, Cross-user access blocked, Foreign key cascade verified]",
+          "Use 2 test users: [userA with ID 'test-user-a', userB with ID 'test-user-b']"
+        ],
+        "logic_flow": [
+          "Setup: Create 2 test users and test database",
+          "Test session isolation: Create sessions for both users, verify each user only sees their own",
+          "Test unauthorized update: Verify userA cannot update userB's session",
+          "Test unauthorized delete: Verify userA cannot delete userB's session",
+          "Test machine isolation: Similar to sessions",
+          "Test message isolation: Verify messages inherit session ownership",
+          "Test foreign key cascade: Delete user, verify cascading delete of all user data",
+          "Cleanup: Remove test data after each test"
+        ],
+        "depends_on": [4],
+        "output": "user_isolation_tests"
+      }
+    ],
+    "target_files": [
+      "server/src/store/index.ts:getSessions:100-110",
+      "server/src/store/index.ts:getSession:112-120",
+      "server/src/store/index.ts:createSession:122-135",
+      "server/src/store/index.ts:updateSession:137-150",
+      "server/src/store/index.ts:deleteSession:152-160",
+      "server/src/store/index.ts:getMachines:170-180",
+      "server/src/store/index.ts:getMachine:182-190",
+      "server/src/store/index.ts:createMachine:192-205",
+      "server/src/store/index.ts:updateMachine:207-220",
+      "server/src/store/index.ts:deleteMachine:222-230",
+      "server/src/store/index.ts:getMessages:240-250",
+      "server/src/store/index.ts:createMessage:252-265",
+      "server/src/store/index.ts:updateMessage:267-280",
+      "server/src/store/index.ts:deleteMessage:282-290",
+      "server/src/store/__tests__/user-isolation.test.ts"
+    ]
+  }
+}

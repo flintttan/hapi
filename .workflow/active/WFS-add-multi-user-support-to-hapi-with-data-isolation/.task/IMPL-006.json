@@ -1,0 +1,204 @@
+{
+  "id": "IMPL-006",
+  "title": "Implement user-scoped event broadcasting for Socket.IO and SSE",
+  "status": "pending",
+  "context_package_path": ".workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json",
+  "meta": {
+    "type": "feature",
+    "agent": "@code-developer",
+    "execution_group": null,
+    "module": "server"
+  },
+  "context": {
+    "requirements": [
+      "Add userId filtering to 4 event types: [session:created, session:updated, machine:created, machine:updated]",
+      "Implement user-scoped Socket.IO rooms: 1 room per user (room name: 'user:{userId}')",
+      "Add SSE listener filtering: Filter listeners by userId before emitting events",
+      "Update 8 event emission points: All SyncEngine event emits must include userId and filter listeners"
+    ],
+    "focus_paths": [
+      "server/src/sync/syncEngine.ts",
+      "server/src/socket/handlers/cli.ts",
+      "server/src/sse/index.ts"
+    ],
+    "acceptance": [
+      "4 event types include userId: verify by grep 'emit.*userId' server/src/sync/syncEngine.ts | wc -l >= 4",
+      "Socket.IO user rooms implemented: verify by grep 'user:.*userId' server/src/socket/handlers/cli.ts",
+      "SSE filtering implemented: verify by grep 'filter.*userId' server/src/sse/index.ts",
+      "Event isolation verified: verify by bun test server/src/socket/__tests__/event-isolation.test.ts (exit code 0)"
+    ],
+    "depends_on": ["IMPL-005"],
+    "inherited": {
+      "from": "IMPL-005",
+      "context": ["SyncEngine methods now include userId parameter and filter cache by user ownership"]
+    },
+    "shared_context": {
+      "tech_stack": ["Socket.IO", "SSE (Server-Sent Events)", "Event-driven architecture"],
+      "room_strategy": "Socket.IO user rooms for efficient user-scoped broadcasting, SSE listener filtering for web clients",
+      "conventions": ["Join user room on authentication", "Leave room on disconnect", "Include userId in all event payloads"]
+    },
+    "artifacts": []
+  },
+  "flow_control": {
+    "pre_analysis": [
+      {
+        "step": "load_context_package",
+        "action": "Load context package for event broadcasting architecture",
+        "commands": ["Read(.workflow/active/WFS-add-multi-user-support-to-hapi-with-data-isolation/.process/context-package.json)"],
+        "output_to": "context_package",
+        "on_error": "fail"
+      },
+      {
+        "step": "analyze_event_system",
+        "action": "Review current event emission and listener patterns",
+        "commands": [
+          "Read(server/src/sync/syncEngine.ts)",
+          "bash(grep -n '\\.emit(' server/src/sync/syncEngine.ts)"
+        ],
+        "output_to": "current_event_system"
+      },
+      {
+        "step": "review_socket_handlers",
+        "action": "Identify Socket.IO connection and room management code",
+        "commands": ["Read(server/src/socket/handlers/cli.ts)", "bash(grep 'join\\|leave' server/src/socket/handlers/cli.ts)"],
+        "output_to": "socket_handlers"
+      }
+    ],
+    "implementation_approach": [
+      {
+        "step": 1,
+        "title": "Add userId to SyncEngine event payloads",
+        "description": "Include userId in all event emissions for filtering",
+        "modification_points": [
+          "Modify 8 event emissions in server/src/sync/syncEngine.ts: [emit('session:created', {session, userId}), emit('session:updated', {session, userId}), emit('session:deleted', {sessionId, userId}), emit('machine:created', {machine, userId}), emit('machine:updated', {machine, userId}), emit('machine:deleted', {machineId, userId}), emit('message:created', {message, sessionId, userId}), emit('message:updated', {message, userId})]",
+          "Add userId field to 8 event payload objects",
+          "Update event type definitions: Add userId: string to event payload types"
+        ],
+        "logic_flow": [
+          "In createSession: After Store operation, emit with {session, userId}",
+          "In updateSession: After Store operation, emit with {session, userId}",
+          "In deleteSession: Emit with {sessionId, userId}",
+          "Similar pattern for machine and message events",
+          "Ensure userId is always present in payload for listener filtering",
+          "Update TypeScript event types to enforce userId field"
+        ],
+        "depends_on": [],
+        "output": "event_payloads_updated"
+      },
+      {
+        "step": 2,
+        "title": "Implement Socket.IO user rooms",
+        "description": "Create user-scoped rooms for efficient event broadcasting",
+        "modification_points": [
+          "Modify 1 connection handler in server/src/socket/handlers/cli.ts: onConnection event (lines 30-50)",
+          "Add 1 room join operation: socket.join(`user:${userId}`) after authentication",
+          "Add 1 room leave operation: socket.leave(`user:${userId}`) on disconnect",
+          "Update 4 event broadcasts: Emit to specific user room instead of global broadcast"
+        ],
+        "logic_flow": [
+          "On socket connection: Extract userId from socket auth data (JWT)",
+          "Join user-specific room: socket.join(`user:${userId}`)",
+          "Store userId in socket.data.userId for later reference",
+          "On disconnect: Leave user room socket.leave(`user:${userId}`)",
+          "Update event listeners: Filter by userId before emitting to room",
+          "Log room join/leave events for debugging"
+        ],
+        "depends_on": [1],
+        "output": "socket_rooms_implemented"
+      },
+      {
+        "step": 3,
+        "title": "Update Socket.IO event broadcasters with room targeting",
+        "description": "Modify event emission to target user-specific rooms",
+        "modification_points": [
+          "Modify 4 event broadcasters in server/src/socket/index.ts: [broadcastSessionEvent, broadcastMachineEvent, broadcastMessageEvent, broadcastPermissionEvent]",
+          "Replace global broadcast io.emit() with room-targeted io.to(`user:${userId}`).emit()",
+          "Add userId parameter to broadcaster functions",
+          "Ensure all event emissions use room-based targeting"
+        ],
+        "logic_flow": [
+          "Extract userId from event payload",
+          "Use io.to(`user:${userId}`).emit(event, payload) instead of io.emit(event, payload)",
+          "Verify userId exists in payload before emitting",
+          "Log broadcasts for monitoring: 'Broadcasting {event} to user:{userId}'",
+          "Handle edge case: If userId missing, log error and skip broadcast"
+        ],
+        "depends_on": [2],
+        "output": "socket_broadcasting_updated"
+      },
+      {
+        "step": 4,
+        "title": "Implement SSE listener filtering",
+        "description": "Add userId filtering to SSE event stream listeners",
+        "modification_points": [
+          "Modify 1 SSE handler in server/src/sse/index.ts: GET /sse endpoint (lines 20-60)",
+          "Add userId extraction from SSE request (from query params or auth header)",
+          "Implement listener filtering: Filter emitted events by event.userId === request.userId",
+          "Create 1 helper function: filterEventsByUserId(events, userId) for SSE stream"
+        ],
+        "logic_flow": [
+          "On SSE connection: Extract userId from request (query param or JWT)",
+          "Store userId with SSE connection context",
+          "On event emission: Check event.userId === connection.userId",
+          "If match, send event to SSE stream",
+          "If mismatch, skip event (user isolation)",
+          "Log filtered events for debugging",
+          "On disconnect: Clean up listener and log"
+        ],
+        "depends_on": [1],
+        "output": "sse_filtering_implemented"
+      },
+      {
+        "step": 5,
+        "title": "Update SyncEngine event listeners with userId filtering",
+        "description": "Ensure all internal SyncEngine event listeners respect userId boundaries",
+        "modification_points": [
+          "Review 6 internal event listeners in server/src/sync/syncEngine.ts",
+          "Add userId checks: Verify event.userId matches expected userId before processing",
+          "Update cache invalidation: Only invalidate cache for affected userId",
+          "Add event filtering to permission change propagation"
+        ],
+        "logic_flow": [
+          "For each event listener: Extract userId from event payload",
+          "Check if event affects current user context",
+          "If userId matches, process event (update cache, trigger actions)",
+          "If userId doesn't match, ignore event (cross-user isolation)",
+          "Log filtered events for security audit",
+          "Ensure permission events also respect userId boundaries"
+        ],
+        "depends_on": [1],
+        "output": "internal_listeners_updated"
+      },
+      {
+        "step": 6,
+        "title": "Create event isolation test suite",
+        "description": "Verify user-scoped event broadcasting and listener filtering",
+        "modification_points": [
+          "Create 1 test file: server/src/socket/__tests__/event-isolation.test.ts with 100-120 lines",
+          "Implement 7 test cases: [Socket.IO rooms isolate users, SSE streams filter by userId, User A doesn't receive User B's events, Event payloads include userId, Room join/leave works correctly, Cross-user event blocking verified, Permission events respect userId]",
+          "Use mock Socket.IO and SSE connections"
+        ],
+        "logic_flow": [
+          "Setup: Create mock Socket.IO server and SSE connections for 2 users",
+          "Test Socket.IO isolation: UserA socket in room 'user:A', UserB in 'user:B'",
+          "Emit session:created for UserA, verify UserB doesn't receive it",
+          "Test SSE filtering: Connect 2 SSE streams with different userIds",
+          "Emit events, verify each stream only receives own events",
+          "Test room management: Join/leave operations work correctly",
+          "Test event payloads: All events include userId field",
+          "Cleanup: Disconnect sockets and SSE streams"
+        ],
+        "depends_on": [2, 3, 4, 5],
+        "output": "event_isolation_tests"
+      }
+    ],
+    "target_files": [
+      "server/src/sync/syncEngine.ts:emit:190-250",
+      "server/src/socket/handlers/cli.ts:onConnection:30-50",
+      "server/src/socket/index.ts:broadcastSessionEvent:80-100",
+      "server/src/socket/index.ts:broadcastMachineEvent:102-120",
+      "server/src/sse/index.ts:GET /sse:20-60",
+      "server/src/socket/__tests__/event-isolation.test.ts"
+    ]
+  }
+}

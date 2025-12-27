@@ -1,0 +1,114 @@
+{
+  "project_structure": "HAPI uses a 3-tier architecture for data flow:\n\n1. **CLI Layer** (cli/src/): Client-side data persistence and API communication\n   - persistence.ts: Local storage (~/.hapi/) for settings, credentials, daemon state\n   - api/: REST + Socket.IO client for server communication\n\n2. **Server Layer** (server/src/): Central data synchronization and routing\n   - store/: SQLite database abstraction (sessions, machines, messages)\n   - sync/syncEngine.ts: In-memory cache + real-time event broadcasting\n   - web/routes/: REST API endpoints for sessions, messages, permissions\n   - socket/: Socket.IO handlers for real-time CLI↔Server communication\n\n3. **Storage Layer**: SQLite database with 3 tables\n   - sessions: Session metadata, agent state, todos\n   - machines: Machine metadata, daemon state\n   - messages: Message content with foreign key to sessions\n\n**Data Flow Pattern**: CLI → REST/Socket.IO → SyncEngine (cache) → Store (SQLite) → Web/Telegram clients",
+  "relevant_files": [
+    {
+      "path": "server/src/store/index.ts",
+      "relevance": 0.95,
+      "rationale": "Core data persistence layer - ALL database operations go through Store class. Critical for adding user_id column to tables (lines 183-225 schema definition)"
+    },
+    {
+      "path": "server/src/sync/syncEngine.ts",
+      "relevance": 0.90,
+      "rationale": "Central dataflow orchestrator - in-memory cache layer between Store and clients. Needs user context filtering in getSessions() (line 222), getMessages() (line 246), and event broadcasting (line 193)"
+    },
+    {
+      "path": "server/src/web/middleware/auth.ts",
+      "relevance": 0.85,
+      "rationale": "JWT authentication middleware extracts userId (line 39: c.set('userId')). This is the ONLY place user context enters the server - must propagate to all downstream operations"
+    },
+    {
+      "path": "server/src/web/routes/sessions.ts",
+      "relevance": 0.80,
+      "rationale": "Session REST API endpoints. Currently no user filtering in getSessions() (line 63-88). Must add userId parameter to all engine.getSessions() calls"
+    },
+    {
+      "path": "server/src/web/routes/messages.ts",
+      "relevance": 0.80,
+      "rationale": "Message REST API endpoints. sendMessage() (line 38-58) and getMessages() (line 20-35) need user ownership validation"
+    },
+    {
+      "path": "server/src/web/routes/guards.ts",
+      "relevance": 0.75,
+      "rationale": "Request validation guards. requireSessionFromParam() (line 32-44) must add user ownership check before returning session"
+    },
+    {
+      "path": "cli/src/persistence.ts",
+      "relevance": 0.70,
+      "rationale": "CLI-side storage (settings, credentials). No changes needed for multi-user (each CLI has own ~/.hapi/), but important to understand isolation boundary"
+    },
+    {
+      "path": "cli/src/api/api.ts",
+      "relevance": 0.65,
+      "rationale": "CLI API client using Bearer token auth (line 30). Token already contains user context via JWT, no changes needed in client"
+    },
+    {
+      "path": "server/src/socket/handlers/cli.ts",
+      "relevance": 0.75,
+      "rationale": "Socket.IO message handlers for real-time CLI communication. Must validate user ownership when handling 'new-message' events and RPC calls"
+    },
+    {
+      "path": "server/src/web/routes/cli.ts",
+      "relevance": 0.70,
+      "rationale": "CLI-specific REST endpoints for session/machine creation (POST /cli/sessions, /cli/machines). Must associate created records with userId from JWT"
+    }
+  ],
+  "patterns": "**Current Data Flow Patterns**:\n\n1. **Authentication Pattern** (server/src/web/middleware/auth.ts:15-46):\n   ```typescript\n   // JWT middleware extracts userId and stores in context\n   c.set('userId', parsed.data.uid)  // Line 39\n   ```\n   Pattern: JWT token → userId in request context\n   Issue: userId not propagated to Store/SyncEngine operations\n\n2. **Data Persistence Pattern** (server/src/store/index.ts):\n   ```typescript\n   // No user scoping in queries\n   getSessions(): StoredSession[] {\n     return this.db.prepare('SELECT * FROM sessions ORDER BY updated_at DESC').all()\n   }  // Line 377-379\n   ```\n   Pattern: Global queries without user filtering\n   Issue: Returns ALL sessions regardless of ownership\n\n3. **In-Memory Cache Pattern** (server/src/sync/syncEngine.ts:155-160):\n   ```typescript\n   private sessions: Map<string, Session> = new Map()\n   private machines: Map<string, Machine> = new Map()\n   ```\n   Pattern: Single global cache for all sessions\n   Issue: No user-based partitioning\n\n4. **Message Storage Pattern** (server/src/store/index.ts:497-536):\n   ```typescript\n   // Messages linked to sessions via foreign key\n   FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE\n   ```\n   Pattern: Cascading deletion, indirect user relationship\n   Opportunity: Add user_id to messages for direct ownership\n\n5. **Event Broadcasting Pattern** (server/src/sync/syncEngine.ts:193-216):\n   ```typescript\n   // Broadcasts to ALL listeners without user filtering\n   for (const listener of this.listeners) {\n     listener(event)\n   }\n   ```\n   Pattern: Global broadcast\n   Issue: Users receive events for other users' sessions",
+  "dependencies": "**Data Isolation Dependencies**:\n\n1. **Database Schema Dependencies**:\n   - bun:sqlite (Bun's built-in SQLite driver)\n   - SQLite WAL mode (line 165: PRAGMA journal_mode = WAL)\n   - Foreign key constraints enabled (line 167: PRAGMA foreign_keys = ON)\n   - Migration: ALTER TABLE needed to add user_id columns without breaking existing data\n\n2. **Authentication Dependencies**:\n   - jose (JWT verification library) - server/src/web/middleware/auth.ts:3\n   - JWT payload schema requires uid field (line 12: z.object({ uid: z.number() }))\n   - Bearer token authentication (line 24)\n\n3. **Real-time Communication Dependencies**:\n   - Socket.IO (server/src/sync/syncEngine.ts:11)\n   - SSEManager for webapp events (line 14)\n   - RpcRegistry for CLI RPC handlers (line 13)\n   - Room-based broadcasting: `session:${sessionId}` (line 575)\n\n4. **Type Dependencies**:\n   - Zod schemas for runtime validation (MetadataSchema, AgentStateSchema)\n   - TypeScript interfaces (Session, Machine, DecryptedMessage)\n   - Versioned update system (VersionedUpdateResult type)\n\n5. **CLI Integration Dependencies**:\n   - CLI_API_TOKEN environment variable (cli/src/api/auth.ts)\n   - Axios for HTTP requests (cli/src/api/api.ts:1)\n   - Local file storage at ~/.hapi/ (cli/src/persistence.ts)",
+  "integration_points": "**Critical Integration Points for User Isolation**:\n\n1. **Authentication Entry Point** (server/src/web/middleware/auth.ts:39):\n   ```typescript\n   c.set('userId', parsed.data.uid)\n   ```\n   Integration: Extract userId from JWT, propagate to all downstream operations\n   Action: Pass userId to SyncEngine methods\n\n2. **Database Query Layer** (server/src/store/index.ts):\n   - getSessions() - line 377: Add WHERE user_id = ?\n   - getSession() - line 372: Add user_id validation\n   - getMessages() - line 539: Add user_id check via session ownership\n   - addMessage() - line 497: Validate session ownership before insert\n   - updateSessionMetadata() - line 283: Add user_id WHERE clause\n   - updateSessionAgentState() - line 316: Add user_id WHERE clause\n\n3. **SyncEngine Cache Layer** (server/src/sync/syncEngine.ts):\n   - getSessions() - line 222: Filter by userId before returning\n   - getSession() - line 226: Validate user ownership\n   - getSessionMessages() - line 246: Check session ownership\n   - sendMessage() - line 540: Validate user owns session\n   - Event emission - line 193: Filter listeners by userId\n\n4. **REST API Guards** (server/src/web/routes/guards.ts:32-44):\n   ```typescript\n   export function requireSessionFromParam(c, engine, options) {\n     const sessionId = c.req.param('id')\n     // ADD: const userId = c.get('userId')\n     // ADD: Validate session belongs to userId\n   }\n   ```\n   Integration: Add user ownership validation in guards\n\n5. **Socket.IO Handlers** (server/src/socket/handlers/):\n   - cli.ts: Validate user owns session before handling messages\n   - terminal.ts: Check session ownership for terminal operations\n   - Must extract userId from socket handshake auth\n\n6. **Session/Machine Creation** (server/src/web/routes/cli.ts):\n   - POST /cli/sessions: Associate new session with c.get('userId')\n   - POST /cli/machines: Associate machine with userId\n   - Store userId in database during creation\n\n7. **Schema Migration Point** (server/src/store/index.ts:181-236):\n   ```sql\n   -- Add to initSchema():\n   ALTER TABLE sessions ADD COLUMN user_id INTEGER;\n   ALTER TABLE machines ADD COLUMN user_id INTEGER;\n   ALTER TABLE messages ADD COLUMN user_id INTEGER;\n   CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);\n   ```\n   Integration: Schema version checking + migration for existing data",
+  "constraints": "**Data Isolation Constraints**:\n\n1. **Database Constraints**:\n   - SQLite single-writer limit: WAL mode helps but not multi-user concurrent writes at scale\n   - Foreign key constraints: messages cascade delete with sessions (line 221)\n   - Index performance: Adding user_id indexes critical for multi-user query performance\n   - Migration challenge: Existing data has no user_id - need default/migration strategy\n\n2. **Architecture Constraints**:\n   - Single SyncEngine instance: In-memory cache shared globally (line 155-159)\n   - Global event broadcasting: All listeners notified regardless of user (line 193-200)\n   - No user context in Socket.IO events: Must add userId to socket metadata\n   - Session ID uniqueness: Currently globally unique, must remain unique per-user or globally\n\n3. **Authentication Constraints**:\n   - JWT-only authentication: No support for API keys or other auth methods\n   - userId must be numeric (line 12: z.number())\n   - Token validation on every request: Performance consideration for high-traffic\n   - No user table: Users managed externally (Telegram), only uid reference exists\n\n4. **Real-time Communication Constraints**:\n   - Socket.IO rooms: Currently session-based (`session:${sessionId}`), need user filtering\n   - SSE broadcasting: Broadcasts to all webapp connections (line 215), needs user filtering\n   - RPC registry: Methods registered globally, need user ownership checks (line 694-727)\n\n5. **Backward Compatibility Constraints**:\n   - CLI clients expect current API contract\n   - Database schema changes require migration without downtime\n   - Existing sessions/machines must be assigned to users (migration strategy needed)\n   - API versioning: May need /v2/ endpoints if breaking changes required\n\n6. **Data Model Constraints**:\n   - Sessions linked to machines via machine_id (line 186)\n   - Messages linked to sessions via foreign key (line 221)\n   - Metadata/agentState stored as JSON TEXT (lines 189, 192)\n   - Versioning system: metadata_version, agent_state_version for optimistic concurrency\n\n7. **Security Constraints**:\n   - No row-level security in SQLite: Must enforce in application code\n   - Trust boundary: Server trusts JWT token, CLI trusts server\n   - No encryption at rest: SQLite database plaintext (documented design choice)\n   - Session hijacking risk if userId not validated on every operation",
+  "clarification_needs": [
+    {
+      "question": "How should we handle existing sessions/machines without a user_id during migration?",
+      "context": "Current database has sessions and machines with no user association. We need a strategy to assign ownership during migration from single-user to multi-user.",
+      "options": [
+        "Create a 'default' or 'system' user (uid=0) and assign all existing data to them",
+        "Delete all existing sessions/machines and start fresh (clean slate)",
+        "Require manual user assignment via admin interface before enabling multi-user",
+        "Auto-assign to first authenticated user and mark as 'migrated' data"
+      ],
+      "recommended": 0
+    },
+    {
+      "question": "Should user_id be added to the messages table directly or inherited via session relationship?",
+      "context": "Messages have a foreign key to sessions. We could add user_id directly to messages table or query via session.user_id. Direct column is faster but denormalized, relationship-based is normalized but requires joins.",
+      "options": [
+        "Add user_id column directly to messages table (denormalized, faster queries)",
+        "Query user_id through session relationship via JOIN (normalized, slower)",
+        "Add user_id to messages with CHECK constraint matching session.user_id (both)",
+        "Use database views to abstract the relationship (virtual denormalization)"
+      ],
+      "recommended": 2
+    },
+    {
+      "question": "How should we scope the SyncEngine in-memory cache for multi-user?",
+      "context": "SyncEngine maintains global in-memory maps for sessions and machines. With multiple users, we need to decide if cache should be user-partitioned or filtered on access.",
+      "options": [
+        "Keep global cache, filter by userId when returning results (simpler, current pattern)",
+        "Partition cache into per-user Maps (Map<userId, Map<sessionId, Session>>)",
+        "Create separate SyncEngine instance per userId (complete isolation)",
+        "Use LRU cache with user-scoped keys (sessionId:userId composite keys)"
+      ],
+      "recommended": 0
+    },
+    {
+      "question": "What should happen when a user tries to access another user's session?",
+      "context": "Once multi-user is implemented, users might attempt to access sessions they don't own (malicious or accidental). We need consistent error handling.",
+      "options": [
+        "Return 404 Not Found (hide existence of other users' sessions)",
+        "Return 403 Forbidden (explicit permission denial)",
+        "Return 401 Unauthorized and force re-authentication",
+        "Log security event and return generic error message"
+      ],
+      "recommended": 0
+    }
+  ],
+  "_metadata": {
+    "timestamp": "2025-12-27T09:06:00.000Z",
+    "task_description": "GOAL: Add multi-user support to HAPI with data isolation\nSCOPE: User authentication system, session management, data isolation layer, migration from single-user to multi-user architecture\nCONTEXT: Current HAPI implementation is designed for single personal user, need to extend to support multiple users with isolated data access",
+    "source": "cli-explore-agent",
+    "exploration_angle": "dataflow",
+    "exploration_index": 3,
+    "total_explorations": 4,
+    "duration_seconds": 180
+  }
+}
