@@ -233,4 +233,21 @@ export class ApiClient {
             body: JSON.stringify({ directory, agent })
         })
     }
+
+    async getCliTokens(): Promise<{ tokens: Array<{ id: string; name: string | null; created_at: number; last_used_at: number | null }> }> {
+        return await this.request(`/api/cli-tokens`)
+    }
+
+    async generateCliToken(name?: string): Promise<{ id: string; token: string; name: string | null; created_at: number }> {
+        return await this.request(`/api/cli-tokens`, {
+            method: 'POST',
+            body: JSON.stringify({ name })
+        })
+    }
+
+    async revokeCliToken(tokenId: string): Promise<void> {
+        await this.request(`/api/cli-tokens/${encodeURIComponent(tokenId)}`, {
+            method: 'DELETE'
+        })
+    }
 }
