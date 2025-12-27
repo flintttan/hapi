@@ -49,18 +49,30 @@ export async function initializeToken(): Promise<void> {
 async function promptForToken(): Promise<string> {
     const rl = readline.createInterface({ input, output })
 
-    console.log(chalk.yellow('\nNo CLI_API_TOKEN found.'))
-    console.log(chalk.gray('Where to find the token:'))
-    console.log(chalk.gray('  1. Check the server startup logs (first run shows generated token)'))
-    console.log(chalk.gray('  2. Read ~/.hapi/settings.json on the server'))
-    console.log(chalk.gray('  3. Ask your server administrator (if token is set via env var)\n'))
+    console.log(chalk.bold.cyan('\n🚀 Welcome to HAPI CLI!\n'))
+    console.log(chalk.yellow('No CLI_API_TOKEN found. Let\'s get you set up.\n'))
+
+    console.log(chalk.bold('Quick Setup:'))
+    console.log(chalk.cyan('  Run: hapi auth setup'))
+    console.log(chalk.gray('  This will guide you through the complete setup process.\n'))
+
+    console.log(chalk.bold('Or enter your token now:'))
+    console.log(chalk.gray('How to get your token:'))
+    console.log(chalk.gray('  1. Open your HAPI server URL in a browser'))
+    console.log(chalk.gray('  2. Register or login to your account'))
+    console.log(chalk.gray('  3. Click your avatar and select "Manage CLI Tokens"'))
+    console.log(chalk.gray('  4. Generate a new token and copy it\n'))
 
     try {
-        const token = await rl.question(chalk.cyan('Enter CLI_API_TOKEN: '))
+        const token = await rl.question(chalk.cyan('Enter CLI_API_TOKEN (or press Ctrl+C to exit and run "hapi auth setup"): '))
         if (!token.trim()) {
             throw new Error('Token cannot be empty')
         }
-        console.log(chalk.green(`\nToken saved to ${configuration.settingsFile}`))
+        console.log(chalk.green(`\n✅ Token saved to ${configuration.settingsFile}`))
+        console.log(chalk.gray(`\nNext steps:`))
+        console.log(chalk.gray(`  • Your machine will be registered automatically`))
+        console.log(chalk.gray(`  • You can now run: hapi`))
+        console.log(chalk.gray(`  • Manage tokens in the web interface\n`))
         return token.trim()
     } finally {
         rl.close()
