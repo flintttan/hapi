@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  hapi-server:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    image: hapi-hapi-server
+    container_name: hapi-server
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - hapi-data:/data
+    environment:
+      - NODE_ENV=production
+      - HAPI_HOME=/data
+      - WEBAPP_PORT=3006
+      - WEBAPP_URL=https://your-server.example.com
+      - CORS_ORIGINS=https://your-server.example.com
+      # Optional: Telegram integration
+      # - TELEGRAM_BOT_TOKEN=your_bot_token_here
+      # - ALLOWED_CHAT_IDS=123456789,987654321
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3006/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  hapi-data:
+    driver: local

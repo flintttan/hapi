@@ -32,3 +32,8 @@ coverage/
 .claude/settings.local.json
 localdocs/
 execplan/
+
+# Local deployment configs
+docker-compose.yml
+docker-compose.*.yml
+!docker-compose.example.yml
