@@ -169,7 +169,7 @@ CREATE TABLE cli_tokens (
 ## 部署状态
 
 ### 生产环境
-- **URL**: https://hapi.420224.xyz/
+- **URL**: https://your-server.example.com/
 - **状态**: ✅ 运行正常
 - **健康检查**: ✅ 通过
 - **移动端**: ✅ UI 正常
@@ -186,7 +186,7 @@ CREATE TABLE cli_tokens (
 ### 新用户上手流程
 
 1. **注册账户**
-   - 访问 https://hapi.420224.xyz/
+   - 访问 https://your-server.example.com/
    - 点击 Register
    - 填写用户名、密码（可选邮箱）
    - 提交注册
@@ -205,7 +205,7 @@ CREATE TABLE cli_tokens (
 4. **配置 CLI**
    ```bash
    ./hapi auth setup
-   # 输入 Server URL: https://hapi.420224.xyz
+   # 输入 Server URL: https://your-server.example.com
    # 输入 CLI Token: (粘贴复制的 Token)
    ```
 

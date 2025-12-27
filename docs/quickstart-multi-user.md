@@ -4,12 +4,12 @@
 
 ## 前提条件
 
-- HAPI Server 已部署并运行（例如：https://hapi.420224.xyz/）
+- HAPI Server 已部署并运行（例如：https://your-server.example.com/）
 - 您可以访问该服务器的 Web 界面
 
 ## 步骤 1: 注册账户
 
-1. 在浏览器中打开 HAPI Server URL（例如：https://hapi.420224.xyz/）
+1. 在浏览器中打开 HAPI Server URL（例如：https://your-server.example.com/）
 2. 点击 "Register" 注册新账户
 3. 填写以下信息：
    - **Username**: 您的用户名（唯一）
@@ -88,7 +88,7 @@ Invoke-WebRequest -Uri https://github.com/tiann/hapi/releases/download/v0.2.1/ha
 
 按照提示输入：
 
-1. **Server URL**: HAPI Server 的完整 URL（例如：`https://hapi.420224.xyz`）
+1. **Server URL**: HAPI Server 的完整 URL（例如：`https://your-server.example.com`）
    - 必须包含 `http://` 或 `https://`
    - 默认端口 3006
 
@@ -108,7 +108,7 @@ Invoke-WebRequest -Uri https://github.com/tiann/hapi/releases/download/v0.2.1/ha
 ```
 Direct Connect Status
 
-  HAPI_SERVER_URL: https://hapi.420224.xyz
+  HAPI_SERVER_URL: https://your-server.example.com
   CLI_API_TOKEN: set
   Token Source: settings file
   Machine ID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
@@ -196,7 +196,7 @@ Direct Connect Status
 您也可以通过环境变量配置（优先级高于 settings.json）：
 
 ```bash
-export HAPI_SERVER_URL="https://hapi.420224.xyz"
+export HAPI_SERVER_URL="https://your-server.example.com"
 export CLI_API_TOKEN="your-token-here"
 ./hapi
 ```
@@ -231,7 +231,7 @@ export HAPI_HOME="$HOME/custom-hapi-dir"
 ### 无法连接到服务器
 
 1. 检查服务器 URL 是否正确：`./hapi auth status`
-2. 验证服务器是否运行：`curl https://hapi.420224.xyz/`
+2. 验证服务器是否运行：`curl https://your-server.example.com/`
 3. 检查网络连接和防火墙设置
 
 ### Machine ID 冲突
