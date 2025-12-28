@@ -5,11 +5,11 @@
   "author": "Kirill Dubovitskiy & weishu",
   "license": "MIT",
   "type": "module",
-  "homepage": "https://github.com/tiann/hapi",
-  "bugs": "https://github.com/tiann/hapi/issues",
+  "homepage": "https://github.com/flintttan/hapi",
+  "bugs": "https://github.com/flintttan/hapi/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/tiann/hapi",
+    "url": "https://github.com/flintttan/hapi",
     "directory": "cli"
   },
   "bin": {

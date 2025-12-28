@@ -1,14 +1,23 @@
-# HAPI Docker 部署指南
+# HAPI Deployment Guide
+
+This document describes how to deploy hapi Docker images to GitHub Container Registry and publish the CLI to npm.
+
+## Quick Overview
+
+- **Docker Images**: Automatically built and pushed to GHCR on version tag push
+- **npm Package**: `@twsxtd/hapi` with platform-specific binaries
+- **GitHub Registry**: `ghcr.io/flintttan/hapi-server`
+- **Repository**: `flintttan/hapi`
+- **Automation**: GitHub Actions handles all deployments
 
 ## 部署完成状态
 
 ✅ **Docker镜像已构建并部署成功**
 
-- **镜像名称**: `hapi-hapi-server:latest`
-- **镜像ID**: `9d2c381a8ce1`
+- **镜像名称**: `ghcr.io/flintttan/hapi-server:latest`
+- **本地测试**: `hapi-hapi-server:latest`
 - **镜像大小**: 324MB
 - **构建时间**: 2025-12-28
-- **容器状态**: Running (healthy)
 
 ## 已包含的新功能
 
@@ -17,6 +26,235 @@
 - ✅ 用户名密码认证
 - ✅ 自动CLI token生成
 - ✅ 机器自动注册
+
+---
+
+# Docker Image Deployment
+
+## GitHub Container Registry (GHCR)
+
+### Automatic Deployment
+
+Docker images are automatically built and pushed when you create a version tag:
+
+```bash
+# Create and push a version tag
+git tag v0.3.1
+git push origin v0.3.1
+```
+
+This triggers `.github/workflows/docker-server.yml` which will:
+1. Build Docker images for `linux/amd64` and `linux/arm64`
+2. Push to GHCR with multiple tags:
+   - `ghcr.io/flintttan/hapi-server:v0.3.1` (version)
+   - `ghcr.io/flintttan/hapi-server:0.3` (major.minor)
+   - `ghcr.io/flintttan/hapi-server:main` (branch)
+   - `ghcr.io/flintttan/hapi-server:sha-abc123` (commit)
+
+### Manual Trigger
+
+You can also manually trigger the workflow:
+1. Go to GitHub Actions → Docker (server)
+2. Click "Run workflow"
+3. Select branch and confirm
+
+### Configuration
+
+**Workflow**: `.github/workflows/docker-server.yml`
+**Dockerfile**: `server/Dockerfile`
+**Platforms**: `linux/amd64`, `linux/arm64`
+**Registry**: `ghcr.io`
+
+### Using Published Images
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/flintttan/hapi-server:latest
+
+# Pull specific version
+docker pull ghcr.io/flintttan/hapi-server:v0.3.0
+
+# Run the container
+docker run -d \
+  -p 3006:3006 \
+  -v hapi-data:/data \
+  -e WEBAPP_PORT=3006 \
+  -e HAPI_HOME=/data \
+  ghcr.io/flintttan/hapi-server:latest
+```
+
+---
+
+# npm Package Deployment
+
+## Package Structure
+
+- **Main Package**: `@twsxtd/hapi`
+- **Platform Packages**:
+  - `@twsxtd/hapi-darwin-arm64` (macOS Apple Silicon)
+  - `@twsxtd/hapi-darwin-x64` (macOS Intel)
+  - `@twsxtd/hapi-linux-arm64` (Linux ARM64)
+  - `@twsxtd/hapi-linux-x64` (Linux x64)
+  - `@twsxtd/hapi-win32-x64` (Windows x64)
+
+## Automatic Deployment (GitHub Actions)
+
+### Prerequisites
+
+1. **Create npm Access Token**:
+   - Go to https://www.npmjs.com/settings/{username}/tokens
+   - Click "Generate New Token" → "Classic Token"
+   - Select "Automation" type
+   - Copy the token
+
+2. **Add Secret to GitHub**:
+   - Go to repository Settings → Secrets and variables → Actions
+   - Click "New repository secret"
+   - Name: `NPM_TOKEN`
+   - Value: (paste your npm token)
+   - Click "Add secret"
+
+### Release Process
+
+When you push a version tag, the release workflow will automatically:
+1. Build platform-specific binaries
+2. Create GitHub Release
+3. Publish all packages to npm
+4. Update Homebrew formula
+
+```bash
+# Complete automated release
+git tag v0.3.1
+git push origin v0.3.1
+
+# GitHub Actions will:
+# ✓ Build binaries for all platforms
+# ✓ Publish @twsxtd/hapi-{platform} packages
+# ✓ Publish @twsxtd/hapi main package
+# ✓ Create GitHub Release with downloads
+# ✓ Build and push Docker images to GHCR
+```
+
+## Manual Deployment
+
+### Using the Release Script
+
+```bash
+# Ensure you're on main branch
+git checkout main
+git pull
+
+# Login to npm
+npm login
+
+# Run complete release
+cd cli
+bun run release-all 0.3.1
+```
+
+This will:
+1. Update version in `package.json`
+2. Build all platform binaries with embedded web
+3. Publish platform packages to npm
+4. Publish main package to npm
+5. Create git commit and tag
+6. Push to GitHub
+
+### Script Options
+
+```bash
+# Dry run (preview without publishing)
+bun run release-all 0.3.1 --dry-run
+
+# Publish to npm only (skip git operations)
+bun run release-all 0.3.1 --publish-npm
+
+# Skip building (use existing binaries)
+bun run release-all 0.3.1 --skip-build
+
+# Combine options
+bun run release-all 0.3.1 --publish-npm --skip-build
+```
+
+### Publish Only to npm (After Tag Exists)
+
+If you've already pushed the tag but need to republish to npm:
+
+```bash
+cd cli
+
+# Ensure binaries are built
+bun run build:single-exe:all
+
+# Publish to npm only
+bun run release-all 0.3.1 --publish-npm --skip-build
+```
+
+---
+
+# Complete Release Workflow
+
+## Step-by-Step Guide
+
+### 1. Prepare Release
+
+```bash
+# Ensure clean working directory
+git status
+
+# Pull latest changes
+git checkout main
+git pull
+
+# Login to npm
+npm login
+
+# Verify login
+npm whoami
+```
+
+### 2. Run Release Script
+
+```bash
+cd cli
+bun run release-all 0.3.1
+```
+
+The script will:
+- ✓ Verify you're on main branch
+- ✓ Verify npm login
+- ✓ Update package.json version
+- ✓ Build all platform binaries
+- ✓ Publish platform packages
+- ✓ Publish main package
+- ✓ Update lockfile
+- ✓ Create git commit
+- ✓ Create git tag
+- ✓ Push to GitHub
+
+### 3. Verify GitHub Actions
+
+1. Go to GitHub Actions
+2. Check "Release" workflow (creates GitHub Release)
+3. Check "Docker (server)" workflow (builds and pushes images)
+4. Both should complete successfully
+
+### 4. Verify Deployment
+
+```bash
+# Check npm package
+npm view @twsxtd/hapi
+
+# Check Docker image
+docker pull ghcr.io/flintttan/hapi-server:v0.3.1
+
+# Check GitHub Release
+# Visit: https://github.com/flintttan/hapi/releases/tag/v0.3.1
+```
+
+---
+
+# Local Development & Testing
 
 ## 服务信息
 

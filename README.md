@@ -37,7 +37,7 @@ npm install -g @twsxtd/hapi
 
 ### Prebuilt binary
 
-Download from [Releases](https://github.com/tiann/hapi/releases).
+Download from [Releases](https://github.com/flintttan/hapi/releases).
 
 **macOS users**: Remove the quarantine attribute before running:
 
@@ -50,13 +50,13 @@ xattr -d com.apple.quarantine ./hapi
 Pull the pre-built image from GitHub Container Registry:
 
 ```bash
-docker pull ghcr.io/tiann/hapi-server:latest
+docker pull ghcr.io/flintttan/hapi-server:latest
 ```
 
 Run the server:
 
 ```bash
-docker run -d --name hapi -p 3006:3006 -v hapi-data:/data ghcr.io/tiann/hapi-server:latest
+docker run -d --name hapi -p 3006:3006 -v hapi-data:/data ghcr.io/flintttan/hapi-server:latest
 ```
 
 <details>
@@ -82,7 +82,7 @@ docker run -d \
   -e WEBAPP_URL="https://your-domain.example" \
   -e TELEGRAM_BOT_TOKEN="your-bot-token" \
   -e ALLOWED_CHAT_IDS="12345678" \
-  ghcr.io/tiann/hapi-server:latest
+  ghcr.io/flintttan/hapi-server:latest
 ```
 
 #### Build from Source

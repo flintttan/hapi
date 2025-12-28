@@ -40,7 +40,7 @@
 **ARM64 (M1/M2/M3 芯片)**:
 ```bash
 # 从 Releases 页面下载
-curl -L -o hapi https://github.com/tiann/hapi/releases/download/v0.2.1/hapi-darwin-arm64
+curl -L -o hapi https://github.com/flintttan/hapi/releases/download/v0.2.1/hapi-darwin-arm64
 chmod +x hapi
 
 # 移除 macOS 隔离属性
@@ -49,7 +49,7 @@ xattr -d com.apple.quarantine ./hapi
 
 **x64 (Intel 芯片)**:
 ```bash
-curl -L -o hapi https://github.com/tiann/hapi/releases/download/v0.2.1/hapi-darwin-x64
+curl -L -o hapi https://github.com/flintttan/hapi/releases/download/v0.2.1/hapi-darwin-x64
 chmod +x hapi
 xattr -d com.apple.quarantine ./hapi
 ```
@@ -58,13 +58,13 @@ xattr -d com.apple.quarantine ./hapi
 
 **ARM64**:
 ```bash
-curl -L -o hapi https://github.com/tiann/hapi/releases/download/v0.2.1/hapi-linux-arm64
+curl -L -o hapi https://github.com/flintttan/hapi/releases/download/v0.2.1/hapi-linux-arm64
 chmod +x hapi
 ```
 
 **x64**:
 ```bash
-curl -L -o hapi https://github.com/tiann/hapi/releases/download/v0.2.1/hapi-linux-x64
+curl -L -o hapi https://github.com/flintttan/hapi/releases/download/v0.2.1/hapi-linux-x64
 chmod +x hapi
 ```
 
@@ -73,10 +73,10 @@ chmod +x hapi
 **x64**:
 ```powershell
 # 从 Releases 页面下载 hapi-windows-x64.exe
-Invoke-WebRequest -Uri https://github.com/tiann/hapi/releases/download/v0.2.1/hapi-windows-x64.exe -OutFile hapi.exe
+Invoke-WebRequest -Uri https://github.com/flintttan/hapi/releases/download/v0.2.1/hapi-windows-x64.exe -OutFile hapi.exe
 ```
 
-或直接访问 [Releases 页面](https://github.com/tiann/hapi/releases) 下载。
+或直接访问 [Releases 页面](https://github.com/flintttan/hapi/releases) 下载。
 
 ## 步骤 4: 配置 CLI
 
@@ -272,7 +272,7 @@ export HAPI_HOME="$HOME/custom-hapi-dir"
 
 ## 获得帮助
 
-- 查看 [GitHub Issues](https://github.com/tiann/hapi/issues)
-- 查看 [文档](https://github.com/tiann/hapi)
+- 查看 [GitHub Issues](https://github.com/flintttan/hapi/issues)
+- 查看 [文档](https://github.com/flintttan/hapi)
 - 运行 `./hapi --help` 查看所有命令
 - 运行 `./hapi doctor` 进行系统诊断
