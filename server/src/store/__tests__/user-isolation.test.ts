@@ -1,4 +1,4 @@
-import { describe, test, expect, beforeEach, afterEach } from 'vitest'
+import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import { Store } from '../index'
 import { rmSync } from 'node:fs'
 

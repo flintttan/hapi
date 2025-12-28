@@ -3,20 +3,14 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAppContext } from '@/lib/app-context'
-import type { AuthResponse } from '@/types/api'
+import type { AuthResponse, CliTokenInfo } from '@/types/api'
 import { Spinner } from '@/components/Spinner'
 
 type UserMenuProps = {
     user: AuthResponse['user']
     onLogout?: () => void
 }
-
-type CliToken = {
-    id: string
-    name: string | null
-    created_at: number
-    last_used_at: number | null
-}
+type CliToken = CliTokenInfo
 
 export function UserMenu({ user, onLogout }: UserMenuProps) {
     const [isOpen, setIsOpen] = useState(false)
@@ -31,13 +25,7 @@ export function UserMenu({ user, onLogout }: UserMenuProps) {
         queryKey: ['cli-tokens'],
         queryFn: async () => {
             if (!api) throw new Error('No API client')
-            const response = await fetch(`${api.baseUrl}/api/cli-tokens`, {
-                headers: {
-                    'Authorization': `Bearer ${api.token}`
-                }
-            })
-            if (!response.ok) throw new Error('Failed to fetch tokens')
-            return response.json() as Promise<{ tokens: CliToken[] }>
+            return await api.getCliTokens()
         },
         enabled: isTokenDialogOpen && Boolean(api)
     })
@@ -46,16 +34,7 @@ export function UserMenu({ user, onLogout }: UserMenuProps) {
     const generateTokenMutation = useMutation({
         mutationFn: async (name: string) => {
             if (!api) throw new Error('No API client')
-            const response = await fetch(`${api.baseUrl}/api/cli-tokens`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${api.token}`,
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ name: name || undefined })
-            })
-            if (!response.ok) throw new Error('Failed to generate token')
-            return response.json() as Promise<{ id: string; token: string; name: string | null; created_at: number }>
+            return await api.createCliToken(name)
         },
         onSuccess: (data) => {
             setGeneratedToken({ token: data.token, name: data.name })
@@ -68,13 +47,7 @@ export function UserMenu({ user, onLogout }: UserMenuProps) {
     const revokeTokenMutation = useMutation({
         mutationFn: async (tokenId: string) => {
             if (!api) throw new Error('No API client')
-            const response = await fetch(`${api.baseUrl}/api/cli-tokens/${tokenId}`, {
-                method: 'DELETE',
-                headers: {
-                    'Authorization': `Bearer ${api.token}`
-                }
-            })
-            if (!response.ok) throw new Error('Failed to revoke token')
+            await api.revokeCliToken(tokenId)
         },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['cli-tokens'] })
@@ -192,7 +165,7 @@ export function UserMenu({ user, onLogout }: UserMenuProps) {
                                     Copy Token
                                 </Button>
                                 <div className="text-xs text-red-600">
-                                    ⚠️ Save this token now - it won't be shown again!
+                                    Save this token now — it won't be shown again.
                                 </div>
                             </div>
                         </div>

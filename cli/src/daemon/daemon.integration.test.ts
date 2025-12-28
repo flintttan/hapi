@@ -48,37 +48,9 @@ async function waitFor(
   throw new Error('Timeout waiting for condition');
 }
 
-// Check if dev server is running and properly configured
-async function isServerHealthy(): Promise<boolean> {
-  try {
-    if (!configuration.cliApiToken) {
-      console.log('[TEST] Missing CLI_API_TOKEN (required for direct-connect integration tests)');
-      return false;
-    }
+const integrationEnabled = process.env.HAPI_DAEMON_INTEGRATION === '1'
 
-    const url = `${configuration.serverUrl}/cli/machines/__healthcheck__`;
-    const response = await fetch(url, {
-      headers: { Authorization: `Bearer ${configuration.cliApiToken}` },
-      signal: AbortSignal.timeout(1000)
-    });
-
-    if (response.status === 401) {
-      console.log('[TEST] Bot health check failed: invalid CLI_API_TOKEN');
-      return false;
-    }
-    if (response.status === 503) {
-      console.log('[TEST] Bot health check failed: bot not ready (503)');
-      return false;
-    }
-    
-    return true;
-  } catch (error) {
-    console.log('[TEST] Bot not reachable:', error);
-    return false;
-  }
-}
-
-describe.skipIf(!await isServerHealthy())('Daemon Integration Tests', { timeout: 20_000 }, () => {
+describe.skipIf(!integrationEnabled)('Daemon Integration Tests', { timeout: 20_000 }, () => {
   let daemonPid: number;
 
   beforeEach(async () => {

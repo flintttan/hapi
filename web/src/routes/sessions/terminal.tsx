@@ -64,6 +64,7 @@ export default function TerminalPage() {
         connect,
         write,
         resize,
+        close,
         disconnect,
         onOutput,
         onExit
@@ -83,9 +84,18 @@ export default function TerminalPage() {
         onExit((code, signal) => {
             setExitInfo({ code, signal })
             terminalRef.current?.write(`\r\n[process exited${code !== null ? ` with code ${code}` : ''}]`)
-            connectOnceRef.current = false
         })
     }, [onExit])
+
+    const handleRetry = useCallback(() => {
+        const size = lastSizeRef.current
+        if (!size) {
+            return
+        }
+        setExitInfo(null)
+        connectOnceRef.current = true
+        connect(size.cols, size.rows)
+    }, [connect])
 
     const handleTerminalMount = useCallback((terminal: Terminal) => {
         terminalRef.current = terminal
@@ -126,16 +136,18 @@ export default function TerminalPage() {
     useEffect(() => {
         connectOnceRef.current = false
         setExitInfo(null)
+        close()
         disconnect()
-    }, [sessionId, disconnect])
+    }, [sessionId, close, disconnect])
 
     useEffect(() => {
         return () => {
             inputDisposableRef.current?.dispose()
             connectOnceRef.current = false
+            close()
             disconnect()
         }
-    }, [disconnect])
+    }, [close, disconnect])
 
     useEffect(() => {
         if (session?.active === false) {
@@ -146,7 +158,6 @@ export default function TerminalPage() {
 
     useEffect(() => {
         if (terminalState.status === 'error') {
-            connectOnceRef.current = false
             return
         }
         if (terminalState.status === 'connecting' || terminalState.status === 'connected') {
@@ -198,6 +209,17 @@ export default function TerminalPage() {
                     <div className="rounded-md border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-3 text-xs text-[var(--app-badge-error-text)]">
                         {errorMessage}
                     </div>
+                    {session.active ? (
+                        <div className="mt-2 flex justify-end">
+                            <button
+                                type="button"
+                                onClick={handleRetry}
+                                className="rounded-md bg-[var(--app-link)] px-3 py-1.5 text-xs font-semibold text-white"
+                            >
+                                Retry
+                            </button>
+                        </div>
+                    ) : null}
                 </div>
             ) : null}
 

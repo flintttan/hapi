@@ -18,7 +18,7 @@ export type ConnectionStatus = 'disconnected' | 'connected'
 
 export const MetadataSchema = z.object({
     path: z.string(),
-    host: z.string(),
+    host: z.string().optional().default('unknown'),
     version: z.string().optional(),
     name: z.string().optional(),
     os: z.string().optional(),
@@ -226,16 +226,38 @@ export class SyncEngine {
     }
 
     getSessions(userId: string): Session[] {
-        return Array.from(this.sessions.values()).filter(s =>
-            s.userId === userId
-        )
+        const stored = this.store.getSessions(userId)
+        const sessions: Session[] = []
+        for (const row of stored) {
+            const cached = this.sessions.get(row.id)
+            if (cached && cached.userId === userId) {
+                sessions.push(cached)
+                continue
+            }
+            const refreshed = this.refreshSession(row.id)
+            if (refreshed && refreshed.userId === userId) {
+                sessions.push(refreshed)
+            }
+        }
+        return sessions
     }
 
     getSession(sessionId: string, userId: string): Session | undefined {
         const session = this.sessions.get(sessionId)
-        if (!session) return undefined
-        if (session.userId !== userId) return undefined
-        return session
+        if (session) {
+            return session.userId === userId ? session : undefined
+        }
+
+        // Cold-cache path: verify ownership in Store first, then refresh cache.
+        const stored = this.store.getSession(sessionId, userId)
+        if (!stored) {
+            return undefined
+        }
+        const refreshed = this.refreshSession(sessionId)
+        if (!refreshed) {
+            return undefined
+        }
+        return refreshed.userId === userId ? refreshed : undefined
     }
 
     /**
@@ -246,21 +268,50 @@ export class SyncEngine {
         return this.sessions.get(sessionId)
     }
 
+    /**
+     * Internal use only - returns all cached sessions without user isolation.
+     * Intended for trusted components like the Telegram bot UI helpers.
+     */
+    _unsafeGetSessions(): Session[] {
+        return Array.from(this.sessions.values())
+    }
+
     getActiveSessions(userId: string): Session[] {
         return this.getSessions(userId).filter(s => s.active)
     }
 
     getMachines(userId: string): Machine[] {
-        return Array.from(this.machines.values()).filter(m =>
-            m.userId === userId
-        )
+        const stored = this.store.getMachines(userId)
+        const machines: Machine[] = []
+        for (const row of stored) {
+            const cached = this.machines.get(row.id)
+            if (cached && cached.userId === userId) {
+                machines.push(cached)
+                continue
+            }
+            const refreshed = this.refreshMachine(row.id)
+            if (refreshed && refreshed.userId === userId) {
+                machines.push(refreshed)
+            }
+        }
+        return machines
     }
 
     getMachine(machineId: string, userId: string): Machine | undefined {
         const machine = this.machines.get(machineId)
-        if (!machine) return undefined
-        if (machine.userId !== userId) return undefined
-        return machine
+        if (machine) {
+            return machine.userId === userId ? machine : undefined
+        }
+
+        const stored = this.store.getMachine(machineId, userId)
+        if (!stored) {
+            return undefined
+        }
+        const refreshed = this.refreshMachine(machineId)
+        if (!refreshed) {
+            return undefined
+        }
+        return refreshed.userId === userId ? refreshed : undefined
     }
 
     getOnlineMachines(userId: string): Machine[] {
@@ -347,6 +398,7 @@ export class SyncEngine {
             || (now - lastBroadcastAt > 10_000)
 
         if (shouldBroadcast) {
+            this.store.updateSession(session.id, { active: true }, session.userId)
             this.lastBroadcastAtBySessionId.set(session.id, now)
             this.emit({
                 type: 'session-updated',
@@ -371,6 +423,7 @@ export class SyncEngine {
         session.thinking = false
         session.thinkingAt = t
 
+        this.store.updateSession(session.id, { active: false }, session.userId)
         this.emit({
             type: 'session-updated',
             sessionId: session.id,
@@ -394,6 +447,7 @@ export class SyncEngine {
         const lastBroadcastAt = this.lastBroadcastAtByMachineId.get(machine.id) ?? 0
         const shouldBroadcast = (!wasActive && machine.active) || (now - lastBroadcastAt > 10_000)
         if (shouldBroadcast) {
+            this.store.updateMachine(machine.id, { active: true }, machine.userId)
             this.lastBroadcastAtByMachineId.set(machine.id, now)
             this.emit({
                 type: 'machine-updated',
@@ -414,6 +468,7 @@ export class SyncEngine {
             if (now - session.activeAt <= sessionTimeoutMs) continue
             session.active = false
             session.thinking = false
+            this.store.updateSession(session.id, { active: false }, session.userId)
             this.emit({
                 type: 'session-updated',
                 sessionId: session.id,
@@ -426,6 +481,7 @@ export class SyncEngine {
             if (!machine.active) continue
             if (now - machine.activeAt <= machineTimeoutMs) continue
             machine.active = false
+            this.store.updateMachine(machine.id, { active: false }, machine.userId)
             this.emit({
                 type: 'machine-updated',
                 machineId: machine.id,
@@ -433,6 +489,22 @@ export class SyncEngine {
                 data: { active: false }
             })
         }
+    }
+
+    deleteSession(sessionId: string, userId: string): boolean {
+        const deleted = this.store.deleteSession(sessionId, userId)
+        if (!deleted) {
+            return false
+        }
+
+        this.sessions.delete(sessionId)
+        this.sessionMessages.delete(sessionId)
+        this.emit({
+            type: 'session-removed',
+            sessionId,
+            userId
+        })
+        return true
     }
 
     private refreshSession(sessionId: string): Session | null {

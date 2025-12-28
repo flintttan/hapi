@@ -12,7 +12,7 @@ import type { SyncEvent } from '../sync/syncEngine'
 import { TerminalRegistry } from './terminalRegistry'
 
 const jwtPayloadSchema = z.object({
-    uid: z.number()
+    uid: z.string()
 })
 
 const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60_000
@@ -113,7 +113,8 @@ export function createSocketServer(deps: SocketServerDeps): {
 
         // Fallback to hardcoded token for backward compatibility
         if (safeCompareStrings(token, configuration.cliApiToken)) {
-            const cliUser = deps.store.getUserById('cli-user')
+            const defaultCliUserId = deps.store.getDefaultCliUserId()
+            const cliUser = deps.store.getUserById(defaultCliUserId)
             if (cliUser) {
                 socket.handshake.auth = {
                     ...auth,
@@ -161,7 +162,7 @@ export function createSocketServer(deps: SocketServerDeps): {
     })
     terminalNs.on('connection', (socket) => registerTerminalHandlers(socket, {
         io,
-        getSession: (sessionId) => deps.getSession?.(sessionId) ?? deps.store.getSession(sessionId),
+        getSession: (sessionId) => deps.getSession?.(sessionId) ?? deps.store._unsafeGetSession(sessionId),
         terminalRegistry,
         maxTerminalsPerSocket,
         maxTerminalsPerSession

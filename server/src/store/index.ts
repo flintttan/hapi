@@ -94,6 +94,7 @@ type DbSessionRow = {
     active: number
     active_at: number | null
     seq: number
+    user_id: string
 }
 
 type DbMachineRow = {
@@ -107,6 +108,7 @@ type DbMachineRow = {
     active: number
     active_at: number | null
     seq: number
+    user_id: string
 }
 
 type DbMessageRow = {
@@ -218,12 +220,45 @@ export class Store {
         }
     }
 
+    /**
+     * Returns the "default" user to associate with the legacy shared CLI_API_TOKEN.
+     *
+     * In single-user deployments, people often:
+     * - register/login with username/password, and
+     * - run `hapi daemon start` with the shared CLI_API_TOKEN.
+     *
+     * If we always map CLI_API_TOKEN to the system `cli-user`, web users would not be able to see
+     * their sessions/machines unless they switch to per-user CLI tokens. To keep the out-of-box
+     * experience working, we map CLI_API_TOKEN to the oldest non-system user when one exists.
+     *
+     * Multi-user setups should prefer per-user CLI tokens (stored in `cli_tokens`) instead.
+     */
+    getDefaultCliUserId(): string {
+        const row = this.db.prepare(`
+            SELECT id
+            FROM users
+            WHERE id NOT IN ('admin-user', 'cli-user')
+            AND (
+                password_hash IS NOT NULL
+                OR telegram_id IS NOT NULL
+            )
+            ORDER BY created_at ASC
+            LIMIT 1
+        `).get() as { id: string } | undefined
+
+        return row?.id ?? 'cli-user'
+    }
+
     private initSchema(): void {
+        // Create tables first (no indices here) so legacy DB migrations can safely add missing columns
+        // before creating indexes that reference them.
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS users (
                 id TEXT PRIMARY KEY,
                 telegram_id TEXT UNIQUE,
                 username TEXT NOT NULL,
+                email TEXT,
+                password_hash TEXT,
                 created_at INTEGER NOT NULL
             );
 
@@ -245,8 +280,6 @@ export class Store {
                 user_id TEXT NOT NULL DEFAULT 'admin-user',
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
-            CREATE INDEX IF NOT EXISTS idx_sessions_tag ON sessions(tag);
-            CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 
             CREATE TABLE IF NOT EXISTS machines (
                 id TEXT NOT NULL,
@@ -263,7 +296,6 @@ export class Store {
                 PRIMARY KEY (id, user_id),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
-            CREATE INDEX IF NOT EXISTS idx_machines_user_id ON machines(user_id);
 
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
@@ -274,8 +306,6 @@ export class Store {
                 local_id TEXT,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
-            CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_local_id ON messages(session_id, local_id) WHERE local_id IS NOT NULL;
 
             CREATE TABLE IF NOT EXISTS cli_tokens (
                 id TEXT PRIMARY KEY,
@@ -286,45 +316,95 @@ export class Store {
                 last_used_at INTEGER,
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
-            CREATE INDEX IF NOT EXISTS idx_cli_tokens_user_id ON cli_tokens(user_id);
         `)
 
-        const sessionColumns = this.db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
-        const sessionColumnNames = new Set(sessionColumns.map((c) => c.name))
+        const getColumnNames = (table: string): Set<string> => {
+            const rows = this.db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
+            return new Set(rows.map((c) => c.name))
+        }
 
+        // users: add columns for legacy DBs
+        const userColumnNames = getColumnNames('users')
+        if (!userColumnNames.has('password_hash')) {
+            this.db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT')
+        }
+        if (!userColumnNames.has('email')) {
+            this.db.exec('ALTER TABLE users ADD COLUMN email TEXT')
+        }
+        this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL')
+
+        // Ensure system users exist (used for legacy rows and CLI_API_TOKEN auth).
+        const now = Date.now()
+        const insertSystemUser = this.db.prepare(`
+            INSERT OR IGNORE INTO users (id, telegram_id, username, email, password_hash, created_at)
+            VALUES (@id, NULL, @username, NULL, NULL, @created_at)
+        `)
+        insertSystemUser.run({ id: 'admin-user', username: 'Admin', created_at: now })
+        insertSystemUser.run({ id: 'cli-user', username: 'CLI User', created_at: now })
+
+        // sessions: add columns for legacy DBs (multi-user + todos)
+        const sessionColumnNames = getColumnNames('sessions')
+        if (!sessionColumnNames.has('user_id')) {
+            this.db.exec(`ALTER TABLE sessions ADD COLUMN user_id TEXT NOT NULL DEFAULT 'admin-user'`)
+        }
         if (!sessionColumnNames.has('todos')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN todos TEXT')
         }
         if (!sessionColumnNames.has('todos_updated_at')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN todos_updated_at INTEGER')
         }
-
-        // Add password_hash and email columns to users table if they don't exist
-        const userColumns = this.db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>
-        const userColumnNames = new Set(userColumns.map((c) => c.name))
-
-        if (!userColumnNames.has('password_hash')) {
-            this.db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT')
+        if (!sessionColumnNames.has('metadata_version')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN metadata_version INTEGER NOT NULL DEFAULT 1')
         }
-        if (!userColumnNames.has('email')) {
-            // SQLite doesn't allow adding UNIQUE columns via ALTER TABLE
-            // Add without UNIQUE first
-            this.db.exec('ALTER TABLE users ADD COLUMN email TEXT')
-            // Then create a unique index for existing databases
-            try {
-                this.db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL')
-            } catch {
-                // Index might already exist, ignore error
-            }
+        if (!sessionColumnNames.has('agent_state_version')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN agent_state_version INTEGER NOT NULL DEFAULT 1')
+        }
+        if (!sessionColumnNames.has('active')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN active INTEGER NOT NULL DEFAULT 0')
+        }
+        if (!sessionColumnNames.has('active_at')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN active_at INTEGER')
+        }
+        if (!sessionColumnNames.has('seq')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN seq INTEGER NOT NULL DEFAULT 0')
         }
 
-        // Migrate machines table to composite primary key (id, user_id) for multi-user support
-        // Check if machines table needs migration
-        const machinesTableInfo = this.db.prepare('SELECT sql FROM sqlite_master WHERE type = ? AND name = ?').get('table', 'machines') as { sql: string } | undefined
-        if (machinesTableInfo && machinesTableInfo.sql.includes('id TEXT PRIMARY KEY')) {
-            // Old schema detected - needs migration
+        // machines: add columns for legacy DBs, then migrate PK if needed
+        const machineColumnNames = getColumnNames('machines')
+        if (!machineColumnNames.has('user_id')) {
+            this.db.exec(`ALTER TABLE machines ADD COLUMN user_id TEXT NOT NULL DEFAULT 'admin-user'`)
+        }
+        if (!machineColumnNames.has('metadata')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN metadata TEXT')
+        }
+        if (!machineColumnNames.has('metadata_version')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN metadata_version INTEGER NOT NULL DEFAULT 1')
+        }
+        if (!machineColumnNames.has('daemon_state')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN daemon_state TEXT')
+        }
+        if (!machineColumnNames.has('daemon_state_version')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN daemon_state_version INTEGER NOT NULL DEFAULT 1')
+        }
+        if (!machineColumnNames.has('active')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN active INTEGER NOT NULL DEFAULT 0')
+        }
+        if (!machineColumnNames.has('active_at')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN active_at INTEGER')
+        }
+        if (!machineColumnNames.has('seq')) {
+            this.db.exec('ALTER TABLE machines ADD COLUMN seq INTEGER NOT NULL DEFAULT 0')
+        }
+
+        const machinesTableInfo = this.db.prepare(
+            'SELECT sql FROM sqlite_master WHERE type = ? AND name = ?'
+        ).get('table', 'machines') as { sql: string } | undefined
+        const machinesSql = machinesTableInfo?.sql ?? ''
+        const hasCompositePrimaryKey = machinesSql.includes('PRIMARY KEY (id, user_id)')
+        if (!hasCompositePrimaryKey) {
+            // Rebuild machines table to enforce composite PK for multi-user support.
             this.db.exec(`
-                -- Create new machines table with composite primary key
+                DROP TABLE IF EXISTS machines_new;
                 CREATE TABLE machines_new (
                     id TEXT NOT NULL,
                     user_id TEXT NOT NULL,
@@ -341,19 +421,42 @@ export class Store {
                     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
                 );
 
-                -- Copy data from old table to new table
-                INSERT INTO machines_new SELECT * FROM machines;
+                INSERT INTO machines_new (
+                    id, user_id, created_at, updated_at,
+                    metadata, metadata_version,
+                    daemon_state, daemon_state_version,
+                    active, active_at, seq
+                )
+                SELECT
+                    id, user_id, created_at, updated_at,
+                    metadata, metadata_version,
+                    daemon_state, daemon_state_version,
+                    active, active_at, seq
+                FROM machines;
 
-                -- Drop old table
                 DROP TABLE machines;
-
-                -- Rename new table to original name
                 ALTER TABLE machines_new RENAME TO machines;
-
-                -- Recreate index
-                CREATE INDEX idx_machines_user_id ON machines(user_id);
             `)
         }
+
+        // messages: add columns for legacy DBs (local_id)
+        const messageColumnNames = getColumnNames('messages')
+        if (!messageColumnNames.has('local_id')) {
+            this.db.exec('ALTER TABLE messages ADD COLUMN local_id TEXT')
+        }
+
+        // Ensure indexes after schema migrations
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_sessions_tag ON sessions(tag);
+            CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+
+            CREATE INDEX IF NOT EXISTS idx_machines_user_id ON machines(user_id);
+
+            CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_local_id ON messages(session_id, local_id) WHERE local_id IS NOT NULL;
+
+            CREATE INDEX IF NOT EXISTS idx_cli_tokens_user_id ON cli_tokens(user_id);
+        `)
     }
 
     getOrCreateSession(tag: string, metadata: unknown, agentState: unknown, userId: string): StoredSession {
@@ -581,7 +684,7 @@ export class Store {
                 UPDATE sessions
                 SET ${fields.join(', ')}
                 WHERE id = @sessionId AND user_id = @userId
-            `).run(params)
+            `).run(params as any)
 
             return result.changes === 1
         } catch {
@@ -783,7 +886,7 @@ export class Store {
                 UPDATE machines
                 SET ${fields.join(', ')}
                 WHERE id = @machineId AND user_id = @userId
-            `).run(params)
+            `).run(params as any)
 
             return result.changes === 1
         } catch {
@@ -912,7 +1015,14 @@ export class Store {
         return this.getMessages(sessionId, userId, limit, beforeSeq)
     }
 
-    createUser(user: Omit<User, 'created_at'> & { created_at?: number }): User {
+    createUser(user: {
+        id: string
+        telegram_id: string | null
+        username: string
+        email?: string | null
+        password_hash?: string | null
+        created_at?: number
+    }): User {
         const now = user.created_at ?? Date.now()
 
         this.db.prepare(`

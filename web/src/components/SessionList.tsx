@@ -41,6 +41,29 @@ function BulbIcon(props: { className?: string }) {
     )
 }
 
+function TrashIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <path d="M3 6h18" />
+            <path d="M8 6V4h8v2" />
+            <path d="M6 6l1 16h10l1-16" />
+            <path d="M10 11v6" />
+            <path d="M14 11v6" />
+        </svg>
+    )
+}
+
 function getSessionTitle(session: SessionSummary): string {
     if (session.metadata?.name) {
         return session.metadata.name
@@ -97,6 +120,7 @@ export function SessionList(props: {
     onSelect: (sessionId: string) => void
     onNewSession: () => void
     onRefresh: () => void
+    onDelete?: (sessionId: string) => void
     isLoading: boolean
     renderHeader?: boolean
 }) {
@@ -122,11 +146,18 @@ export function SessionList(props: {
 
             <div className="flex flex-col divide-y divide-[var(--app-divider)]">
                 {props.sessions.map((s) => (
-                    <button
+                    <div
                         key={s.id}
-                        type="button"
+                        role="button"
+                        tabIndex={0}
                         onClick={() => props.onSelect(s.id)}
-                        className="session-list-item flex w-full flex-col gap-1.5 px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault()
+                                props.onSelect(s.id)
+                            }
+                        }}
+                        className="session-list-item flex w-full cursor-pointer flex-col gap-1.5 px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                     >
                         <div className="flex items-center justify-between gap-3">
                             <div className="flex items-center gap-2 min-w-0">
@@ -154,6 +185,21 @@ export function SessionList(props: {
                                         pending {s.pendingRequestsCount}
                                     </span>
                                 ) : null}
+                                {props.onDelete ? (
+                                    <button
+                                        type="button"
+                                        onClick={(e) => {
+                                            e.preventDefault()
+                                            e.stopPropagation()
+                                            props.onDelete?.(s.id)
+                                        }}
+                                        className="rounded p-1 text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
+                                        title="Delete session"
+                                        aria-label="Delete session"
+                                    >
+                                        <TrashIcon className="h-4 w-4" />
+                                    </button>
+                                ) : null}
                             </div>
                         </div>
                         <div className="truncate text-xs text-[var(--app-hint)]">
@@ -168,7 +214,7 @@ export function SessionList(props: {
                                 return <span>{lastSeen}</span>
                             })()}
                         </div>
-                    </button>
+                    </div>
                 ))}
             </div>
         </div>

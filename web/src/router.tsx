@@ -75,6 +75,28 @@ function SessionsPage() {
         void refetch()
     }, [refetch])
 
+    const handleDeleteSession = useCallback(async (sessionId: string) => {
+        if (!api) {
+            return
+        }
+        const session = sessions.find((s) => s.id === sessionId) ?? null
+        const isActive = Boolean(session?.active)
+        const prompt = isActive
+            ? 'This session is active. Force delete it? (CLI may show errors if still running)'
+            : 'Delete this session? This cannot be undone.'
+        const confirmed = globalThis.confirm?.(prompt) ?? false
+        if (!confirmed) {
+            return
+        }
+        try {
+            await api.deleteSession(sessionId, { force: isActive })
+            await refetch()
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to delete session'
+            globalThis.alert?.(message)
+        }
+    }, [api, refetch, sessions])
+
     return (
         <div className="flex h-full flex-col">
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
@@ -109,6 +131,7 @@ function SessionsPage() {
                     })}
                     onNewSession={() => navigate({ to: '/sessions/new' })}
                     onRefresh={handleRefresh}
+                    onDelete={handleDeleteSession}
                     isLoading={isLoading}
                     renderHeader={false}
                 />

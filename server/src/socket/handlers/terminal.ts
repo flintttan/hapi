@@ -35,6 +35,7 @@ export type TerminalHandlersDeps = {
 export function registerTerminalHandlers(socket: Socket, deps: TerminalHandlersDeps): void {
     const { io, getSession, terminalRegistry, maxTerminalsPerSocket, maxTerminalsPerSession } = deps
     const cliNamespace = io.of('/cli')
+    const terminalNamespace = io.of('/terminal')
 
     const emitTerminalError = (terminalId: string, message: string) => {
         socket.emit('terminal:error', { terminalId, message })
@@ -97,6 +98,52 @@ export function registerTerminalHandlers(socket: Socket, deps: TerminalHandlersD
             return
         }
 
+        const cliSocketId = pickCliSocketId(sessionId)
+        if (!cliSocketId) {
+            emitTerminalError(terminalId, 'CLI is not connected for this session.')
+            return
+        }
+
+        const existing = terminalRegistry.get(terminalId)
+        if (existing) {
+            if (existing.sessionId !== sessionId) {
+                emitTerminalError(terminalId, 'Terminal ID is already in use.')
+                return
+            }
+
+            if (existing.socketId !== socket.id) {
+                if (terminalRegistry.countForSocket(socket.id) >= maxTerminalsPerSocket) {
+                    emitTerminalError(terminalId, `Too many terminals open (max ${maxTerminalsPerSocket}).`)
+                    return
+                }
+
+                const activeTerminalSocket = terminalNamespace.sockets.get(existing.socketId)
+                if (activeTerminalSocket) {
+                    emitTerminalError(terminalId, 'Terminal is already connected.')
+                    return
+                }
+
+                terminalRegistry.rebind(terminalId, socket.id, cliSocketId)
+            } else {
+                terminalRegistry.rebind(terminalId, socket.id, cliSocketId)
+            }
+
+            const cliSocket = cliNamespace.sockets.get(cliSocketId)
+            if (!cliSocket) {
+                emitTerminalError(terminalId, 'CLI is not connected for this session.')
+                return
+            }
+
+            cliSocket.emit('terminal:open', {
+                sessionId,
+                terminalId,
+                cols,
+                rows
+            })
+            terminalRegistry.markActivity(terminalId)
+            return
+        }
+
         if (terminalRegistry.countForSocket(socket.id) >= maxTerminalsPerSocket) {
             emitTerminalError(terminalId, `Too many terminals open (max ${maxTerminalsPerSocket}).`)
             return
@@ -104,12 +151,6 @@ export function registerTerminalHandlers(socket: Socket, deps: TerminalHandlersD
 
         if (terminalRegistry.countForSession(sessionId) >= maxTerminalsPerSession) {
             emitTerminalError(terminalId, `Too many terminals open for this session (max ${maxTerminalsPerSession}).`)
-            return
-        }
-
-        const cliSocketId = pickCliSocketId(sessionId)
-        if (!cliSocketId) {
-            emitTerminalError(terminalId, 'CLI is not connected for this session.')
             return
         }
 
@@ -201,9 +242,6 @@ export function registerTerminalHandlers(socket: Socket, deps: TerminalHandlersD
     })
 
     socket.on('disconnect', () => {
-        const removed = terminalRegistry.removeBySocket(socket.id)
-        for (const entry of removed) {
-            emitCloseToCli(entry)
-        }
+        terminalRegistry.detachBySocket(socket.id)
     })
 }

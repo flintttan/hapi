@@ -1,5 +1,7 @@
 import type {
     AuthResponse,
+    CliTokenCreateResponse,
+    CliTokensResponse,
     FileReadResponse,
     FileSearchResponse,
     GitCommandResponse,
@@ -79,7 +81,20 @@ export class ApiClient {
             throw new Error(`HTTP ${res.status} ${res.statusText}: ${body}`)
         }
 
-        return await res.json() as T
+        if (res.status === 204) {
+            return undefined as T
+        }
+
+        const text = await res.text().catch(() => '')
+        if (!text) {
+            return undefined as T
+        }
+
+        try {
+            return JSON.parse(text) as T
+        } catch {
+            throw new Error('Invalid JSON response from server.')
+        }
     }
 
     async authenticate(auth: { initData: string } | { accessToken: string } | { username: string; password: string }): Promise<AuthResponse> {
@@ -103,6 +118,16 @@ export class ApiClient {
 
     async getSession(sessionId: string): Promise<SessionResponse> {
         return await this.request<SessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}`)
+    }
+
+    async deleteSession(sessionId: string, options?: { force?: boolean }): Promise<void> {
+        const params = new URLSearchParams()
+        if (options?.force) {
+            params.set('force', 'true')
+        }
+        const qs = params.toString()
+        const url = `/api/sessions/${encodeURIComponent(sessionId)}${qs ? `?${qs}` : ''}`
+        await this.request(url, { method: 'DELETE' })
     }
 
     async getMessages(sessionId: string, options: { beforeSeq?: number | null; limit?: number }): Promise<MessagesResponse> {
@@ -154,6 +179,21 @@ export class ApiClient {
         const params = new URLSearchParams()
         params.set('path', path)
         return await this.request<FileReadResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/file?${params.toString()}`)
+    }
+
+    async getCliTokens(): Promise<CliTokensResponse> {
+        return await this.request<CliTokensResponse>('/api/cli-tokens')
+    }
+
+    async createCliToken(name?: string): Promise<CliTokenCreateResponse> {
+        return await this.request<CliTokenCreateResponse>('/api/cli-tokens', {
+            method: 'POST',
+            body: JSON.stringify({ name: name || undefined })
+        })
+    }
+
+    async revokeCliToken(tokenId: string): Promise<void> {
+        await this.request(`/api/cli-tokens/${encodeURIComponent(tokenId)}`, { method: 'DELETE' })
     }
 
     async sendMessage(sessionId: string, text: string, localId?: string | null): Promise<void> {
@@ -231,23 +271,6 @@ export class ApiClient {
         return await this.request<SpawnResponse>(`/api/machines/${encodeURIComponent(machineId)}/spawn`, {
             method: 'POST',
             body: JSON.stringify({ directory, agent })
-        })
-    }
-
-    async getCliTokens(): Promise<{ tokens: Array<{ id: string; name: string | null; created_at: number; last_used_at: number | null }> }> {
-        return await this.request(`/api/cli-tokens`)
-    }
-
-    async generateCliToken(name?: string): Promise<{ id: string; token: string; name: string | null; created_at: number }> {
-        return await this.request(`/api/cli-tokens`, {
-            method: 'POST',
-            body: JSON.stringify({ name })
-        })
-    }
-
-    async revokeCliToken(tokenId: string): Promise<void> {
-        await this.request(`/api/cli-tokens/${encodeURIComponent(tokenId)}`, {
-            method: 'DELETE'
         })
     }
 }

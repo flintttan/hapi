@@ -16,6 +16,8 @@ const USER_B = 'user-b-456'
 const SESSION_A: Session = {
     id: 'session-a',
     userId: USER_A,
+    seq: 0,
+    createdAt: Date.now(),
     active: true,
     activeAt: Date.now(),
     updatedAt: Date.now(),
@@ -23,13 +25,13 @@ const SESSION_A: Session = {
     thinkingAt: 0,
     metadata: {
         path: '/path/a',
+        host: 'host-a',
         name: 'Session A',
         userId: USER_A
     },
     metadataVersion: 1,
     agentState: null,
     agentStateVersion: 0,
-    todos: null,
     permissionMode: null,
     modelMode: null
 }
@@ -37,6 +39,8 @@ const SESSION_A: Session = {
 const SESSION_B: Session = {
     id: 'session-b',
     userId: USER_B,
+    seq: 0,
+    createdAt: Date.now(),
     active: true,
     activeAt: Date.now(),
     updatedAt: Date.now(),
@@ -44,13 +48,13 @@ const SESSION_B: Session = {
     thinkingAt: 0,
     metadata: {
         path: '/path/b',
+        host: 'host-b',
         name: 'Session B',
         userId: USER_B
     },
     metadataVersion: 1,
     agentState: null,
     agentStateVersion: 0,
-    todos: null,
     permissionMode: null,
     modelMode: null
 }
@@ -59,11 +63,16 @@ const SESSION_B: Session = {
 const MACHINE_A: Machine = {
     id: 'machine-a',
     userId: USER_A,
+    seq: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
     active: true,
     activeAt: Date.now(),
     metadata: {
-        userId: USER_A,
-        hostname: 'machine-a'
+        host: 'machine-a',
+        platform: 'test',
+        happyCliVersion: '0.0.0-test',
+        userId: USER_A
     },
     metadataVersion: 1,
     daemonState: null,
@@ -73,11 +82,16 @@ const MACHINE_A: Machine = {
 const MACHINE_B: Machine = {
     id: 'machine-b',
     userId: USER_B,
+    seq: 0,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
     active: true,
     activeAt: Date.now(),
     metadata: {
-        userId: USER_B,
-        hostname: 'machine-b'
+        host: 'machine-b',
+        platform: 'test',
+        happyCliVersion: '0.0.0-test',
+        userId: USER_B
     },
     metadataVersion: 1,
     daemonState: null,
@@ -87,15 +101,15 @@ const MACHINE_B: Machine = {
 // Mock SyncEngine
 const createMockEngine = (): SyncEngine => {
     return {
-        getSession: (sessionId: string) => {
-            if (sessionId === 'session-a') return SESSION_A
-            if (sessionId === 'session-b') return SESSION_B
-            return undefined
+        getSession: (sessionId: string, userId: string) => {
+            const session = sessionId === 'session-a' ? SESSION_A : sessionId === 'session-b' ? SESSION_B : undefined
+            if (!session) return undefined
+            return session.userId === userId ? session : undefined
         },
-        getMachine: (machineId: string) => {
-            if (machineId === 'machine-a') return MACHINE_A
-            if (machineId === 'machine-b') return MACHINE_B
-            return undefined
+        getMachine: (machineId: string, userId: string) => {
+            const machine = machineId === 'machine-a' ? MACHINE_A : machineId === 'machine-b' ? MACHINE_B : undefined
+            if (!machine) return undefined
+            return machine.userId === userId ? machine : undefined
         }
     } as unknown as SyncEngine
 }
@@ -108,19 +122,12 @@ const createMockContext = (userId?: string): Context<WebAppEnv> => {
             return undefined
         },
         json: (data: any, status?: number) => {
-            // Create a Response-like object
-            const response = {
-                data,
+            const response = new Response(JSON.stringify(data), {
                 status: status ?? 200,
-                // Add Response properties to make instanceof work
-                headers: new Headers(),
-                ok: status ? status >= 200 && status < 300 : true,
-                type: 'default' as ResponseType,
-                url: ''
-            }
-            // Make it look like a Response
-            Object.setPrototypeOf(response, Response.prototype)
-            return response as Response
+                headers: { 'Content-Type': 'application/json' }
+            })
+            ;(response as any).data = data
+            return response
         },
         req: {
             param: (name: string) => {
@@ -157,7 +164,7 @@ describe('Route Guards - Ownership Validation', () => {
             expect((result as any).status).toBe(404)
             expect((result as any).data).toEqual({ error: 'Session not found' })
             expect(mockWarn).toHaveBeenCalledWith(
-                expect.stringContaining(`User ${USER_A} attempted unauthorized access to session session-b`)
+                expect.stringContaining(`User ${USER_A} attempted to access non-existent session session-b`)
             )
         })
 
@@ -212,7 +219,7 @@ describe('Route Guards - Ownership Validation', () => {
             expect((result as any).status).toBe(404)
             expect((result as any).data).toEqual({ error: 'Machine not found' })
             expect(mockWarn).toHaveBeenCalledWith(
-                expect.stringContaining(`User ${USER_A} attempted unauthorized access to machine machine-b`)
+                expect.stringContaining(`User ${USER_A} attempted to access non-existent machine machine-b`)
             )
         })
 
@@ -322,9 +329,9 @@ describe('Route Guards - Ownership Validation', () => {
             requireSession(context, engine, 'non-existent', USER_A)
             expect(mockWarn).toHaveBeenCalledTimes(3)
 
-            // Verify log format includes userId, resourceId, and ownerId
+            // Verify log format includes userId and resourceId
             expect(mockWarn).toHaveBeenCalledWith(
-                expect.stringMatching(/\[Security\].*user.*session.*user-b/)
+                expect.stringContaining(`[Security] User ${USER_A} attempted to access non-existent session session-b`)
             )
         })
 

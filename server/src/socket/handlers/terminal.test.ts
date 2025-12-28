@@ -64,6 +64,7 @@ type Harness = {
     io: FakeServer
     terminalSocket: FakeSocket
     cliNamespace: FakeNamespace
+    terminalNamespace: FakeNamespace
     terminalRegistry: TerminalRegistry
 }
 
@@ -76,6 +77,8 @@ function createHarness(options?: {
     const terminalSocket = new FakeSocket('terminal-socket')
     const terminalRegistry = new TerminalRegistry({ idleTimeoutMs: 0 })
     const cliNamespace = io.of('/cli')
+    const terminalNamespace = io.of('/terminal')
+    terminalNamespace.sockets.set(terminalSocket.id, terminalSocket)
 
     registerTerminalHandlers(terminalSocket as unknown as Socket, {
         io: io as unknown as Server,
@@ -85,7 +88,7 @@ function createHarness(options?: {
         maxTerminalsPerSession: options?.maxTerminalsPerSession ?? 4
     })
 
-    return { io, terminalSocket, cliNamespace, terminalRegistry }
+    return { io, terminalSocket, cliNamespace, terminalNamespace, terminalRegistry }
 }
 
 function connectCliSocket(cliNamespace: FakeNamespace, cliSocket: FakeSocket, sessionId: string): void {
@@ -191,11 +194,92 @@ describe('terminal socket handlers', () => {
         terminalSocket.trigger('disconnect')
 
         const closeEvent = lastEmit(cliSocket, 'terminal:close')
-        expect(closeEvent?.data).toEqual({
+        expect(closeEvent).toBeUndefined()
+        const entry = terminalRegistry.get('terminal-1')
+        expect(entry).not.toBeNull()
+        expect(entry?.socketId).toBe('')
+    })
+
+    it('allows reattaching to an existing terminal after disconnect', () => {
+        const { io, terminalSocket, cliNamespace, terminalNamespace, terminalRegistry } = createHarness()
+        const cliSocket = new FakeSocket('cli-socket-1')
+        connectCliSocket(cliNamespace, cliSocket, 'session-1')
+
+        terminalSocket.trigger('terminal:create', {
             sessionId: 'session-1',
-            terminalId: 'terminal-1'
+            terminalId: 'terminal-1',
+            cols: 90,
+            rows: 24
         })
-        expect(terminalRegistry.get('terminal-1')).toBeNull()
+
+        terminalSocket.trigger('disconnect')
+
+        const terminalSocket2 = new FakeSocket('terminal-socket-2')
+        terminalNamespace.sockets.set(terminalSocket2.id, terminalSocket2)
+        registerTerminalHandlers(terminalSocket2 as unknown as Socket, {
+            io: io as unknown as Server,
+            getSession: () => ({ active: true }),
+            terminalRegistry,
+            maxTerminalsPerSocket: 4,
+            maxTerminalsPerSession: 4
+        })
+
+        terminalSocket2.trigger('terminal:create', {
+            sessionId: 'session-1',
+            terminalId: 'terminal-1',
+            cols: 100,
+            rows: 30
+        })
+
+        const openEvent = lastEmit(cliSocket, 'terminal:open')
+        expect(openEvent?.data).toEqual({
+            sessionId: 'session-1',
+            terminalId: 'terminal-1',
+            cols: 100,
+            rows: 30
+        })
+
+        const entry = terminalRegistry.get('terminal-1')
+        expect(entry?.socketId).toBe('terminal-socket-2')
+    })
+
+    it('rejects connecting a second web socket to an active terminal', () => {
+        const { io, terminalSocket, cliNamespace, terminalNamespace, terminalRegistry } = createHarness()
+        const cliSocket = new FakeSocket('cli-socket-1')
+        connectCliSocket(cliNamespace, cliSocket, 'session-1')
+
+        terminalSocket.trigger('terminal:create', {
+            sessionId: 'session-1',
+            terminalId: 'terminal-1',
+            cols: 90,
+            rows: 24
+        })
+
+        const terminalSocket2 = new FakeSocket('terminal-socket-2')
+        terminalNamespace.sockets.set(terminalSocket2.id, terminalSocket2)
+        registerTerminalHandlers(terminalSocket2 as unknown as Socket, {
+            io: io as unknown as Server,
+            getSession: () => ({ active: true }),
+            terminalRegistry,
+            maxTerminalsPerSocket: 4,
+            maxTerminalsPerSession: 4
+        })
+
+        terminalSocket2.trigger('terminal:create', {
+            sessionId: 'session-1',
+            terminalId: 'terminal-1',
+            cols: 100,
+            rows: 30
+        })
+
+        const errorEvent = lastEmit(terminalSocket2, 'terminal:error')
+        expect(errorEvent?.data).toEqual({
+            terminalId: 'terminal-1',
+            message: 'Terminal is already connected.'
+        })
+
+        const entry = terminalRegistry.get('terminal-1')
+        expect(entry?.socketId).toBe('terminal-socket')
     })
 
     it('enforces per-socket terminal limits', () => {

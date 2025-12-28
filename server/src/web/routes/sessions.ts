@@ -73,8 +73,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
         const getPendingCount = (s: Session) => s.agentState?.requests ? Object.keys(s.agentState.requests).length : 0
 
-        const sessions = engine.getSessions()
-            .filter(s => s.userId === userId)
+        const sessions = engine.getSessions(userId)
             .sort((a, b) => {
                 // Active sessions first
                 if (a.active !== b.active) {
@@ -203,6 +202,34 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
         await engine.setModelMode(sessionResult.sessionId, parsed.data.model)
         return c.json({ ok: true })
+    })
+
+    app.delete('/sessions/:id', (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const userId = c.get('userId') as string
+        if (!userId) {
+            return c.json({ error: 'Unauthorized' }, 401)
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, userId)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const force = c.req.query('force') === 'true' || c.req.query('force') === '1'
+        if (sessionResult.session.active && !force) {
+            return c.json({ error: 'Session is active' }, 409)
+        }
+
+        const deleted = engine.deleteSession(sessionResult.sessionId, userId)
+        if (!deleted) {
+            return c.json({ error: 'Session not found' }, 404)
+        }
+        return c.body(null, 204)
     })
 
     return app

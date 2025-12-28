@@ -41,7 +41,8 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, store: Store): Middl
             }
 
             if (safeCompareStrings(token, configuration.cliApiToken)) {
-                const cliUser = store.getUserById('cli-user')
+                const defaultCliUserId = store.getDefaultCliUserId()
+                const cliUser = store.getUserById(defaultCliUserId)
                 if (cliUser) {
                     c.set('userId', cliUser.id)
                     await next()

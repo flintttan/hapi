@@ -21,6 +21,8 @@ describe('User Management', () => {
             id: 'test-user-1',
             telegram_id: '123456789',
             username: 'testuser',
+            email: null,
+            password_hash: null,
             created_at: expect.any(Number)
         })
     })
@@ -85,15 +87,16 @@ describe('User Management', () => {
 
         const users = store.getAllUsers()
 
-        expect(users).toHaveLength(3)
+        // Store initializes system users (admin-user, cli-user) by default.
+        expect(users.length).toBeGreaterThanOrEqual(5)
         expect(users.map(u => u.id)).toContain('user-1')
         expect(users.map(u => u.id)).toContain('user-2')
         expect(users.map(u => u.id)).toContain('user-3')
     })
 
-    test('createUser should support CLI users with null telegram_id', () => {
+    test('createUser should support users with null telegram_id', () => {
         const user = store.createUser({
-            id: 'cli-user',
+            id: 'cli-user-alt',
             telegram_id: null,
             username: 'CLI User'
         })

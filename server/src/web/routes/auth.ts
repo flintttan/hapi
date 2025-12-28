@@ -43,26 +43,27 @@ function getOrCreateUser(store: Store, telegramId: string, username?: string): U
     return user
 }
 
-let cliUserCache: User | null = null
+let defaultCliUserCache: User | null = null
 
-function getUserByCliToken(store: Store): User {
-    if (cliUserCache) {
-        return cliUserCache
+function getDefaultCliUser(store: Store): User {
+    const defaultId = store.getDefaultCliUserId()
+    if (defaultCliUserCache?.id === defaultId) {
+        return defaultCliUserCache
     }
 
-    const existing = store.getUserById('cli-user')
+    const existing = store.getUserById(defaultId) ?? store.getUserById('cli-user')
     if (existing) {
-        cliUserCache = existing
+        defaultCliUserCache = existing
         return existing
     }
 
+    // Should not happen (Store.initSchema seeds system users), but keep a safe fallback.
     const user = store.createUser({
         id: 'cli-user',
         telegram_id: null,
         username: 'CLI User'
     })
-
-    cliUserCache = user
+    defaultCliUserCache = user
     return user
 }
 
@@ -100,8 +101,8 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
             if (!safeCompareStrings(parsed.data.accessToken, configuration.cliApiToken)) {
                 return c.json({ error: 'Invalid access token' }, 401)
             }
-            user = getUserByCliToken(store)
-            firstName = 'CLI User'
+            user = getDefaultCliUser(store)
+            firstName = user.username
         }
         // Telegram initData authentication
         else {
@@ -131,7 +132,7 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
         const token = await new SignJWT({ uid: user.id })
             .setProtectedHeader({ alg: 'HS256' })
             .setIssuedAt()
-            .setExpirationTime('15m')
+            .setExpirationTime('7d')
             .sign(jwtSecret)
 
         return c.json({

@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from 'bun:test'
+import { Hono } from 'hono'
 import { Store } from '../../../store'
 import { createCliTokenRoutes } from '../cli-tokens'
 import type { WebAppEnv } from '../../middleware/auth'
@@ -131,34 +132,30 @@ describe('CLI Token Management', () => {
     })
 
     describe('API Routes', () => {
-        const createMockContext = (userId: string) => ({
-            get: (key: string) => key === 'userId' ? userId : undefined,
-            req: {
-                json: async () => ({}),
-                param: (key: string) => undefined
-            },
-            json: (data: unknown, status?: number) => ({ data, status }),
-            body: (data: unknown, status?: number) => ({ data, status })
-        } as unknown as any)
+        const createAuthedApp = (userId: string) => {
+            const app = new Hono<WebAppEnv>()
+            app.use('*', async (c, next) => {
+                c.set('userId', userId)
+                await next()
+            })
+            app.route('/', createCliTokenRoutes(store))
+            return app
+        }
 
         describe('POST /cli-tokens', () => {
             it('should create new CLI token', async () => {
-                const app = createCliTokenRoutes(store)
-                const ctx = createMockContext(testUserId)
-                ctx.req.json = async () => ({ name: 'API Token' })
-
-                const route = app.routes.find(r => r.method === 'POST' && r.path === '/cli-tokens')
-                expect(route).toBeDefined()
-
-                const handler = route?.handler
-                if (!handler) throw new Error('Handler not found')
-
-                const response: any = await handler(ctx, async () => {})
+                const app = createAuthedApp(testUserId)
+                const response = await app.request('/cli-tokens', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name: 'API Token' })
+                })
 
                 expect(response.status).toBe(200)
-                expect(response.data.id).toBeDefined()
-                expect(response.data.token).toBeDefined()
-                expect(response.data.name).toBe('API Token')
+                const data = await response.json() as any
+                expect(data.id).toBeDefined()
+                expect(data.token).toBeDefined()
+                expect(data.name).toBe('API Token')
             })
         })
 
@@ -167,22 +164,15 @@ describe('CLI Token Management', () => {
                 store.generateCliToken(testUserId, 'Token 1')
                 store.generateCliToken(testUserId, 'Token 2')
 
-                const app = createCliTokenRoutes(store)
-                const ctx = createMockContext(testUserId)
-
-                const route = app.routes.find(r => r.method === 'GET' && r.path === '/cli-tokens')
-                expect(route).toBeDefined()
-
-                const handler = route?.handler
-                if (!handler) throw new Error('Handler not found')
-
-                const response: any = await handler(ctx, async () => {})
+                const app = createAuthedApp(testUserId)
+                const response = await app.request('/cli-tokens', { method: 'GET' })
 
                 expect(response.status).toBe(200)
-                expect(response.data.tokens).toHaveLength(2)
-                expect(response.data.tokens[0].id).toBeDefined()
-                expect(response.data.tokens[0].name).toBeDefined()
-                expect((response.data.tokens[0] as any).token).toBeUndefined()
+                const data = await response.json() as any
+                expect(data.tokens).toHaveLength(2)
+                expect(data.tokens[0].id).toBeDefined()
+                expect(data.tokens[0].name).toBeDefined()
+                expect((data.tokens[0] as any).token).toBeUndefined()
             })
         })
 
@@ -190,17 +180,8 @@ describe('CLI Token Management', () => {
             it('should revoke token', async () => {
                 const generated = store.generateCliToken(testUserId, 'Token to Delete')
 
-                const app = createCliTokenRoutes(store)
-                const ctx = createMockContext(testUserId)
-                ctx.req.param = (key: string) => key === 'id' ? generated.id : undefined
-
-                const route = app.routes.find(r => r.method === 'DELETE' && r.path === '/cli-tokens/:id')
-                expect(route).toBeDefined()
-
-                const handler = route?.handler
-                if (!handler) throw new Error('Handler not found')
-
-                const response: any = await handler(ctx, async () => {})
+                const app = createAuthedApp(testUserId)
+                const response = await app.request(`/cli-tokens/${generated.id}`, { method: 'DELETE' })
 
                 expect(response.status).toBe(204)
 

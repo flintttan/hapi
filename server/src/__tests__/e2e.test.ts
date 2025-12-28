@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'bun:test'
 
-describe('Server E2E Smoke Test', () => {
+const e2eEnabled = process.env.HAPI_E2E === '1'
+
+;(e2eEnabled ? describe : describe.skip)('Server E2E Smoke Test', () => {
     const serverUrl = process.env.HAPI_SERVER_URL || 'http://hapi-server:3006'
     const apiToken = process.env.CLI_API_TOKEN || 'test-token-e2e'
 
@@ -18,7 +20,7 @@ describe('Server E2E Smoke Test', () => {
         expect(response.ok).toBe(false)
         expect(response.status).toBe(401)
 
-        const data = await response.json()
+        const data = await response.json() as any
         expect(data.error).toBe('Missing authorization token')
     })
 
@@ -34,7 +36,7 @@ describe('Server E2E Smoke Test', () => {
         })
 
         expect(response.ok).toBe(true)
-        const data = await response.json()
+        const data = await response.json() as any
         expect(data.token).toBeDefined()
         expect(typeof data.token).toBe('string')
     })

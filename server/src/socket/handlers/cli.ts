@@ -332,7 +332,7 @@ export function registerCliHandlers(socket: Socket, deps: CliHandlersDeps): void
         if (result.result === 'success') {
             const freshMachine = store.getMachine(id, userId)
             if (freshMachine && deps.onWebappEvent) {
-                deps.onWebappEvent({ type: 'machine:metadata_updated', machine: freshMachine })
+                deps.onWebappEvent({ type: 'machine-updated', machineId: id, userId, data: freshMachine })
             }
         }
 
@@ -357,7 +357,7 @@ export function registerCliHandlers(socket: Socket, deps: CliHandlersDeps): void
         if (result.result === 'success') {
             const freshMachine = store.getMachine(id, userId)
             if (freshMachine && deps.onWebappEvent) {
-                deps.onWebappEvent({ type: 'machine:updated', machine: freshMachine })
+                deps.onWebappEvent({ type: 'machine-updated', machineId: id, userId, data: freshMachine })
             }
         }
 

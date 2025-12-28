@@ -37,7 +37,7 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const parsed = querySchema.safeParse(c.req.query())
         const limit = parsed.success ? (parsed.data.limit ?? 50) : 50
         const beforeSeq = parsed.success ? (parsed.data.beforeSeq ?? null) : null
-        return c.json(engine.getMessagesPage(sessionId, { limit, beforeSeq }))
+        return c.json(engine.getMessagesPage(sessionId, userId, { limit, beforeSeq }))
     })
 
     app.post('/sessions/:id/messages', async (c) => {
@@ -63,7 +63,7 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Invalid body' }, 400)
         }
 
-        await engine.sendMessage(sessionId, { text: parsed.data.text, localId: parsed.data.localId, sentFrom: 'webapp' })
+        await engine.sendMessage(sessionId, userId, { text: parsed.data.text, localId: parsed.data.localId, sentFrom: 'webapp' })
         return c.json({ ok: true })
     })
 

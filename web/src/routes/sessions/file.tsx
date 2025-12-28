@@ -10,13 +10,27 @@ import { langAlias, useShikiHighlighter } from '@/lib/shiki'
 
 function decodeBase64(value: string): { text: string; ok: boolean } {
     try {
-        return { text: atob(value), ok: true }
-    } catch {
-        try {
-            return { text: decodeURIComponent(escape(atob(value))), ok: true }
-        } catch {
-            return { text: '', ok: false }
+        const binary = atob(value)
+        const bytes = new Uint8Array(binary.length)
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i)
         }
+
+        // Prefer UTF-8 (most repos). If it fails, try GB18030 (common on Windows CN).
+        try {
+            return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), ok: true }
+        } catch {
+        }
+
+        try {
+            return { text: new TextDecoder('gb18030', { fatal: true }).decode(bytes), ok: true }
+        } catch {
+        }
+
+        // Last resort: decode with replacement characters.
+        return { text: new TextDecoder('utf-8', { fatal: false }).decode(bytes), ok: true }
+    } catch {
+        return { text: '', ok: false }
     }
 }
 

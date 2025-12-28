@@ -154,6 +154,22 @@ export type FileReadResponse = {
     error?: string
 }
 
+export type CliTokenInfo = {
+    id: string
+    name: string | null
+    created_at: number
+    last_used_at: number | null
+}
+
+export type CliTokensResponse = { tokens: CliTokenInfo[] }
+
+export type CliTokenCreateResponse = {
+    id: string
+    token: string
+    name: string | null
+    created_at: number
+}
+
 export type GitFileStatus = {
     fileName: string
     filePath: string

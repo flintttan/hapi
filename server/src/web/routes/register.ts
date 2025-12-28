@@ -58,7 +58,7 @@ export function createRegisterRoutes(jwtSecret: Uint8Array, store: Store): Hono<
         const token = await new SignJWT({ uid: user.id })
             .setProtectedHeader({ alg: 'HS256' })
             .setIssuedAt()
-            .setExpirationTime('15m')
+            .setExpirationTime('7d')
             .sign(jwtSecret)
 
         return c.json({

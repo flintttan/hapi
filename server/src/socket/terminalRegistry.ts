@@ -46,6 +46,49 @@ export class TerminalRegistry {
         return entry
     }
 
+    rebind(terminalId: string, socketId: string, cliSocketId: string): TerminalRegistryEntry | null {
+        const entry = this.terminals.get(terminalId)
+        if (!entry) {
+            return null
+        }
+
+        if (entry.socketId !== socketId) {
+            this.removeFromIndex(this.terminalsBySocket, entry.socketId, terminalId)
+            this.addToIndex(this.terminalsBySocket, socketId, terminalId)
+            entry.socketId = socketId
+        }
+
+        if (entry.cliSocketId !== cliSocketId) {
+            this.removeFromIndex(this.terminalsByCliSocket, entry.cliSocketId, terminalId)
+            this.addToIndex(this.terminalsByCliSocket, cliSocketId, terminalId)
+            entry.cliSocketId = cliSocketId
+        }
+
+        this.scheduleIdle(entry)
+        return entry
+    }
+
+    detachBySocket(socketId: string): TerminalRegistryEntry[] {
+        const ids = this.terminalsBySocket.get(socketId)
+        if (!ids || ids.size === 0) {
+            return []
+        }
+        this.terminalsBySocket.delete(socketId)
+
+        const detached: TerminalRegistryEntry[] = []
+        for (const terminalId of ids) {
+            const entry = this.terminals.get(terminalId)
+            if (!entry) {
+                continue
+            }
+            if (entry.socketId === socketId) {
+                entry.socketId = ''
+            }
+            detached.push(entry)
+        }
+        return detached
+    }
+
     markActivity(terminalId: string): void {
         const entry = this.terminals.get(terminalId)
         if (!entry) {

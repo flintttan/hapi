@@ -22,6 +22,11 @@ export function createEventsRoutes(getSseManager: () => SSEManager | null): Hono
     const app = new Hono<WebAppEnv>()
 
     app.get('/events', (c) => {
+        // Improve behavior behind proxies (e.g. nginx/cloudflared) by disabling buffering.
+        c.header('Cache-Control', 'no-cache')
+        c.header('Connection', 'keep-alive')
+        c.header('X-Accel-Buffering', 'no')
+
         const manager = getSseManager()
         if (!manager) {
             return c.json({ error: 'Not connected' }, 503)
@@ -37,6 +42,9 @@ export function createEventsRoutes(getSseManager: () => SSEManager | null): Hono
         const userId = c.get('userId') ?? null
 
         return streamSSE(c, async (stream) => {
+            // Send an initial chunk immediately so intermediaries don't buffer the response.
+            await stream.write(': connected\n\n')
+
             manager.subscribe({
                 id: subscriptionId,
                 all,

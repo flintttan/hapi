@@ -1,7 +1,10 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
 import type { Database } from 'bun:sqlite'
+import type { Server as SocketIOServer } from 'socket.io'
 import { Store } from '../../store'
 import { SyncEngine } from '../../sync/syncEngine'
+import { RpcRegistry } from '../../socket/rpcRegistry'
+import { SSEManager } from '../../sse/sseManager'
 import {
     cleanupTestDatabase,
     generateTestData
@@ -22,12 +25,13 @@ import {
 describe('Integration: Multi-User Data Isolation', () => {
     let store: Store
     let syncEngine: SyncEngine
-    let db: Database | null = null
+    let db!: Database
 
     beforeEach(() => {
         // Create test store (which creates its own in-memory database)
         store = new Store(':memory:')
-        syncEngine = new SyncEngine(store)
+        const io = {} as unknown as SocketIOServer
+        syncEngine = new SyncEngine(store, io, new RpcRegistry(), new SSEManager(0))
 
         // Access the store's internal database for test helper functions
         db = (store as any).db as Database
@@ -199,13 +203,12 @@ describe('Integration: Multi-User Data Isolation', () => {
             const sessionBId = createTestSession(db, userB.id, 'Session B')
 
             // SyncEngine.getSession filters by userId parameter
-            // With empty cache, it returns undefined
             const sessionForUserA = syncEngine.getSession(sessionBId, userA.id)
             expect(sessionForUserA).toBeUndefined()
 
-            // Even if we try with correct userId, still undefined because not loaded into cache
             const sessionForUserB = syncEngine.getSession(sessionBId, userB.id)
-            expect(sessionForUserB).toBeUndefined() // Cache empty, so undefined
+            expect(sessionForUserB).toBeDefined()
+            expect(sessionForUserB?.id).toBe(sessionBId)
         })
     })
 
@@ -218,14 +221,11 @@ describe('Integration: Multi-User Data Isolation', () => {
             createTestSession(db, userA.id, 'Session A2')
             createTestSession(db, userB.id, 'Session B1')
 
-            // SyncEngine filters from in-memory cache
-            // Since cache is empty, both return empty arrays
             const userASessions = syncEngine.getSessions(userA.id)
             const userBSessions = syncEngine.getSessions(userB.id)
 
-            // Empty cache means no sessions returned
-            expect(userASessions).toHaveLength(0)
-            expect(userBSessions).toHaveLength(0)
+            expect(userASessions).toHaveLength(2)
+            expect(userBSessions).toHaveLength(1)
         })
 
         test('SyncEngine getMachines respects userId filter', () => {
@@ -235,13 +235,11 @@ describe('Integration: Multi-User Data Isolation', () => {
             createTestMachine(db, userA.id, 'machine-a')
             createTestMachine(db, userB.id, 'machine-b')
 
-            // SyncEngine filters from in-memory cache
             const userAMachines = syncEngine.getMachines(userA.id)
             const userBMachines = syncEngine.getMachines(userB.id)
 
-            // Empty cache means no machines returned
-            expect(userAMachines).toHaveLength(0)
-            expect(userBMachines).toHaveLength(0)
+            expect(userAMachines).toHaveLength(1)
+            expect(userBMachines).toHaveLength(1)
         })
     })
 
@@ -333,13 +331,12 @@ describe('Integration: Multi-User Data Isolation', () => {
             const userA = createTelegramUser(db, 'user_a')
             const sessionId = createTestSession(db, userA.id, 'Original Session')
 
-            // SyncEngine methods filter by userId from their in-memory cache
-            // With empty cache, returns empty/undefined
             const sessions = syncEngine.getSessions(userA.id)
-            expect(sessions).toHaveLength(0) // Cache empty
+            expect(sessions).toHaveLength(1)
 
             const session = syncEngine.getSession(sessionId, userA.id)
-            expect(session).toBeUndefined() // Not in cache
+            expect(session).toBeDefined()
+            expect(session?.id).toBe(sessionId)
         })
     })
 

@@ -30,7 +30,7 @@ async function getSessionOrAnswer(
     sessionPrefix: string,
     options?: { requireActive?: boolean }
 ): Promise<Session | null> {
-    const session = findSessionByPrefix(syncEngine.getSessions(), sessionPrefix)
+    const session = findSessionByPrefix(syncEngine._unsafeGetSessions(), sessionPrefix)
     if (!session) {
         await ctx.answerCallback('Session not found')
         return null
