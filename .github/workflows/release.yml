@@ -51,11 +51,3 @@ jobs:
               run: |
                   VERSION="${GITHUB_REF#refs/tags/v}"
                   cd cli && bun run update-homebrew-formula --version "$VERSION" --push
-
-            - name: Publish to npm
-              env:
-                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-              run: |
-                  VERSION="${GITHUB_REF#refs/tags/v}"
-                  echo "//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}" > ~/.npmrc
-                  cd cli && bun run release-all "$VERSION" --publish-npm --skip-build

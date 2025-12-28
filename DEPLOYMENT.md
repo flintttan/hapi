@@ -1,11 +1,11 @@
 # HAPI Deployment Guide
 
-This document describes how to deploy hapi Docker images to GitHub Container Registry and publish the CLI to npm.
+This document describes how to deploy hapi Docker images to GitHub Container Registry and create GitHub Releases with binary downloads.
 
 ## Quick Overview
 
 - **Docker Images**: Automatically built and pushed to GHCR on version tag push
-- **npm Package**: `@twsxtd/hapi` with platform-specific binaries
+- **Binary Downloads**: Platform-specific binaries in GitHub Release Assets
 - **GitHub Registry**: `ghcr.io/flintttan/hapi-server`
 - **Repository**: `flintttan/hapi`
 - **Automation**: GitHub Actions handles all deployments
@@ -85,110 +85,59 @@ docker run -d \
 
 ---
 
-# npm Package Deployment
+# GitHub Binary Releases
 
-## Package Structure
+## Release Assets
 
-- **Main Package**: `@twsxtd/hapi`
-- **Platform Packages**:
-  - `@twsxtd/hapi-darwin-arm64` (macOS Apple Silicon)
-  - `@twsxtd/hapi-darwin-x64` (macOS Intel)
-  - `@twsxtd/hapi-linux-arm64` (Linux ARM64)
-  - `@twsxtd/hapi-linux-x64` (Linux x64)
-  - `@twsxtd/hapi-win32-x64` (Windows x64)
+When you create a version tag, GitHub Actions automatically builds and publishes platform-specific binaries:
 
-## Automatic Deployment (GitHub Actions)
+**Available Platforms**:
+- `hapi-darwin-arm64.tar.gz` (macOS Apple Silicon)
+- `hapi-darwin-x64.tar.gz` (macOS Intel)
+- `hapi-linux-arm64.tar.gz` (Linux ARM64)
+- `hapi-linux-x64.tar.gz` (Linux x64)
+- `hapi-win32-x64.zip` (Windows x64)
+- `checksums.txt` (SHA256 checksums for all binaries)
 
-### Prerequisites
+## Automatic Release Process
 
-1. **Create npm Access Token**:
-   - Go to https://www.npmjs.com/settings/{username}/tokens
-   - Click "Generate New Token" → "Classic Token"
-   - Select "Automation" type
-   - Copy the token
-
-2. **Add Secret to GitHub**:
-   - Go to repository Settings → Secrets and variables → Actions
-   - Click "New repository secret"
-   - Name: `NPM_TOKEN`
-   - Value: (paste your npm token)
-   - Click "Add secret"
-
-### Release Process
-
-When you push a version tag, the release workflow will automatically:
-1. Build platform-specific binaries
-2. Create GitHub Release
-3. Publish all packages to npm
-4. Update Homebrew formula
+The `.github/workflows/release.yml` workflow is triggered when you push a version tag:
 
 ```bash
-# Complete automated release
 git tag v0.3.1
 git push origin v0.3.1
-
-# GitHub Actions will:
-# ✓ Build binaries for all platforms
-# ✓ Publish @twsxtd/hapi-{platform} packages
-# ✓ Publish @twsxtd/hapi main package
-# ✓ Create GitHub Release with downloads
-# ✓ Build and push Docker images to GHCR
-```
-
-## Manual Deployment
-
-### Using the Release Script
-
-```bash
-# Ensure you're on main branch
-git checkout main
-git pull
-
-# Login to npm
-npm login
-
-# Run complete release
-cd cli
-bun run release-all 0.3.1
 ```
 
 This will:
-1. Update version in `package.json`
-2. Build all platform binaries with embedded web
-3. Publish platform packages to npm
-4. Publish main package to npm
-5. Create git commit and tag
-6. Push to GitHub
+1. Build all platform binaries with embedded web assets
+2. Package binaries into `.tar.gz` (Unix) or `.zip` (Windows)
+3. Generate SHA256 checksums
+4. Create GitHub Release with binary downloads
+5. Update Homebrew formula (if configured)
 
-### Script Options
+### What Gets Built
 
-```bash
-# Dry run (preview without publishing)
-bun run release-all 0.3.1 --dry-run
+The build process:
+- Uses `bun run build:single-exe:all` to create standalone executables
+- Embeds web assets directly into the binary
+- Creates optimized binaries for each platform
+- Total size: ~50-80MB per platform (includes Bun runtime + web assets)
 
-# Publish to npm only (skip git operations)
-bun run release-all 0.3.1 --publish-npm
+## Downloading Binaries
 
-# Skip building (use existing binaries)
-bun run release-all 0.3.1 --skip-build
-
-# Combine options
-bun run release-all 0.3.1 --publish-npm --skip-build
-```
-
-### Publish Only to npm (After Tag Exists)
-
-If you've already pushed the tag but need to republish to npm:
+Users can download binaries from the GitHub Releases page:
 
 ```bash
-cd cli
+# Example: Download for macOS ARM64
+curl -L -o hapi https://github.com/flintttan/hapi/releases/download/v0.3.1/hapi-darwin-arm64.tar.gz
+tar xzf hapi-darwin-arm64.tar.gz
+chmod +x hapi
 
-# Ensure binaries are built
-bun run build:single-exe:all
-
-# Publish to npm only
-bun run release-all 0.3.1 --publish-npm --skip-build
+# macOS: Remove quarantine attribute
+xattr -d com.apple.quarantine ./hapi
 ```
+
+Visit releases page: https://github.com/flintttan/hapi/releases
 
 ---
 
@@ -205,51 +154,40 @@ git status
 # Pull latest changes
 git checkout main
 git pull
-
-# Login to npm
-npm login
-
-# Verify login
-npm whoami
 ```
 
-### 2. Run Release Script
+### 2. Create Version Tag
 
 ```bash
-cd cli
-bun run release-all 0.3.1
+# Create and push version tag
+git tag v0.3.1
+git push origin v0.3.1
 ```
 
-The script will:
-- ✓ Verify you're on main branch
-- ✓ Verify npm login
-- ✓ Update package.json version
-- ✓ Build all platform binaries
-- ✓ Publish platform packages
-- ✓ Publish main package
-- ✓ Update lockfile
-- ✓ Create git commit
-- ✓ Create git tag
-- ✓ Push to GitHub
+### 3. Monitor GitHub Actions
 
-### 3. Verify GitHub Actions
-
-1. Go to GitHub Actions
-2. Check "Release" workflow (creates GitHub Release)
-3. Check "Docker (server)" workflow (builds and pushes images)
-4. Both should complete successfully
+1. Go to GitHub Actions: https://github.com/flintttan/hapi/actions
+2. Check "Release" workflow:
+   - Builds all platform binaries
+   - Creates GitHub Release
+   - Uploads binary assets
+   - Updates Homebrew formula
+3. Check "Docker (server)" workflow:
+   - Builds Docker images for linux/amd64 and linux/arm64
+   - Pushes to GHCR
 
 ### 4. Verify Deployment
 
 ```bash
-# Check npm package
-npm view @twsxtd/hapi
+# Check GitHub Release
+# Visit: https://github.com/flintttan/hapi/releases/tag/v0.3.1
 
 # Check Docker image
 docker pull ghcr.io/flintttan/hapi-server:v0.3.1
 
-# Check GitHub Release
-# Visit: https://github.com/flintttan/hapi/releases/tag/v0.3.1
+# Test binary download
+curl -L -O https://github.com/flintttan/hapi/releases/download/v0.3.1/checksums.txt
+cat checksums.txt
 ```
 
 ---
