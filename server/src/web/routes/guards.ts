@@ -20,17 +20,10 @@ export function requireSession(
     userId: string,
     options?: { requireActive?: boolean }
 ): Session | Response {
-    const session = engine.getSession(sessionId)
+    const session = engine.getSession(sessionId, userId)
     if (!session) {
         // Return 404 to hide resource existence
         console.warn(`[Security] User ${userId} attempted to access non-existent session ${sessionId}`)
-        return c.json({ error: 'Session not found' }, 404)
-    }
-
-    // Verify ownership
-    if (session.userId !== userId) {
-        // Return 404 to hide resource existence from unauthorized users
-        console.warn(`[Security] User ${userId} attempted unauthorized access to session ${sessionId} owned by ${session.userId}`)
         return c.json({ error: 'Session not found' }, 404)
     }
 

@@ -51,14 +51,9 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         }
 
         const sessionId = c.req.param('id')
-        const session = engine.getSession(sessionId)
+        const session = engine.getSession(sessionId, userId)
         if (!session) {
             return c.json({ error: 'Session not found' }, 404)
-        }
-
-        // Verify session belongs to user
-        if (session.userId !== userId) {
-            return c.json({ error: 'Forbidden' }, 403)
         }
 
         return c.json({ session })
@@ -97,14 +92,9 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         }
 
         const machineId = c.req.param('id')
-        const machine = engine.getMachine(machineId)
+        const machine = engine.getMachine(machineId, userId)
         if (!machine) {
             return c.json({ error: 'Machine not found' }, 404)
-        }
-
-        // Verify machine belongs to user
-        if (machine.userId !== userId) {
-            return c.json({ error: 'Forbidden' }, 403)
         }
 
         return c.json({ machine })

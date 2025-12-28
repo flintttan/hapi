@@ -235,28 +235,28 @@ export class HappyBot {
             return
         }
 
-        if (event.type === 'session-updated' && event.sessionId) {
-            const session = this.syncEngine?.getSession(event.sessionId)
+        if (event.type === 'session-updated' && event.sessionId && event.userId) {
+            const session = this.syncEngine?.getSession(event.sessionId, event.userId)
             if (session) {
                 this.checkForPermissionNotification(session)
             }
         }
 
-        if (event.type === 'message-received' && event.sessionId) {
+        if (event.type === 'message-received' && event.sessionId && event.userId) {
             const message = (event.message?.content ?? event.data) as any
             const messageContent = message?.content
             const eventType = messageContent?.type === 'event' ? messageContent?.data?.type : null
 
             if (eventType === 'ready') {
-                this.sendReadyNotification(event.sessionId).catch((error) => {
+                this.sendReadyNotification(event.sessionId, event.userId).catch((error) => {
                     console.error('[HAPIBot] Failed to send ready notification:', error)
                 })
             }
         }
     }
 
-    private getNotifiableSession(sessionId: string): Session | null {
-        const session = this.syncEngine?.getSession(sessionId)
+    private getNotifiableSession(sessionId: string, userId: string): Session | null {
+        const session = this.syncEngine?.getSession(sessionId, userId)
         if (!session || !session.active) {
             return null
         }
@@ -266,8 +266,8 @@ export class HappyBot {
     /**
      * Send a push notification when agent is ready for input.
      */
-    private async sendReadyNotification(sessionId: string): Promise<void> {
-        const session = this.getNotifiableSession(sessionId)
+    private async sendReadyNotification(sessionId: string, userId: string): Promise<void> {
+        const session = this.getNotifiableSession(sessionId, userId)
         if (!session) {
             return
         }
@@ -303,7 +303,7 @@ export class HappyBot {
      * Check if session has new permission requests and send notification
      */
     private checkForPermissionNotification(session: Session): void {
-        const currentSession = this.getNotifiableSession(session.id)
+        const currentSession = this.getNotifiableSession(session.id, session.userId)
         if (!currentSession) {
             return
         }
@@ -342,9 +342,10 @@ export class HappyBot {
             clearTimeout(existingTimer)
         }
 
+        const userId = currentSession.userId
         const timer = setTimeout(() => {
             this.notificationDebounce.delete(currentSession.id)
-            this.sendPermissionNotification(currentSession.id).catch(err => {
+            this.sendPermissionNotification(currentSession.id, userId).catch(err => {
                 console.error('[HAPIBot] Failed to send notification:', err)
             })
         }, 500)
@@ -355,8 +356,8 @@ export class HappyBot {
     /**
      * Send permission notification to all allowed chats
      */
-    private async sendPermissionNotification(sessionId: string): Promise<void> {
-        const session = this.getNotifiableSession(sessionId)
+    private async sendPermissionNotification(sessionId: string, userId: string): Promise<void> {
+        const session = this.getNotifiableSession(sessionId, userId)
         if (!session) {
             return
         }

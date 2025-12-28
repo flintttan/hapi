@@ -237,6 +237,14 @@ export class SyncEngine {
         return session
     }
 
+    /**
+     * Internal use only - bypasses user isolation checks
+     * Used by trusted internal components (socket server, etc.)
+     */
+    _unsafeGetSession(sessionId: string): Session | undefined {
+        return this.sessions.get(sessionId)
+    }
+
     getActiveSessions(userId: string): Session[] {
         return this.getSessions(userId).filter(s => s.active)
     }
