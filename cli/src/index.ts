@@ -118,12 +118,19 @@ import { getCliArgs } from './utils/cliArgs'
       const { runCodex } = await import('@/codex/runCodex');
 
       // Parse known arguments and collect unknown ones for passthrough
-      const options: { startedBy?: 'daemon' | 'terminal'; codexArgs?: string[] } = {};
+      const options: {
+        startedBy?: 'daemon' | 'terminal';
+        codexArgs?: string[];
+        permissionMode?: 'default' | 'read-only' | 'safe-yolo' | 'yolo';
+      } = {};
       const unknownArgs: string[] = [];
       for (let i = 1; i < args.length; i++) {
         const arg = args[i];
         if (arg === '--started-by') {
           options.startedBy = args[++i] as 'daemon' | 'terminal';
+        } else if (arg === '--yolo' || arg === '--dangerously-bypass-approvals-and-sandbox') {
+          options.permissionMode = 'yolo';
+          unknownArgs.push(arg);
         } else {
           unknownArgs.push(arg);
         }
@@ -147,15 +154,19 @@ import { getCliArgs } from './utils/cliArgs'
   } else if (subcommand === 'gemini') {
     // Handle gemini command
     try {
-      await import('./agent/runners/gemini');
-      const { runAgentSession } = await import('./agent/runners/runAgentSession');
-
       let startedBy: 'daemon' | 'terminal' | undefined = undefined;
+      let yolo = false;
       for (let i = 1; i < args.length; i++) {
         if (args[i] === '--started-by') {
           startedBy = args[++i] as 'daemon' | 'terminal';
+        } else if (args[i] === '--yolo') {
+          yolo = true;
         }
       }
+
+      const { registerGeminiAgent } = await import('./agent/runners/gemini');
+      const { runAgentSession } = await import('./agent/runners/runAgentSession');
+      registerGeminiAgent(yolo);
 
       await initializeToken();
       await authAndSetupMachineIfNeeded();
@@ -323,7 +334,11 @@ ${chalk.bold('To clean up runaway processes:')} Use ${chalk.cyan('hapi doctor cl
         options.startingMode = z.enum(['local', 'remote']).parse(args[++i])
       } else if (arg === '--yolo') {
         // Shortcut for --dangerously-skip-permissions
+        options.permissionMode = 'bypassPermissions'
         unknownArgs.push('--dangerously-skip-permissions')
+      } else if (arg === '--dangerously-skip-permissions') {
+        options.permissionMode = 'bypassPermissions'
+        unknownArgs.push(arg)
       } else if (arg === '--started-by') {
         options.startedBy = args[++i] as 'daemon' | 'terminal'
       } else {

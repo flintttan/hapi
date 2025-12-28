@@ -7,8 +7,16 @@ import { requireSessionFromParam, requireSyncEngine } from './guards'
 type SessionSummaryMetadata = {
     name?: string
     path: string
+    machineId?: string
     summary?: { text: string }
     flavor?: string | null
+    worktree?: {
+        basePath: string
+        branch: string
+        name: string
+        worktreePath?: string
+        createdAt?: number
+    }
 }
 
 type SessionSummary = {
@@ -19,7 +27,7 @@ type SessionSummary = {
     metadata: SessionSummaryMetadata | null
     todoProgress: { completed: number; total: number } | null
     pendingRequestsCount: number
-    modelMode?: 'default' | 'sonnet' | 'opus' | null
+    modelMode?: 'default' | 'sonnet' | 'opus'
 }
 
 function toSessionSummary(session: Session): SessionSummary {
@@ -28,8 +36,10 @@ function toSessionSummary(session: Session): SessionSummary {
     const metadata: SessionSummaryMetadata | null = session.metadata ? {
         name: session.metadata.name,
         path: session.metadata.path,
+        machineId: session.metadata.machineId ?? undefined,
         summary: session.metadata.summary ? { text: session.metadata.summary.text } : undefined,
-        flavor: session.metadata.flavor ?? null
+        flavor: session.metadata.flavor ?? null,
+        worktree: session.metadata.worktree
     } : null
 
     const todoProgress = session.todos?.length ? {
@@ -45,12 +55,12 @@ function toSessionSummary(session: Session): SessionSummary {
         metadata,
         todoProgress,
         pendingRequestsCount,
-        modelMode: session.modelMode ?? null
+        modelMode: session.modelMode
     }
 }
 
 const permissionModeSchema = z.object({
-    mode: z.enum(['default', 'acceptEdits', 'bypassPermissions', 'plan'])
+    mode: z.enum(['default', 'acceptEdits', 'bypassPermissions', 'plan', 'read-only', 'safe-yolo', 'yolo'])
 })
 
 const modelModeSchema = z.object({
@@ -174,8 +184,26 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Invalid body' }, 400)
         }
 
-        await engine.setPermissionMode(sessionResult.sessionId, parsed.data.mode)
-        return c.json({ ok: true })
+        const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
+        const mode = parsed.data.mode
+        const claudeModes = new Set(['default', 'acceptEdits', 'bypassPermissions', 'plan'])
+        const codexModes = new Set(['default', 'read-only', 'safe-yolo', 'yolo'])
+
+        if (flavor === 'gemini') {
+            return c.json({ error: 'Permission mode not supported for Gemini sessions' }, 400)
+        }
+
+        if (flavor === 'codex' ? !codexModes.has(mode) : !claudeModes.has(mode)) {
+            return c.json({ error: 'Invalid permission mode for session flavor' }, 400)
+        }
+
+        try {
+            await engine.applySessionConfig(sessionResult.sessionId, { permissionMode: mode })
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to apply permission mode'
+            return c.json({ error: message }, 409)
+        }
     })
 
     app.post('/sessions/:id/model', async (c) => {
@@ -200,8 +228,44 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Invalid body' }, 400)
         }
 
-        await engine.setModelMode(sessionResult.sessionId, parsed.data.model)
-        return c.json({ ok: true })
+        const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
+        if (flavor !== 'claude') {
+            return c.json({ error: 'Model mode is only supported for Claude sessions' }, 400)
+        }
+
+        try {
+            await engine.applySessionConfig(sessionResult.sessionId, { modelMode: parsed.data.model })
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to apply model mode'
+            return c.json({ error: message }, 409)
+        }
+    })
+
+    app.get('/sessions/:id/slash-commands', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        // Session must exist but doesn't need to be active
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        // Get agent type from session metadata, default to 'claude'
+        const agent = sessionResult.session.metadata?.flavor ?? 'claude'
+
+        try {
+            const result = await engine.listSlashCommands(sessionResult.sessionId, agent)
+            return c.json(result)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list slash commands'
+            })
+        }
     })
 
     app.delete('/sessions/:id', (c) => {

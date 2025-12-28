@@ -5,8 +5,10 @@ import type {
     FileReadResponse,
     FileSearchResponse,
     GitCommandResponse,
+    MachinePathsExistsResponse,
     MachinesResponse,
     MessagesResponse,
+    SlashCommandsResponse,
     SpawnResponse,
     SessionResponse,
     SessionsResponse
@@ -217,7 +219,7 @@ export class ApiClient {
         })
     }
 
-    async setPermissionMode(sessionId: string, mode: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'): Promise<void> {
+    async setPermissionMode(sessionId: string, mode: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'read-only' | 'safe-yolo' | 'yolo'): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/permission-mode`, {
             method: 'POST',
             body: JSON.stringify({ mode })
@@ -267,10 +269,36 @@ export class ApiClient {
         return await this.request<MachinesResponse>('/api/machines')
     }
 
-    async spawnSession(machineId: string, directory: string, agent?: 'claude' | 'codex' | 'gemini'): Promise<SpawnResponse> {
+    async checkMachinePathsExists(
+        machineId: string,
+        paths: string[]
+    ): Promise<MachinePathsExistsResponse> {
+        return await this.request<MachinePathsExistsResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/paths/exists`,
+            {
+                method: 'POST',
+                body: JSON.stringify({ paths })
+            }
+        )
+    }
+
+    async spawnSession(
+        machineId: string,
+        directory: string,
+        agent?: 'claude' | 'codex' | 'gemini',
+        yolo?: boolean,
+        sessionType?: 'simple' | 'worktree',
+        worktreeName?: string
+    ): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>(`/api/machines/${encodeURIComponent(machineId)}/spawn`, {
             method: 'POST',
-            body: JSON.stringify({ directory, agent })
+            body: JSON.stringify({ directory, agent, yolo, sessionType, worktreeName })
         })
+    }
+
+    async getSlashCommands(sessionId: string): Promise<SlashCommandsResponse> {
+        return await this.request<SlashCommandsResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/slash-commands`
+        )
     }
 }

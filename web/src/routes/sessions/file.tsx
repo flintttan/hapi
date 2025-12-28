@@ -3,36 +3,13 @@ import { useQuery } from '@tanstack/react-query'
 import { useParams, useSearch } from '@tanstack/react-router'
 import type { GitCommandResponse } from '@/types/api'
 import { FileIcon } from '@/components/FileIcon'
+import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { queryKeys } from '@/lib/query-keys'
 import { langAlias, useShikiHighlighter } from '@/lib/shiki'
-
-function decodeBase64(value: string): { text: string; ok: boolean } {
-    try {
-        const binary = atob(value)
-        const bytes = new Uint8Array(binary.length)
-        for (let i = 0; i < binary.length; i++) {
-            bytes[i] = binary.charCodeAt(i)
-        }
-
-        // Prefer UTF-8 (most repos). If it fails, try GB18030 (common on Windows CN).
-        try {
-            return { text: new TextDecoder('utf-8', { fatal: true }).decode(bytes), ok: true }
-        } catch {
-        }
-
-        try {
-            return { text: new TextDecoder('gb18030', { fatal: true }).decode(bytes), ok: true }
-        } catch {
-        }
-
-        // Last resort: decode with replacement characters.
-        return { text: new TextDecoder('utf-8', { fatal: false }).decode(bytes), ok: true }
-    } catch {
-        return { text: '', ok: false }
-    }
-}
+import { decodeBase64 } from '@/lib/utils'
 
 function decodePath(value: string): string {
     if (!value) return ''
@@ -135,6 +112,7 @@ function extractCommandError(result: GitCommandResponse | undefined): string | n
 
 export default function FilePage() {
     const { api } = useAppContext()
+    const { copied, copy } = useCopyToClipboard()
     const goBack = useAppGoBack()
     const { sessionId } = useParams({ from: '/sessions/$sessionId/file' })
     const search = useSearch({ from: '/sessions/$sessionId/file' })
@@ -223,7 +201,15 @@ export default function FilePage() {
             <div className="bg-[var(--app-bg)]">
                 <div className="mx-auto w-full max-w-content px-3 py-2 flex items-center gap-2 border-b border-[var(--app-divider)]">
                     <FileIcon fileName={fileName} size={20} />
-                    <span className="text-xs text-[var(--app-hint)]">{filePath}</span>
+                    <span className="min-w-0 flex-1 truncate text-xs text-[var(--app-hint)]">{filePath}</span>
+                    <button
+                        type="button"
+                        onClick={() => copy(filePath)}
+                        className="shrink-0 rounded p-1 text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] transition-colors"
+                        title="Copy path"
+                    >
+                        {copied ? <CheckIcon className="h-3.5 w-3.5" /> : <CopyIcon className="h-3.5 w-3.5" />}
+                    </button>
                 </div>
             </div>
 

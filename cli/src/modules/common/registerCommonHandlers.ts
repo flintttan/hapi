@@ -3,12 +3,13 @@ import { exec, ExecOptions } from 'child_process';
 import { promisify } from 'util';
 import { readFile, writeFile, readdir, stat } from 'fs/promises';
 import { createHash } from 'crypto';
-import { join, resolve } from 'path';
+import { basename, join, resolve } from 'path';
 import { run as runRipgrep } from '@/modules/ripgrep/index';
 import { run as runDifftastic } from '@/modules/difftastic/index';
 import { RpcHandlerManager } from '../../api/rpc/RpcHandlerManager';
 import { registerGitHandlers } from './gitHandlers';
 import { validatePath } from './pathSecurity';
+import { listSlashCommands, type ListSlashCommandsRequest, type ListSlashCommandsResponse } from './slashCommands';
 
 const execAsync = promisify(exec);
 
@@ -122,7 +123,10 @@ export interface SpawnSessionOptions {
     sessionId?: string;
     approvedNewDirectoryCreation?: boolean;
     agent?: 'claude' | 'codex' | 'gemini';
+    yolo?: boolean;
     token?: string;
+    sessionType?: 'simple' | 'worktree';
+    worktreeName?: string;
 }
 
 export type SpawnSessionResult =
@@ -408,8 +412,8 @@ export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, wor
                 return { success: false, error: 'maxDepth must be non-negative' };
             }
 
-            // Get the base name for the root node
-            const baseName = data.path === '/' ? '/' : data.path.split('/').pop() || data.path;
+            // Get the base name for the root node (cross-platform)
+            const baseName = data.path === '/' ? '/' : basename(data.path) || data.path;
 
             // Build the tree starting from the requested path
             const tree = await buildTree(data.path, baseName, 0);
@@ -479,6 +483,22 @@ export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, wor
             return {
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to run difftastic'
+            };
+        }
+    });
+
+    // Slash commands handler - lists available slash commands for an agent
+    rpcHandlerManager.registerHandler<ListSlashCommandsRequest, ListSlashCommandsResponse>('listSlashCommands', async (data) => {
+        logger.debug('List slash commands request for agent:', data.agent);
+
+        try {
+            const commands = await listSlashCommands(data.agent);
+            return { success: true, commands };
+        } catch (error) {
+            logger.debug('Failed to list slash commands:', error);
+            return {
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list slash commands'
             };
         }
     });

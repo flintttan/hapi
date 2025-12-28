@@ -1,13 +1,19 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { Machine } from '@/types/api'
+import { Autocomplete } from '@/components/ChatInput/Autocomplete'
+import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSpawnSession } from '@/hooks/mutations/useSpawnSession'
+import { useSessions } from '@/hooks/queries/useSessions'
+import { useActiveSuggestions, type Suggestion } from '@/hooks/useActiveSuggestions'
+import { useDirectorySuggestions } from '@/hooks/useDirectorySuggestions'
 import { useRecentPaths } from '@/hooks/useRecentPaths'
 
 type AgentType = 'claude' | 'codex' | 'gemini'
+type SessionType = 'simple' | 'worktree'
 
 function getMachineTitle(machine: Machine): string {
     if (machine.metadata?.displayName) return machine.metadata.displayName
@@ -24,13 +30,28 @@ export function NewSession(props: {
 }) {
     const { haptic } = usePlatform()
     const { spawnSession, isPending, error: spawnError } = useSpawnSession(props.api)
+    const { sessions } = useSessions(props.api)
     const isFormDisabled = isPending || props.isLoading
     const { getRecentPaths, addRecentPath, getLastUsedMachineId, setLastUsedMachineId } = useRecentPaths()
 
     const [machineId, setMachineId] = useState<string | null>(null)
     const [directory, setDirectory] = useState('')
+    const [suppressSuggestions, setSuppressSuggestions] = useState(false)
+    const [isDirectoryFocused, setIsDirectoryFocused] = useState(false)
+    const [pathExistence, setPathExistence] = useState<Record<string, boolean>>({})
     const [agent, setAgent] = useState<AgentType>('claude')
+    const [yoloMode, setYoloMode] = useState(false)
+    const [sessionType, setSessionType] = useState<SessionType>('simple')
+    const [worktreeName, setWorktreeName] = useState('')
     const [error, setError] = useState<string | null>(null)
+    const worktreeInputRef = useRef<HTMLInputElement>(null)
+
+    // Focus worktree input when switching to worktree mode
+    useEffect(() => {
+        if (sessionType === 'worktree') {
+            worktreeInputRef.current?.focus()
+        }
+    }, [sessionType])
 
     // Initialize with last used machine or first available
     useEffect(() => {
@@ -59,6 +80,61 @@ export function NewSession(props: {
         [getRecentPaths, machineId]
     )
 
+    const allPaths = useDirectorySuggestions(machineId, sessions, recentPaths)
+
+    const pathsToCheck = useMemo(
+        () => Array.from(new Set(allPaths)).slice(0, 1000),
+        [allPaths]
+    )
+
+    useEffect(() => {
+        let cancelled = false
+
+        if (!machineId || pathsToCheck.length === 0) {
+            setPathExistence({})
+            return () => { cancelled = true }
+        }
+
+        void props.api.checkMachinePathsExists(machineId, pathsToCheck)
+            .then((result) => {
+                if (cancelled) return
+                setPathExistence(result.exists ?? {})
+            })
+            .catch(() => {
+                if (cancelled) return
+                setPathExistence({})
+            })
+
+        return () => {
+            cancelled = true
+        }
+    }, [machineId, pathsToCheck, props.api])
+
+    const verifiedPaths = useMemo(
+        () => allPaths.filter((path) => pathExistence[path]),
+        [allPaths, pathExistence]
+    )
+
+    const getSuggestions = useCallback(async (query: string): Promise<Suggestion[]> => {
+        const lowered = query.toLowerCase()
+        return verifiedPaths
+            .filter((path) => path.toLowerCase().includes(lowered))
+            .slice(0, 8)
+            .map((path) => ({
+                key: path,
+                text: path,
+                label: path
+            }))
+    }, [verifiedPaths])
+
+    const activeQuery = (!isDirectoryFocused || suppressSuggestions) ? null : directory
+
+    const [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions] = useActiveSuggestions(
+        activeQuery,
+        getSuggestions,
+        { allowEmptyQuery: true, autoSelectFirst: false }
+    )
+
     const handleMachineChange = useCallback((newMachineId: string) => {
         setMachineId(newMachineId)
         // Auto-fill most recent path for the new machine
@@ -74,6 +150,54 @@ export function NewSession(props: {
         setDirectory(path)
     }, [])
 
+    const handleSuggestionSelect = useCallback((index: number) => {
+        const suggestion = suggestions[index]
+        if (suggestion) {
+            setDirectory(suggestion.text)
+            clearSuggestions()
+            setSuppressSuggestions(true)
+        }
+    }, [suggestions, clearSuggestions])
+
+    const handleDirectoryChange = useCallback((value: string) => {
+        setSuppressSuggestions(false)
+        setDirectory(value)
+    }, [])
+
+    const handleDirectoryFocus = useCallback(() => {
+        setSuppressSuggestions(false)
+        setIsDirectoryFocused(true)
+    }, [])
+
+    const handleDirectoryBlur = useCallback(() => {
+        setIsDirectoryFocused(false)
+    }, [])
+
+    const handleDirectoryKeyDown = useCallback((event: ReactKeyboardEvent<HTMLInputElement>) => {
+        if (suggestions.length === 0) return
+
+        if (event.key === 'ArrowUp') {
+            event.preventDefault()
+            moveUp()
+        }
+
+        if (event.key === 'ArrowDown') {
+            event.preventDefault()
+            moveDown()
+        }
+
+        if (event.key === 'Enter' || event.key === 'Tab') {
+            if (selectedIndex >= 0) {
+                event.preventDefault()
+                handleSuggestionSelect(selectedIndex)
+            }
+        }
+
+        if (event.key === 'Escape') {
+            clearSuggestions()
+        }
+    }, [suggestions, selectedIndex, moveUp, moveDown, clearSuggestions, handleSuggestionSelect])
+
     async function handleCreate() {
         if (!machineId || !directory.trim()) return
 
@@ -83,6 +207,9 @@ export function NewSession(props: {
                 machineId,
                 directory: directory.trim(),
                 agent,
+                yolo: yoloMode,
+                sessionType,
+                worktreeName: sessionType === 'worktree' ? (worktreeName.trim() || undefined) : undefined
             })
 
             if (result.type === 'success') {
@@ -137,14 +264,30 @@ export function NewSession(props: {
                 <label className="text-xs font-medium text-[var(--app-hint)]">
                     Directory
                 </label>
-                <input
-                    type="text"
-                    placeholder="/path/to/project"
-                    value={directory}
-                    onChange={(e) => setDirectory(e.target.value)}
-                    disabled={isFormDisabled}
-                    className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
-                />
+                <div className="relative">
+                    <input
+                        type="text"
+                        placeholder="/path/to/project"
+                        value={directory}
+                        onChange={(event) => handleDirectoryChange(event.target.value)}
+                        onKeyDown={handleDirectoryKeyDown}
+                        onFocus={handleDirectoryFocus}
+                        onBlur={handleDirectoryBlur}
+                        disabled={isFormDisabled}
+                        className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-50"
+                    />
+                    {suggestions.length > 0 && (
+                        <div className="absolute top-full left-0 right-0 z-10 mt-1">
+                            <FloatingOverlay maxHeight={200}>
+                                <Autocomplete
+                                    suggestions={suggestions}
+                                    selectedIndex={selectedIndex}
+                                    onSelect={handleSuggestionSelect}
+                                />
+                            </FloatingOverlay>
+                        </div>
+                    )}
+                </div>
 
                 {/* Recent Paths */}
                 {recentPaths.length > 0 && (
@@ -166,6 +309,77 @@ export function NewSession(props: {
                         </div>
                     </div>
                 )}
+            </div>
+
+            {/* Session Type */}
+            <div className="flex flex-col gap-1.5 px-3 py-3">
+                <label className="text-xs font-medium text-[var(--app-hint)]">
+                    Session type
+                </label>
+                <div className="flex flex-col gap-1.5">
+                    {(['simple', 'worktree'] as const).map((type) => (
+                        <div key={type} className="flex flex-col gap-2">
+                            {type === 'worktree' ? (
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        id="session-type-worktree"
+                                        type="radio"
+                                        name="sessionType"
+                                        value="worktree"
+                                        checked={sessionType === 'worktree'}
+                                        onChange={() => setSessionType('worktree')}
+                                        disabled={isFormDisabled}
+                                        className="accent-[var(--app-link)]"
+                                    />
+                                    <div className="flex-1">
+                                        <div className="min-h-[34px] flex items-center">
+                                            {sessionType === 'worktree' ? (
+                                                <input
+                                                    ref={worktreeInputRef}
+                                                    type="text"
+                                                    placeholder="Branch name (optional)"
+                                                    value={worktreeName}
+                                                    onChange={(e) => setWorktreeName(e.target.value)}
+                                                    disabled={isFormDisabled}
+                                                    className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-[var(--app-link)] disabled:opacity-60"
+                                                />
+                                            ) : (
+                                                <>
+                                                    <label
+                                                        htmlFor="session-type-worktree"
+                                                        className="text-sm capitalize cursor-pointer"
+                                                    >
+                                                        Worktree
+                                                    </label>
+                                                    <span className="ml-2 text-xs text-[var(--app-hint)]">
+                                                        Create a new git worktree next to the repo
+                                                    </span>
+                                                </>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            ) : (
+                                <label className="flex items-center gap-2 cursor-pointer min-h-[34px]">
+                                    <input
+                                        id="session-type-simple"
+                                        type="radio"
+                                        name="sessionType"
+                                        value="simple"
+                                        checked={sessionType === 'simple'}
+                                        onChange={() => setSessionType('simple')}
+                                        disabled={isFormDisabled}
+                                        className="accent-[var(--app-link)]"
+                                    />
+                                    <span className="text-sm capitalize">Simple</span>
+                                    <span className="text-xs text-[var(--app-hint)]">
+                                        Use the selected directory as-is
+                                    </span>
+                                </label>
+                            )}
+                        </div>
+                    ))}
+                </div>
             </div>
 
             {/* Agent Selector */}
@@ -191,6 +405,34 @@ export function NewSession(props: {
                             <span className="text-sm capitalize">{agentType}</span>
                         </label>
                     ))}
+                </div>
+            </div>
+
+            {/* YOLO Mode */}
+            <div className="flex flex-col gap-1.5 px-3 py-3">
+                <label className="text-xs font-medium text-[var(--app-hint)]">
+                    YOLO mode
+                </label>
+                <div className="flex items-center justify-between gap-3">
+                    <div className="flex flex-col">
+                        <span className="text-sm text-[var(--app-fg)]">
+                            Bypass approvals and sandbox
+                        </span>
+                        <span className="text-xs text-[var(--app-hint)]">
+                            Uses dangerous agent flags when spawning.
+                        </span>
+                    </div>
+                    <label className="relative inline-flex h-5 w-9 items-center">
+                        <input
+                            type="checkbox"
+                            checked={yoloMode}
+                            onChange={(e) => setYoloMode(e.target.checked)}
+                            disabled={isFormDisabled}
+                            className="peer sr-only"
+                        />
+                        <span className="absolute inset-0 rounded-full bg-[var(--app-border)] transition-colors peer-checked:bg-[var(--app-link)] peer-disabled:opacity-50" />
+                        <span className="absolute left-0.5 h-4 w-4 rounded-full bg-[var(--app-bg)] transition-transform peer-checked:translate-x-4 peer-disabled:opacity-50" />
+                    </label>
                 </div>
             </div>
 
