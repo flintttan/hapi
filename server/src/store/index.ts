@@ -61,6 +61,7 @@ export type StoredMachine = {
     active: boolean
     activeAt: number | null
     seq: number
+    userId: string
 }
 
 export type StoredMessage = {
@@ -155,7 +156,8 @@ function toStoredMachine(row: DbMachineRow): StoredMachine {
         daemonStateVersion: row.daemon_state_version,
         active: row.active === 1,
         activeAt: row.active_at,
-        seq: row.seq
+        seq: row.seq,
+        userId: row.user_id
     }
 }
 

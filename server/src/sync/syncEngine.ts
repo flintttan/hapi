@@ -98,6 +98,7 @@ export interface Machine {
     metadataVersion: number
     daemonState: unknown | null
     daemonStateVersion: number
+    userId: string
 }
 
 export interface DecryptedMessage {
@@ -242,14 +243,14 @@ export class SyncEngine {
 
     getMachines(userId: string): Machine[] {
         return Array.from(this.machines.values()).filter(m =>
-            m.metadata?.userId === userId
+            m.userId === userId
         )
     }
 
     getMachine(machineId: string, userId: string): Machine | undefined {
         const machine = this.machines.get(machineId)
         if (!machine) return undefined
-        if (machine.metadata?.userId !== userId) return undefined
+        if (machine.userId !== userId) return undefined
         return machine
     }
 
@@ -388,7 +389,7 @@ export class SyncEngine {
             this.emit({
                 type: 'machine-updated',
                 machineId: machine.id,
-                userId: machine.metadata?.userId as string | undefined,
+                userId: machine.userId,
                 data: { activeAt: machine.activeAt }
             })
         }
@@ -419,7 +420,7 @@ export class SyncEngine {
             this.emit({
                 type: 'machine-updated',
                 machineId: machine.id,
-                userId: machine.metadata?.userId as string | undefined,
+                userId: machine.userId,
                 data: { active: false }
             })
         }
@@ -513,7 +514,7 @@ export class SyncEngine {
                 this.emit({
                     type: 'machine-updated',
                     machineId,
-                    userId: deletedMachine?.metadata?.userId as string | undefined,
+                    userId: deletedMachine?.userId,
                     data: null
                 })
             }
@@ -547,14 +548,15 @@ export class SyncEngine {
             metadata,
             metadataVersion: stored.metadataVersion,
             daemonState: stored.daemonState,
-            daemonStateVersion: stored.daemonStateVersion
+            daemonStateVersion: stored.daemonStateVersion,
+            userId: stored.userId
         }
 
         this.machines.set(machineId, machine)
         this.emit({
             type: 'machine-updated',
             machineId,
-            userId: machine.metadata?.userId as string | undefined,
+            userId: machine.userId,
             data: machine
         })
         return machine
