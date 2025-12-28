@@ -32,8 +32,8 @@ const SESSION_A: Session = {
     metadataVersion: 1,
     agentState: null,
     agentStateVersion: 0,
-    permissionMode: null,
-    modelMode: null
+    permissionMode: undefined,
+    modelMode: undefined
 }
 
 const SESSION_B: Session = {
@@ -55,8 +55,8 @@ const SESSION_B: Session = {
     metadataVersion: 1,
     agentState: null,
     agentStateVersion: 0,
-    permissionMode: null,
-    modelMode: null
+    permissionMode: undefined,
+    modelMode: undefined
 }
 
 // Mock machines

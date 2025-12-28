@@ -1,43 +1,47 @@
-# hapi
+# HAPI
 
-HAPI means "哈皮," a Chinese transliteration of [Happy](https://github.com/slopus/happy). Great credit to the original project.
+> **Fork Notice**: This is a fork of [tiann/hapi](https://github.com/tiann/hapi) with additional features and improvements. The upstream project is based on [slopus/happy](https://github.com/slopus/happy). Great credit to both original projects!
 
-Run Claude Code / Codex / Gemini sessions locally and control them remotely through a Web / PWA / Telegram Mini App.
+HAPI means "哈皮," a Chinese transliteration of Happy. Run Claude Code / Codex / Gemini sessions locally and control them remotely through a Web / PWA / Telegram Mini App.
+
+## Key Features of This Fork
+
+- ✅ **Multi-user support** - Complete user authentication and session isolation
+- ✅ **Enhanced security** - User-based access control and resource ownership validation
+- ✅ **Improved Web UI** - Allow message sending during agent thinking (interrupt/continue conversations)
+- ✅ **Slash commands** - Full autocomplete support for custom commands
+- ✅ **Better documentation** - Comprehensive guides for deployment and features
 
 > **Why HAPI?** HAPI is a local-first alternative to Happy. See [Why Not Happy?](docs/WHY_NOT_HAPPY.md) for the key differences.
 
-## Features
+## Core Features
 
-- Start AI coding sessions from any machine.
-- Monitor and control sessions from your phone or browser.
-- Approve or deny tool permissions remotely.
-- Browse files and view git diffs.
-- Track session progress with todo lists.
-- Supports multiple AI backends: Claude Code, Codex, and Gemini.
+- 🚀 Start AI coding sessions from any machine
+- 📱 Monitor and control sessions from your phone or browser
+- 🔐 Multi-user authentication with session isolation
+- ✅ Approve or deny tool permissions remotely
+- 📁 Browse files and view git diffs
+- 📝 Track session progress with todo lists
+- 🤖 Multiple AI backends: Claude Code, Codex, and Gemini
+- 💬 Slash commands with autocomplete
+- 🔄 Real-time permission and model mode synchronization
 
 ## Installation
 
-### Homebrew (macOS/Linux)
+### From Source (Recommended for this fork)
 
 ```bash
-brew install tiann/tap/hapi
+git clone https://github.com/flintttan/hapi.git
+cd hapi
+bun install
+bun run build:single-exe
 ```
 
-### npm/npx
+The compiled binary will be in `cli/dist/`.
 
-```bash
-npx @twsxtd/hapi
-```
+### Prebuilt Binary
 
-Or install globally:
-
-```bash
-npm install -g @twsxtd/hapi
-```
-
-### Prebuilt binary
-
-Download from [Releases](https://github.com/flintttan/hapi/releases).
+Download from [GitHub Releases](https://github.com/flintttan/hapi/releases).
 
 **macOS users**: Remove the quarantine attribute before running:
 
@@ -93,42 +97,48 @@ docker build -t hapi-server -f server/Dockerfile .
 
 </details>
 
-## Quickstart
+## Quick Start
 
-1. Start the server on a machine you control:
+### Single-User Setup (Default)
 
-```bash
-hapi server
-# or: npx @twsxtd/hapi server
-```
-
-2. If the server has no public IP, expose it over HTTPS:
-   - Cloudflare Tunnel: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/
-   - Tailscale: https://tailscale.com/kb/
-
-3. Run the CLI on the machine where you want sessions:
+1. **Start the server** on a machine you control:
 
 ```bash
-# If the server is not on localhost:3006
-export HAPI_SERVER_URL="https://your-domain.example"
-
-hapi
-# or: npx @twsxtd/hapi
+./hapi server
 ```
 
-4. Open the UI in a browser at the server URL and log in with `CLI_API_TOKEN`.
+The server will start on `http://localhost:3006` with an auto-generated access token.
 
-### Finding Your Access Token
-
-On first run, an Access Token is automatically generated and saved to `~/.hapi/settings.json`.
-
-View your token:
+2. **Find your access token**:
 
 ```bash
 cat ~/.hapi/settings.json | grep cliApiToken
 ```
 
-Or set your own via environment variable (takes priority over generated token):
+3. **Run the CLI** on the machine where you want sessions:
+
+```bash
+# If server is not on localhost:3006
+export HAPI_SERVER_URL="https://your-domain.example"
+
+./hapi
+```
+
+4. **Open the Web UI** at the server URL and log in with your `CLI_API_TOKEN`.
+
+### Multi-User Setup
+
+For production deployment with multiple users, see [Multi-User Quick Start](docs/quickstart-multi-user.md).
+
+### Expose Server Over HTTPS
+
+If your server has no public IP:
+- **Cloudflare Tunnel**: [Setup Guide](docs/cloudflared-setup.md)
+- **Tailscale**: https://tailscale.com/kb/
+
+### Custom Access Token
+
+You can set your own token via environment variable (takes priority over auto-generated token):
 
 ```bash
 export CLI_API_TOKEN="your-secret-token"
@@ -175,19 +185,43 @@ Environment variables take priority over the file.
 - Claude CLI installed and logged in (`claude` on PATH) for Claude Code sessions.
 - Bun if building from source.
 
-## Build from source
+## Build from Source
 
 ```bash
 bun install
 bun run build:single-exe
 ```
 
-## Docs
+The compiled binary will be in `cli/dist/hapi`.
 
-- `docs/WHY_NOT_HAPPY.md` - Why HAPI exists: architectural differences from Happy
-- `cli/README.md` - CLI usage and config
-- `server/README.md` - Server setup and architecture
-- `web/README.md` - Web app behavior and dev workflow
+## Project Links
+
+- 🏠 **This Fork**: [flintttan/hapi](https://github.com/flintttan/hapi)
+- ⬆️ **Upstream**: [tiann/hapi](https://github.com/tiann/hapi)
+- 🎯 **Original Project**: [slopus/happy](https://github.com/slopus/happy)
+- 📦 **Docker Images**: [ghcr.io/flintttan/hapi-server](https://github.com/flintttan/hapi/pkgs/container/hapi-server)
+- 📝 **Releases**: [GitHub Releases](https://github.com/flintttan/hapi/releases)
+
+## Documentation
+
+### 📚 Main Documentation
+- **[docs/](docs/)** - Complete documentation index
+- **[docs/WHY_NOT_HAPPY.md](docs/WHY_NOT_HAPPY.md)** - Why HAPI exists: architectural differences from Happy
+
+### 🚀 Quick Start Guides
+- **[docs/QUICKSTART_MCP.md](docs/QUICKSTART_MCP.md)** - MCP DevTools quick start
+- **[docs/quickstart-multi-user.md](docs/quickstart-multi-user.md)** - Multi-user deployment quick start
+
+### 🔧 Features & Setup
+- **[docs/AUTO_LOGIN.md](docs/AUTO_LOGIN.md)** - Automatic authentication
+- **[docs/AGENTS.md](docs/AGENTS.md)** - Agent types (Claude, Codex, Gemini)
+- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** - Deployment guide
+- **[docs/multi-user-guide.md](docs/multi-user-guide.md)** - Multi-user setup
+
+### 💻 Component Documentation
+- **[cli/README.md](cli/README.md)** - CLI usage and config
+- **[server/README.md](server/README.md)** - Server setup and architecture
+- **[web/README.md](web/README.md)** - Web app behavior and dev workflow
 
 ## License
 

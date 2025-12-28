@@ -248,8 +248,13 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
+        const userId = c.get('userId') as string
+        if (!userId) {
+            return c.json({ error: 'Unauthorized' }, 401)
+        }
+
         // Session must exist but doesn't need to be active
-        const sessionResult = requireSessionFromParam(c, engine)
+        const sessionResult = requireSessionFromParam(c, engine, userId)
         if (sessionResult instanceof Response) {
             return sessionResult
         }

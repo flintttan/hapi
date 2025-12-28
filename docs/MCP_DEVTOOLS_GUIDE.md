@@ -41,7 +41,7 @@ Machine ID: d15f62f7-6089-4f54-9fd1-b4903324aa43
 
 ```bash
 cd /Users/tanfulin/llm/hapi
-./test-mcp-devtools.sh
+./scripts/test-mcp-devtools.sh
 ```
 
 ### 方法2：手动启动

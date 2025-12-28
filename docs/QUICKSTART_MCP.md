@@ -17,7 +17,7 @@
 
 ```bash
 cd /Users/tanfulin/llm/hapi
-./start-hapi-with-mcp.sh
+./scripts/start-hapi-with-mcp.sh
 ```
 
 这个脚本会：
@@ -131,7 +131,7 @@ from the current page"
 运行以下命令启动：
 
 ```bash
-cd /Users/tanfulin/llm/hapi && ./start-hapi-with-mcp.sh
+cd /Users/tanfulin/llm/hapi && ./scripts/start-hapi-with-mcp.sh
 ```
 
 或者直接：

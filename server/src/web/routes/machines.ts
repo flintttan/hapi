@@ -69,15 +69,20 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
     })
 
     app.post('/machines/:id/paths/exists', async (c) => {
-        const engine = getSyncEngine()
-        if (!engine) {
-            return c.json({ error: 'Not connected' }, 503)
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const userId = c.get('userId') as string
+        if (!userId) {
+            return c.json({ error: 'Unauthorized' }, 401)
         }
 
         const machineId = c.req.param('id')
-        const machine = engine.getMachine(machineId)
-        if (!machine) {
-            return c.json({ error: 'Machine not found' }, 404)
+        const machine = requireMachine(c, engine, machineId, userId)
+        if (machine instanceof Response) {
+            return machine
         }
 
         const body = await c.req.json().catch(() => null)

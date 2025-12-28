@@ -94,7 +94,9 @@ export function HappyComposer(props: {
     const controlsDisabled = disabled || !active || threadIsDisabled
     const trimmed = composerText.trim()
     const hasText = trimmed.length > 0
-    const canSend = hasText && !controlsDisabled && !threadIsRunning
+    // Allow sending messages even when agent is thinking (threadIsRunning)
+    // This enables interrupting or continuing the conversation mid-response
+    const canSend = hasText && !controlsDisabled
 
     const [inputState, setInputState] = useState<TextInputState>({
         text: '',
