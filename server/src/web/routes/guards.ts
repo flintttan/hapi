@@ -46,17 +46,10 @@ export function requireMachine(
     machineId: string,
     userId: string
 ): Machine | Response {
-    const machine = engine.getMachine(machineId)
+    const machine = engine.getMachine(machineId, userId)
     if (!machine) {
         // Return 404 to hide resource existence
         console.warn(`[Security] User ${userId} attempted to access non-existent machine ${machineId}`)
-        return c.json({ error: 'Machine not found' }, 404)
-    }
-
-    // Verify ownership
-    if (machine.userId !== userId) {
-        // Return 404 to hide resource existence from unauthorized users
-        console.warn(`[Security] User ${userId} attempted unauthorized access to machine ${machineId} owned by ${machine.userId}`)
         return c.json({ error: 'Machine not found' }, 404)
     }
 
