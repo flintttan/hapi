@@ -2,6 +2,7 @@ import chalk from 'chalk'
 import os from 'node:os'
 import * as readline from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
+import axios from 'axios'
 import { configuration } from '@/configuration'
 import { readSettings, clearMachineId, updateSettings } from '@/persistence'
 
@@ -44,6 +45,14 @@ export async function handleAuthCommand(args: string[]): Promise<void> {
     }
 
     if (subcommand === 'login') {
+        // Check for --auto flag
+        const hasAutoFlag = args.includes('--auto')
+
+        if (hasAutoFlag) {
+            await handleAutoLogin()
+            return
+        }
+
         if (!process.stdin.isTTY) {
             console.error(chalk.red('Cannot prompt for token in non-TTY environment.'))
             console.error(chalk.gray('Set CLI_API_TOKEN environment variable instead.'))
@@ -160,19 +169,162 @@ async function handleSetup(): Promise<void> {
     }
 }
 
+/**
+ * Handles automatic login flow using username and password
+ * This eliminates the need to manually copy token from web UI
+ */
+async function handleAutoLogin(): Promise<void> {
+    if (!process.stdin.isTTY) {
+        console.error(chalk.red('Cannot run auto login in non-TTY environment.'))
+        console.error(chalk.gray('Use manual token login instead.'))
+        process.exit(1)
+    }
+
+    console.log(chalk.bold.cyan('\n🔐 HAPI Auto Login\n'))
+    console.log(chalk.gray('This will automatically configure your CLI using your account credentials.\n'))
+
+    const rl = readline.createInterface({ input, output })
+
+    try {
+        // Get server URL
+        const currentServerUrl = process.env.HAPI_SERVER_URL || configuration.serverUrl
+        console.log(chalk.bold('Step 1: Server Configuration'))
+        const serverUrl = await rl.question(chalk.cyan(`Server URL [${currentServerUrl}]: `))
+        const finalServerUrl = (serverUrl.trim() || currentServerUrl).replace(/\/$/, '')
+
+        // Validate URL
+        try {
+            new URL(finalServerUrl)
+        } catch {
+            console.error(chalk.red('\n❌ Invalid URL format. Please use http:// or https://'))
+            process.exit(1)
+        }
+
+        console.log('')
+
+        // Get credentials
+        console.log(chalk.bold('Step 2: Account Credentials'))
+        const username = await rl.question(chalk.cyan('Username: '))
+        
+        if (!username.trim()) {
+            console.error(chalk.red('\n❌ Username cannot be empty'))
+            process.exit(1)
+        }
+
+        // For password, we need to hide input
+        // Since readline doesn't support hidden input, we'll use a workaround
+        const password = await rl.question(chalk.cyan('Password: '))
+        
+        if (!password.trim()) {
+            console.error(chalk.red('\n❌ Password cannot be empty'))
+            process.exit(1)
+        }
+
+        console.log('')
+        console.log(chalk.bold('Step 3: Authenticating...'))
+
+        // Step 1: Login to get JWT token
+        let jwtToken: string
+        try {
+            const authResponse = await axios.post(`${finalServerUrl}/api/auth`, {
+                username: username.trim(),
+                password: password.trim()
+            })
+
+            jwtToken = authResponse.data.token
+            console.log(chalk.green('✓ Authentication successful'))
+        } catch (error: any) {
+            if (error.response?.status === 401) {
+                console.error(chalk.red('\n❌ Invalid username or password'))
+            } else if (error.response?.data?.error) {
+                console.error(chalk.red(`\n❌ ${error.response.data.error}`))
+            } else {
+                console.error(chalk.red('\n❌ Failed to authenticate. Please check your server URL and try again.'))
+                console.error(chalk.gray(`Error: ${error.message}`))
+            }
+            process.exit(1)
+        }
+
+        // Step 2: Generate CLI token using JWT
+        console.log(chalk.bold('Step 4: Generating CLI token...'))
+        let cliToken: string
+        try {
+            const tokenResponse = await axios.post(
+                `${finalServerUrl}/api/cli-tokens`,
+                {
+                    name: `CLI on ${os.hostname()}`
+                },
+                {
+                    headers: {
+                        'Authorization': `Bearer ${jwtToken}`
+                    }
+                }
+            )
+
+            cliToken = tokenResponse.data.token
+            console.log(chalk.green('✓ CLI token generated'))
+        } catch (error: any) {
+            console.error(chalk.red('\n❌ Failed to generate CLI token'))
+            if (error.response?.data?.error) {
+                console.error(chalk.gray(`Error: ${error.response.data.error}`))
+            } else {
+                console.error(chalk.gray(`Error: ${error.message}`))
+            }
+            process.exit(1)
+        }
+
+        // Step 3: Save configuration
+        console.log('')
+        console.log(chalk.bold('Step 5: Saving configuration...'))
+
+        await updateSettings(current => ({
+            ...current,
+            cliApiToken: cliToken,
+            serverUrl: finalServerUrl
+        }))
+        configuration._setCliApiToken(cliToken)
+
+        console.log(chalk.green(`\n✅ Configuration saved to ${configuration.settingsFile}`))
+        console.log('')
+        console.log(chalk.bold('Configuration summary:'))
+        console.log(chalk.gray(`  Server URL: ${finalServerUrl}`))
+        console.log(chalk.gray(`  Username: ${username.trim()}`))
+        console.log(chalk.gray(`  CLI Token: ${'*'.repeat(20)}...`))
+        console.log('')
+        console.log(chalk.bold.cyan('🎉 Auto login complete!'))
+        console.log('')
+        console.log(chalk.gray('Your machine will be automatically registered when you start a session.'))
+        console.log('')
+        console.log(chalk.gray('You can now run:'))
+        console.log(chalk.cyan('  hapi            ') + chalk.gray('- Start a Claude Code session'))
+        console.log(chalk.cyan('  hapi daemon start') + chalk.gray(' - Start background daemon'))
+        console.log(chalk.cyan('  hapi doctor     ') + chalk.gray('- Check connection status'))
+        console.log('')
+    } finally {
+        rl.close()
+    }
+}
+
 function showHelp(): void {
     console.log(`
 ${chalk.bold('hapi auth')} - Authentication management
 
 ${chalk.bold('Usage:')}
   hapi auth setup             Interactive setup wizard (first-time setup)
+  hapi auth login             Enter and save CLI_API_TOKEN manually
+  hapi auth login --auto      Auto login with username/password (recommended)
   hapi auth status            Show current configuration
-  hapi auth login             Enter and save CLI_API_TOKEN
   hapi auth logout            Clear saved credentials
 
 ${chalk.bold('Token priority (highest to lowest):')}
   1. CLI_API_TOKEN environment variable
   2. ~/.hapi/settings.json
   3. Interactive prompt (on first run)
+
+${chalk.bold('Recommended workflow for new users:')}
+  1. Run: hapi auth login --auto
+  2. Enter your server URL, username, and password
+  3. CLI token will be automatically generated and saved
+  4. Your machine will be registered when you start a session
 `)
 }

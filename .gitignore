@@ -37,3 +37,8 @@ execplan/
 docker-compose.yml
 docker-compose.*.yml
 !docker-compose.example.yml
+
+# Runtime databases
+**/*.db
+**/*.db-shm
+**/*.db-wal

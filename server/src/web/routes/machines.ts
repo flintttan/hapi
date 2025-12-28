@@ -23,7 +23,7 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Unauthorized' }, 401)
         }
 
-        const machines = engine.getOnlineMachines().filter(m => m.userId === userId)
+        const machines = engine.getOnlineMachines(userId)
         return c.json({ machines })
     })
 
