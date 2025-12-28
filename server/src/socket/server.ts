@@ -94,10 +94,39 @@ export function createSocketServer(deps: SocketServerDeps): {
     cliNs.use((socket, next) => {
         const auth = socket.handshake.auth as Record<string, unknown> | undefined
         const token = typeof auth?.token === 'string' ? auth.token : null
-        if (!safeCompareStrings(token, configuration.cliApiToken)) {
-            return next(new Error('Invalid token'))
+        if (!token) {
+            return next(new Error('Missing token'))
         }
-        next()
+
+        // Try database CLI token first
+        const perUserTokenResult = deps.store.validateCliToken(token)
+        if (perUserTokenResult) {
+            socket.handshake.auth = {
+                ...auth,
+                userId: perUserTokenResult.userId,
+                machineId: auth?.machineId,
+                sessionId: auth?.sessionId
+            }
+            next()
+            return
+        }
+
+        // Fallback to hardcoded token for backward compatibility
+        if (safeCompareStrings(token, configuration.cliApiToken)) {
+            const cliUser = deps.store.getUserById('cli-user')
+            if (cliUser) {
+                socket.handshake.auth = {
+                    ...auth,
+                    userId: cliUser.id,
+                    machineId: auth?.machineId,
+                    sessionId: auth?.sessionId
+                }
+                next()
+                return
+            }
+        }
+
+        return next(new Error('Invalid token'))
     })
     cliNs.on('connection', (socket) => registerCliHandlers(socket, {
         io,

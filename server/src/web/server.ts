@@ -72,12 +72,16 @@ function createWebApp(options: {
     app.use('/api/*', corsMiddleware)
     app.use('/cli/*', corsMiddleware)
 
-    app.route('/cli', createCliRoutes(options.getSyncEngine))
-
     app.route('/api', createAuthRoutes(options.jwtSecret, options.store))
     app.route('/api', createRegisterRoutes(options.jwtSecret, options.store))
 
-    app.use('/api/*', createAuthMiddleware(options.jwtSecret, options.store))
+    // Apply auth middleware to both /api/* and /cli/* routes
+    const authMiddleware = createAuthMiddleware(options.jwtSecret, options.store)
+    app.use('/api/*', authMiddleware)
+    app.use('/cli/*', authMiddleware)
+
+    // CLI routes (now protected by auth middleware)
+    app.route('/cli', createCliRoutes(options.getSyncEngine))
     app.route('/api', createEventsRoutes(options.getSseManager))
     app.route('/api', createSessionsRoutes(options.getSyncEngine))
     app.route('/api', createMessagesRoutes(options.getSyncEngine))

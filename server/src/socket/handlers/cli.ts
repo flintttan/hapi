@@ -172,11 +172,14 @@ export function registerCliHandlers(socket: Socket, deps: CliHandlersDeps): void
             })()
             : raw
 
-        const msg = store.addMessage(sid, content, localId)
+        if (!userId) {
+            return
+        }
+        const msg = store.createMessage(sid, content, userId, localId)
 
         const todos = extractTodoWriteTodosFromMessageContent(content)
         if (todos) {
-            const updated = store.setSessionTodos(sid, todos, msg.createdAt)
+            const updated = store.setSessionTodos(sid, todos, msg.createdAt, userId)
             if (updated) {
                 onWebappEvent?.({ type: 'session-updated', sessionId: sid, data: { sid } })
             }
@@ -222,7 +225,11 @@ export function registerCliHandlers(socket: Socket, deps: CliHandlersDeps): void
         }
 
         const { sid, metadata, expectedVersion } = parsed.data
-        const result = store.updateSessionMetadata(sid, metadata, expectedVersion)
+        if (!userId) {
+            cb({ result: 'error' })
+            return
+        }
+        const result = store.updateSessionMetadata(sid, metadata, expectedVersion, userId)
         if (result.result === 'success') {
             cb({ result: 'success', version: result.version, metadata: result.value })
         } else if (result.result === 'version-mismatch') {
@@ -256,7 +263,11 @@ export function registerCliHandlers(socket: Socket, deps: CliHandlersDeps): void
         }
 
         const { sid, agentState, expectedVersion } = parsed.data
-        const result = store.updateSessionAgentState(sid, agentState, expectedVersion)
+        if (!userId) {
+            cb({ result: 'error' })
+            return
+        }
+        const result = store.updateSessionAgentState(sid, agentState, expectedVersion, userId)
         if (result.result === 'success') {
             cb({ result: 'success', version: result.version, agentState: result.value })
         } else if (result.result === 'version-mismatch') {
@@ -311,30 +322,21 @@ export function registerCliHandlers(socket: Socket, deps: CliHandlersDeps): void
         }
 
         const { machineId: id, metadata, expectedVersion } = parsed.data
-        const result = store.updateMachineMetadata(id, metadata, expectedVersion)
-        if (result.result === 'success') {
-            cb({ result: 'success', version: result.version, metadata: result.value })
-        } else if (result.result === 'version-mismatch') {
-            cb({ result: 'version-mismatch', version: result.version, metadata: result.value })
-        } else {
+        const userId = typeof auth?.userId === 'string' ? auth.userId : null
+        if (!userId) {
             cb({ result: 'error' })
+            return
         }
 
+        const result = store.updateMachineMetadata(id, metadata, expectedVersion, userId)
         if (result.result === 'success') {
-            const update = {
-                id: randomUUID(),
-                seq: Date.now(),
-                createdAt: Date.now(),
-                body: {
-                    t: 'update-machine' as const,
-                    machineId: id,
-                    metadata: { version: result.version, value: metadata },
-                    daemonState: null
-                }
+            const freshMachine = store.getMachine(id, userId)
+            if (freshMachine && deps.onWebappEvent) {
+                deps.onWebappEvent({ type: 'machine:metadata_updated', machine: freshMachine })
             }
-            socket.to(`machine:${id}`).emit('update', update)
-            onWebappEvent?.({ type: 'machine-updated', machineId: id, data: { id } })
         }
+
+        cb(result)
     }
 
     const handleMachineStateUpdate = (data: unknown, cb: (answer: unknown) => void) => {
@@ -345,30 +347,21 @@ export function registerCliHandlers(socket: Socket, deps: CliHandlersDeps): void
         }
 
         const { machineId: id, daemonState, expectedVersion } = parsed.data
-        const result = store.updateMachineDaemonState(id, daemonState, expectedVersion)
-        if (result.result === 'success') {
-            cb({ result: 'success', version: result.version, daemonState: result.value })
-        } else if (result.result === 'version-mismatch') {
-            cb({ result: 'version-mismatch', version: result.version, daemonState: result.value })
-        } else {
+        const userId = typeof auth?.userId === 'string' ? auth.userId : null
+        if (!userId) {
             cb({ result: 'error' })
+            return
         }
 
+        const result = store.updateMachineDaemonState(id, daemonState, expectedVersion, userId)
         if (result.result === 'success') {
-            const update = {
-                id: randomUUID(),
-                seq: Date.now(),
-                createdAt: Date.now(),
-                body: {
-                    t: 'update-machine' as const,
-                    machineId: id,
-                    metadata: null,
-                    daemonState: { version: result.version, value: daemonState }
-                }
+            const freshMachine = store.getMachine(id, userId)
+            if (freshMachine && deps.onWebappEvent) {
+                deps.onWebappEvent({ type: 'machine:updated', machine: freshMachine })
             }
-            socket.to(`machine:${id}`).emit('update', update)
-            onWebappEvent?.({ type: 'machine-updated', machineId: id, data: { id } })
         }
+
+        cb(result)
     }
 
     socket.on('machine-update-metadata', handleMachineMetadataUpdate)

@@ -245,7 +245,8 @@ export class Store {
             CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 
             CREATE TABLE IF NOT EXISTS machines (
-                id TEXT PRIMARY KEY,
+                id TEXT NOT NULL,
+                user_id TEXT NOT NULL DEFAULT 'admin-user',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
                 metadata TEXT,
@@ -255,7 +256,7 @@ export class Store {
                 active INTEGER DEFAULT 0,
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0,
-                user_id TEXT NOT NULL DEFAULT 'admin-user',
+                PRIMARY KEY (id, user_id),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_machines_user_id ON machines(user_id);
@@ -311,6 +312,43 @@ export class Store {
             } catch {
                 // Index might already exist, ignore error
             }
+        }
+
+        // Migrate machines table to composite primary key (id, user_id) for multi-user support
+        // Check if machines table needs migration
+        const machinesTableInfo = this.db.prepare('SELECT sql FROM sqlite_master WHERE type = ? AND name = ?').get('table', 'machines') as { sql: string } | undefined
+        if (machinesTableInfo && machinesTableInfo.sql.includes('id TEXT PRIMARY KEY')) {
+            // Old schema detected - needs migration
+            this.db.exec(`
+                -- Create new machines table with composite primary key
+                CREATE TABLE machines_new (
+                    id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL,
+                    metadata TEXT,
+                    metadata_version INTEGER DEFAULT 1,
+                    daemon_state TEXT,
+                    daemon_state_version INTEGER DEFAULT 1,
+                    active INTEGER DEFAULT 0,
+                    active_at INTEGER,
+                    seq INTEGER DEFAULT 0,
+                    PRIMARY KEY (id, user_id),
+                    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                );
+
+                -- Copy data from old table to new table
+                INSERT INTO machines_new SELECT * FROM machines;
+
+                -- Drop old table
+                DROP TABLE machines;
+
+                -- Rename new table to original name
+                ALTER TABLE machines_new RENAME TO machines;
+
+                -- Recreate index
+                CREATE INDEX idx_machines_user_id ON machines(user_id);
+            `)
         }
     }
 
