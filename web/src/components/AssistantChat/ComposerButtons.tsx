@@ -125,6 +125,7 @@ export function ComposerButtons(props: {
     switchDisabled: boolean
     isSwitching: boolean
     onSwitch: () => void
+    onSend?: () => void
 }) {
     return (
         <div className="flex items-center justify-between px-2 pb-2">
@@ -182,18 +183,35 @@ export function ComposerButtons(props: {
                 ) : null}
             </div>
 
-            <ComposerPrimitive.Send
-                disabled={props.controlsDisabled || !props.canSend}
-                aria-label="Send"
-                title="Send"
-                className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
-                    props.canSend && !props.controlsDisabled
-                        ? 'bg-black text-white'
-                        : 'bg-[#C0C0C0] text-white'
-                } disabled:cursor-not-allowed`}
-            >
-                <SendIcon />
-            </ComposerPrimitive.Send>
+            {props.onSend ? (
+                <button
+                    type="button"
+                    disabled={props.controlsDisabled || !props.canSend}
+                    onClick={props.onSend}
+                    aria-label="Send"
+                    title="Send"
+                    className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+                        props.canSend && !props.controlsDisabled
+                            ? 'bg-black text-white hover:bg-gray-800'
+                            : 'bg-[#C0C0C0] text-white'
+                    } disabled:cursor-not-allowed`}
+                >
+                    <SendIcon />
+                </button>
+            ) : (
+                <ComposerPrimitive.Send
+                    disabled={props.controlsDisabled || !props.canSend}
+                    aria-label="Send"
+                    title="Send"
+                    className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${
+                        props.canSend && !props.controlsDisabled
+                            ? 'bg-black text-white'
+                            : 'bg-[#C0C0C0] text-white'
+                    } disabled:cursor-not-allowed`}
+                >
+                    <SendIcon />
+                </ComposerPrimitive.Send>
+            )}
         </div>
     )
 }

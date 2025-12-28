@@ -1,5 +1,5 @@
-import { readdir } from 'fs/promises';
-import { join } from 'path';
+import { readdir, stat } from 'fs/promises';
+import { join, relative, sep } from 'path';
 import { homedir } from 'os';
 
 export interface SlashCommand {
@@ -63,8 +63,40 @@ function getUserCommandsDir(agent: string): string | null {
 }
 
 /**
+ * Recursively scan a directory for .md files.
+ * Returns paths relative to the base directory.
+ */
+async function scanDirectoryRecursive(dir: string, baseDir: string): Promise<string[]> {
+    const results: string[] = [];
+
+    try {
+        const entries = await readdir(dir, { withFileTypes: true });
+
+        for (const entry of entries) {
+            const fullPath = join(dir, entry.name);
+
+            if (entry.isDirectory()) {
+                // Recursively scan subdirectories
+                const subResults = await scanDirectoryRecursive(fullPath, baseDir);
+                results.push(...subResults);
+            } else if (entry.isFile() && entry.name.endsWith('.md')) {
+                // Get relative path from base directory
+                const relativePath = relative(baseDir, fullPath);
+                results.push(relativePath);
+            }
+        }
+    } catch {
+        // Ignore errors for individual directories
+    }
+
+    return results;
+}
+
+/**
  * Scan a directory for user-defined commands (*.md files).
  * Returns the command names (filename without extension).
+ * Supports nested directories - converts path separators to colons.
+ * Example: workflow/ui-design/capture.md -> workflow:ui-design:capture
  */
 async function scanUserCommands(agent: string): Promise<SlashCommand[]> {
     const dir = getUserCommandsDir(agent);
@@ -73,16 +105,17 @@ async function scanUserCommands(agent: string): Promise<SlashCommand[]> {
     }
 
     try {
-        const entries = await readdir(dir, { withFileTypes: true });
+        const filePaths = await scanDirectoryRecursive(dir, dir);
         const commands: SlashCommand[] = [];
 
-        for (const entry of entries) {
-            if (!entry.isFile()) continue;
-            if (!entry.name.endsWith('.md')) continue;
+        for (const filePath of filePaths) {
+            // Remove .md extension
+            const nameWithPath = filePath.slice(0, -3);
+            if (!nameWithPath) continue;
 
-            // Remove .md extension to get command name
-            const name = entry.name.slice(0, -3);
-            if (!name) continue;
+            // Convert path separators to colons
+            // Example: workflow/ui-design/capture -> workflow:ui-design:capture
+            const name = nameWithPath.split(sep).join(':');
 
             commands.push({
                 name,
