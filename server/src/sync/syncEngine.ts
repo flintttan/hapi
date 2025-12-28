@@ -79,6 +79,7 @@ export interface Session {
     todos?: TodoItem[]
     permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | null
     modelMode?: 'default' | 'sonnet' | 'opus' | null
+    userId: string
 }
 
 export interface Machine {
@@ -226,14 +227,14 @@ export class SyncEngine {
 
     getSessions(userId: string): Session[] {
         return Array.from(this.sessions.values()).filter(s =>
-            s.metadata?.userId === userId
+            s.userId === userId
         )
     }
 
     getSession(sessionId: string, userId: string): Session | undefined {
         const session = this.sessions.get(sessionId)
         if (!session) return undefined
-        if (session.metadata?.userId !== userId) return undefined
+        if (session.userId !== userId) return undefined
         return session
     }
 
@@ -350,7 +351,7 @@ export class SyncEngine {
             this.emit({
                 type: 'session-updated',
                 sessionId: session.id,
-                userId: session.metadata?.userId as string | undefined,
+                userId: session.userId,
                 data: { activeAt: session.activeAt, thinking: session.thinking }
             })
         }
@@ -373,7 +374,7 @@ export class SyncEngine {
         this.emit({
             type: 'session-updated',
             sessionId: session.id,
-            userId: session.metadata?.userId as string | undefined,
+            userId: session.userId,
             data: { active: false, thinking: false }
         })
     }
@@ -416,7 +417,7 @@ export class SyncEngine {
             this.emit({
                 type: 'session-updated',
                 sessionId: session.id,
-                userId: session.metadata?.userId as string | undefined,
+                userId: session.userId,
                 data: { active: false }
             })
         }
@@ -444,7 +445,7 @@ export class SyncEngine {
                 this.emit({
                     type: 'session-removed',
                     sessionId,
-                    userId: deletedSession?.metadata?.userId as string | undefined
+                    userId: deletedSession?.userId
                 })
             }
             return null
@@ -499,14 +500,15 @@ export class SyncEngine {
             thinkingAt: existing?.thinkingAt ?? 0,
             todos,
             permissionMode: existing?.permissionMode ?? null,
-            modelMode: existing?.modelMode ?? null
+            modelMode: existing?.modelMode ?? null,
+            userId: stored.userId
         }
 
         this.sessions.set(sessionId, session)
         this.emit({
             type: existing ? 'session-updated' : 'session-added',
             sessionId,
-            userId: session.metadata?.userId as string | undefined,
+            userId: session.userId,
             data: session
         })
         return session
@@ -642,7 +644,7 @@ export class SyncEngine {
         this.emit({
             type: 'message-received',
             sessionId,
-            userId: session?.metadata?.userId as string | undefined,
+            userId: session?.userId,
             message: {
                 id: msg.id,
                 seq: msg.seq,
@@ -701,7 +703,7 @@ export class SyncEngine {
             this.emit({
                 type: 'session-updated',
                 sessionId,
-                userId: session.metadata?.userId as string | undefined,
+                userId: session.userId,
                 data: session
             })
         }
@@ -714,7 +716,7 @@ export class SyncEngine {
             this.emit({
                 type: 'session-updated',
                 sessionId,
-                userId: session.metadata?.userId as string | undefined,
+                userId: session.userId,
                 data: session
             })
         }

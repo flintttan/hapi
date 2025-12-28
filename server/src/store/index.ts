@@ -48,6 +48,7 @@ export type StoredSession = {
     active: boolean
     activeAt: number | null
     seq: number
+    userId: string
 }
 
 export type StoredMachine = {
@@ -141,7 +142,8 @@ function toStoredSession(row: DbSessionRow): StoredSession {
         todosUpdatedAt: row.todos_updated_at,
         active: row.active === 1,
         activeAt: row.active_at,
-        seq: row.seq
+        seq: row.seq,
+        userId: row.user_id
     }
 }
 
