@@ -259,6 +259,17 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return sessionResult
         }
 
+        // Check if commands are already cached in session metadata
+        if (sessionResult.session.metadata?.slashCommands && Array.isArray(sessionResult.session.metadata.slashCommands)) {
+            // Convert array of command names to SlashCommand objects
+            const commands = sessionResult.session.metadata.slashCommands.map(name => ({
+                name,
+                source: 'user' as const
+            }))
+            return c.json({ success: true, commands })
+        }
+
+        // Fallback to RPC call if not cached
         // Get agent type from session metadata, default to 'claude'
         const agent = sessionResult.session.metadata?.flavor ?? 'claude'
 
