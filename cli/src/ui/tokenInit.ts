@@ -52,16 +52,16 @@ async function promptForToken(): Promise<string> {
     console.log(chalk.bold.cyan('\n🚀 Welcome to HAPI CLI!\n'))
     console.log(chalk.yellow('No CLI_API_TOKEN found. Let\'s get you set up.\n'))
 
-    console.log(chalk.bold('Quick Setup:'))
+    console.log(chalk.bold.white('Quick Setup:'))
     console.log(chalk.cyan('  Run: hapi auth setup'))
-    console.log(chalk.gray('  This will guide you through the complete setup process.\n'))
+    console.log(chalk.dim('  This will guide you through the complete setup process.\n'))
 
-    console.log(chalk.bold('Or enter your token now:'))
-    console.log(chalk.gray('How to get your token:'))
-    console.log(chalk.gray('  1. Open your HAPI server URL in a browser'))
-    console.log(chalk.gray('  2. Register or login to your account'))
-    console.log(chalk.gray('  3. Click your avatar and select "Manage CLI Tokens"'))
-    console.log(chalk.gray('  4. Generate a new token and copy it\n'))
+    console.log(chalk.bold.white('Or enter your token now:'))
+    console.log(chalk.dim('How to get your token:'))
+    console.log(chalk.dim('  1. Open your HAPI server URL in a browser'))
+    console.log(chalk.dim('  2. Register or login to your account'))
+    console.log(chalk.dim('  3. Click your avatar and select "Manage CLI Tokens"'))
+    console.log(chalk.dim('  4. Generate a new token and copy it\n'))
 
     try {
         const token = await rl.question(chalk.cyan('Enter CLI_API_TOKEN (or press Ctrl+C to exit and run "hapi auth setup"): '))
@@ -69,10 +69,10 @@ async function promptForToken(): Promise<string> {
             throw new Error('Token cannot be empty')
         }
         console.log(chalk.green(`\n✅ Token saved to ${configuration.settingsFile}`))
-        console.log(chalk.gray(`\nNext steps:`))
-        console.log(chalk.gray(`  • Your machine will be registered automatically`))
-        console.log(chalk.gray(`  • You can now run: hapi`))
-        console.log(chalk.gray(`  • Manage tokens in the web interface\n`))
+        console.log(chalk.dim(`\nNext steps:`))
+        console.log(chalk.dim(`  • Your machine will be registered automatically`))
+        console.log(chalk.dim(`  • You can now run: hapi`))
+        console.log(chalk.dim(`  • Manage tokens in the web interface\n`))
         return token.trim()
     } finally {
         rl.close()

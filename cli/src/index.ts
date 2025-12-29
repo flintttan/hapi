@@ -195,7 +195,7 @@ import { getCliArgs } from './utils/cliArgs'
   } else if (subcommand === 'notify') {
     // Handle notification command
     console.error(chalk.red('The `hapi notify` command is not available in direct-connect mode.'))
-    console.error(chalk.gray('Use Telegram notifications from hapi-server instead.'))
+    console.error(chalk.dim('Use Telegram notifications from hapi-server instead.'))
     process.exit(1)
     return;
   } else if (subcommand === 'daemon') {
@@ -294,9 +294,9 @@ import { getCliArgs } from './utils/cliArgs'
       }
     } else {
       console.log(`
-${chalk.bold('hapi daemon')} - Daemon management
+${chalk.bold.white('hapi daemon')} - Daemon management
 
-${chalk.bold('Usage:')}
+${chalk.bold.white('Usage:')}
   hapi daemon start              Start the daemon (detached)
   hapi daemon stop               Stop the daemon (sessions stay alive)
   hapi daemon status             Show daemon status
@@ -305,9 +305,9 @@ ${chalk.bold('Usage:')}
   If you want to kill all hapi related processes run 
   ${chalk.cyan('hapi doctor clean')}
 
-${chalk.bold('Note:')} The daemon runs in the background and manages Claude sessions.
+${chalk.bold.white('Note:')} The daemon runs in the background and manages Claude sessions.
 
-${chalk.bold('To clean up runaway processes:')} Use ${chalk.cyan('hapi doctor clean')}
+${chalk.bold.white('To clean up runaway processes:')} Use ${chalk.cyan('hapi doctor clean')}
 `)
     }
     return;
@@ -359,9 +359,9 @@ ${chalk.bold('To clean up runaway processes:')} Use ${chalk.cyan('hapi doctor cl
     // Show help
     if (showHelp) {
       console.log(`
-${chalk.bold('hapi')} - Claude Code On the Go
+${chalk.bold.white('hapi')} - Claude Code On the Go
 
-${chalk.bold('Usage:')}
+${chalk.bold.white('Usage:')}
   hapi [options]         Start Claude with Telegram control (direct-connect)
   hapi auth              Manage authentication
   hapi codex             Start Codex mode
@@ -374,7 +374,7 @@ ${chalk.bold('Usage:')}
                             to spawn new sessions away from your computer
   hapi doctor            System diagnostics & troubleshooting
 
-${chalk.bold('Examples:')}
+${chalk.bold.white('Examples:')}
   hapi                    Start session (will prompt for token if not set)
   hapi auth login         Configure CLI_API_TOKEN interactively
   hapi --yolo             Start with bypassing permissions
@@ -382,12 +382,12 @@ ${chalk.bold('Examples:')}
   hapi auth status        Show direct-connect status
   hapi doctor             Run diagnostics
 
-${chalk.bold('hapi supports ALL Claude options!')}
+${chalk.bold.white('hapi supports ALL Claude options!')}
   Use any claude flag with hapi as you would with claude. Our favorite:
 
   hapi --resume
 
-${chalk.gray('─'.repeat(60))}
+${chalk.dim('─'.repeat(60))}
 ${chalk.bold.cyan('Claude Code Options (from `claude --help`):')}
 `)
       
@@ -444,12 +444,12 @@ ${chalk.bold.cyan('Claude Code Options (from `claude --help`):')}
           messageLower.includes('enotfound') || messageLower.includes('network error')) {
         const { configuration } = await import('@/configuration');
         console.error(chalk.yellow('Unable to connect to HAPI server'));
-        console.error(chalk.gray(`  Server URL: ${configuration.serverUrl}`));
-        console.error(chalk.gray('  Please check your network connection or server status'));
+        console.error(chalk.dim(`  Server URL: ${configuration.serverUrl}`));
+        console.error(chalk.dim('  Please check your network connection or server status'));
       } else if (httpStatus === 401 || httpStatus === 403 ||
                  messageLower.includes('unauthorized') || messageLower.includes('forbidden')) {
         console.error(chalk.red('Authentication error:'), message);
-        console.error(chalk.gray('  Run: hapi auth login'));
+        console.error(chalk.dim('  Run: hapi auth login'));
       } else {
         console.error(chalk.red('Error:'), message);
       }

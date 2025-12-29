@@ -25,21 +25,21 @@ export async function handleAuthCommand(args: string[]): Promise<void> {
         const settingsToken = settings.cliApiToken
         const hasToken = Boolean(envToken || settingsToken)
         const tokenSource = envToken ? 'environment' : (settingsToken ? 'settings file' : 'none')
-        console.log(chalk.bold('\nDirect Connect Status\n'))
-        console.log(chalk.gray(`  HAPI_SERVER_URL: ${configuration.serverUrl}`))
-        console.log(chalk.gray(`  CLI_API_TOKEN: ${hasToken ? 'set' : 'missing'}`))
-        console.log(chalk.gray(`  Token Source: ${tokenSource}`))
-        console.log(chalk.gray(`  Machine ID: ${settings.machineId ?? 'not set'}`))
-        console.log(chalk.gray(`  Host: ${os.hostname()}`))
+        console.log(chalk.bold.white('\nDirect Connect Status\n'))
+        console.log(chalk.dim(`  HAPI_SERVER_URL: ${configuration.serverUrl}`))
+        console.log(chalk.dim(`  CLI_API_TOKEN: ${hasToken ? 'set' : 'missing'}`))
+        console.log(chalk.dim(`  Token Source: ${tokenSource}`))
+        console.log(chalk.dim(`  Machine ID: ${settings.machineId ?? 'not set'}`))
+        console.log(chalk.dim(`  Host: ${os.hostname()}`))
 
         if (!hasToken) {
             console.log('')
             console.log(chalk.yellow('  Token not configured. To get your token:'))
-            console.log(chalk.gray('    1. Check the server startup logs (first run shows generated token)'))
-            console.log(chalk.gray('    2. Read ~/.hapi/settings.json on the server'))
-            console.log(chalk.gray('    3. Ask your server administrator (if token is set via env var)'))
+            console.log(chalk.dim('    1. Check the server startup logs (first run shows generated token)'))
+            console.log(chalk.dim('    2. Read ~/.hapi/settings.json on the server'))
+            console.log(chalk.dim('    3. Ask your server administrator (if token is set via env var)'))
             console.log('')
-            console.log(chalk.gray('  Then run: hapi auth login'))
+            console.log(chalk.dim('  Then run: hapi auth login'))
         }
         return
     }
@@ -55,7 +55,7 @@ export async function handleAuthCommand(args: string[]): Promise<void> {
 
         if (!process.stdin.isTTY) {
             console.error(chalk.red('Cannot prompt for token in non-TTY environment.'))
-            console.error(chalk.gray('Set CLI_API_TOKEN environment variable instead.'))
+            console.error(chalk.dim('Set CLI_API_TOKEN environment variable instead.'))
             process.exit(1)
         }
 
@@ -88,7 +88,7 @@ export async function handleAuthCommand(args: string[]): Promise<void> {
         }))
         await clearMachineId()
         console.log(chalk.green('Cleared local credentials (token and machineId).'))
-        console.log(chalk.gray('Note: If CLI_API_TOKEN is set via environment variable, it will still be used.'))
+        console.log(chalk.dim('Note: If CLI_API_TOKEN is set via environment variable, it will still be used.'))
         return
     }
 
@@ -100,19 +100,19 @@ export async function handleAuthCommand(args: string[]): Promise<void> {
 async function handleSetup(): Promise<void> {
     if (!process.stdin.isTTY) {
         console.error(chalk.red('Cannot run setup in non-TTY environment.'))
-        console.error(chalk.gray('Set HAPI_SERVER_URL and CLI_API_TOKEN environment variables instead.'))
+        console.error(chalk.dim('Set HAPI_SERVER_URL and CLI_API_TOKEN environment variables instead.'))
         process.exit(1)
     }
 
     console.log(chalk.bold.cyan('\n🚀 HAPI CLI Setup Wizard\n'))
-    console.log(chalk.gray('This wizard will help you configure your HAPI CLI client.\n'))
+    console.log(chalk.dim('This wizard will help you configure your HAPI CLI client.\n'))
 
     const rl = readline.createInterface({ input, output })
 
     try {
         // Step 1: Server URL
-        console.log(chalk.bold('Step 1: Server Configuration'))
-        console.log(chalk.gray('Enter your HAPI server URL (e.g., https://hapi.example.com)'))
+        console.log(chalk.bold.white('Step 1: Server Configuration'))
+        console.log(chalk.dim('Enter your HAPI server URL (e.g., https://hapi.example.com)'))
         const currentServerUrl = process.env.HAPI_SERVER_URL || configuration.serverUrl
         const serverUrl = await rl.question(chalk.cyan(`Server URL [${currentServerUrl}]: `))
         const finalServerUrl = serverUrl.trim() || currentServerUrl
@@ -128,11 +128,11 @@ async function handleSetup(): Promise<void> {
         console.log('')
 
         // Step 2: CLI Token
-        console.log(chalk.bold('Step 2: Authentication Token'))
-        console.log(chalk.gray('To get your token:'))
-        console.log(chalk.gray('  1. Open ' + finalServerUrl + ' in your browser'))
-        console.log(chalk.gray('  2. Register or login to your account'))
-        console.log(chalk.gray('  3. Go to Settings and generate a new CLI token'))
+        console.log(chalk.bold.white('Step 2: Authentication Token'))
+        console.log(chalk.dim('To get your token:'))
+        console.log(chalk.dim('  1. Open ' + finalServerUrl + ' in your browser'))
+        console.log(chalk.dim('  2. Register or login to your account'))
+        console.log(chalk.dim('  3. Go to Settings and generate a new CLI token'))
         console.log('')
         const token = await rl.question(chalk.cyan('Enter your CLI token: '))
 
@@ -143,7 +143,7 @@ async function handleSetup(): Promise<void> {
 
         // Step 3: Save configuration
         console.log('')
-        console.log(chalk.bold('Step 3: Saving configuration...'))
+        console.log(chalk.bold.white('Step 3: Saving configuration...'))
 
         await updateSettings(current => ({
             ...current,
@@ -153,16 +153,16 @@ async function handleSetup(): Promise<void> {
 
         console.log(chalk.green(`\n✅ Configuration saved to ${configuration.settingsFile}`))
         console.log('')
-        console.log(chalk.bold('Configuration summary:'))
-        console.log(chalk.gray(`  Server URL: ${finalServerUrl}`))
-        console.log(chalk.gray(`  Token: ${'*'.repeat(Math.min(token.length, 20))}...`))
+        console.log(chalk.bold.white('Configuration summary:'))
+        console.log(chalk.dim(`  Server URL: ${finalServerUrl}`))
+        console.log(chalk.dim(`  Token: ${'*'.repeat(Math.min(token.length, 20))}...`))
         console.log('')
         console.log(chalk.bold.cyan('🎉 Setup complete!'))
         console.log('')
-        console.log(chalk.gray('You can now run:'))
-        console.log(chalk.cyan('  hapi            ') + chalk.gray('- Start a Claude Code session'))
-        console.log(chalk.cyan('  hapi daemon start') + chalk.gray(' - Start background daemon'))
-        console.log(chalk.cyan('  hapi doctor     ') + chalk.gray('- Check connection status'))
+        console.log(chalk.dim('You can now run:'))
+        console.log(chalk.cyan('  hapi            ') + chalk.dim('- Start a Claude Code session'))
+        console.log(chalk.cyan('  hapi daemon start') + chalk.dim(' - Start background daemon'))
+        console.log(chalk.cyan('  hapi doctor     ') + chalk.dim('- Check connection status'))
         console.log('')
     } finally {
         rl.close()
@@ -176,19 +176,19 @@ async function handleSetup(): Promise<void> {
 async function handleAutoLogin(): Promise<void> {
     if (!process.stdin.isTTY) {
         console.error(chalk.red('Cannot run auto login in non-TTY environment.'))
-        console.error(chalk.gray('Use manual token login instead.'))
+        console.error(chalk.dim('Use manual token login instead.'))
         process.exit(1)
     }
 
     console.log(chalk.bold.cyan('\n🔐 HAPI Auto Login\n'))
-    console.log(chalk.gray('This will automatically configure your CLI using your account credentials.\n'))
+    console.log(chalk.dim('This will automatically configure your CLI using your account credentials.\n'))
 
     const rl = readline.createInterface({ input, output })
 
     try {
         // Get server URL
         const currentServerUrl = process.env.HAPI_SERVER_URL || configuration.serverUrl
-        console.log(chalk.bold('Step 1: Server Configuration'))
+        console.log(chalk.bold.white('Step 1: Server Configuration'))
         const serverUrl = await rl.question(chalk.cyan(`Server URL [${currentServerUrl}]: `))
         const finalServerUrl = (serverUrl.trim() || currentServerUrl).replace(/\/$/, '')
 
@@ -203,9 +203,9 @@ async function handleAutoLogin(): Promise<void> {
         console.log('')
 
         // Get credentials
-        console.log(chalk.bold('Step 2: Account Credentials'))
+        console.log(chalk.bold.white('Step 2: Account Credentials'))
         const username = await rl.question(chalk.cyan('Username: '))
-        
+
         if (!username.trim()) {
             console.error(chalk.red('\n❌ Username cannot be empty'))
             process.exit(1)
@@ -214,14 +214,14 @@ async function handleAutoLogin(): Promise<void> {
         // For password, we need to hide input
         // Since readline doesn't support hidden input, we'll use a workaround
         const password = await rl.question(chalk.cyan('Password: '))
-        
+
         if (!password.trim()) {
             console.error(chalk.red('\n❌ Password cannot be empty'))
             process.exit(1)
         }
 
         console.log('')
-        console.log(chalk.bold('Step 3: Authenticating...'))
+        console.log(chalk.bold.white('Step 3: Authenticating...'))
 
         // Step 1: Login to get JWT token
         let jwtToken: string
@@ -240,13 +240,13 @@ async function handleAutoLogin(): Promise<void> {
                 console.error(chalk.red(`\n❌ ${error.response.data.error}`))
             } else {
                 console.error(chalk.red('\n❌ Failed to authenticate. Please check your server URL and try again.'))
-                console.error(chalk.gray(`Error: ${error.message}`))
+                console.error(chalk.dim(`Error: ${error.message}`))
             }
             process.exit(1)
         }
 
         // Step 2: Generate CLI token using JWT
-        console.log(chalk.bold('Step 4: Generating CLI token...'))
+        console.log(chalk.bold.white('Step 4: Generating CLI token...'))
         let cliToken: string
         try {
             const tokenResponse = await axios.post(
@@ -266,16 +266,16 @@ async function handleAutoLogin(): Promise<void> {
         } catch (error: any) {
             console.error(chalk.red('\n❌ Failed to generate CLI token'))
             if (error.response?.data?.error) {
-                console.error(chalk.gray(`Error: ${error.response.data.error}`))
+                console.error(chalk.dim(`Error: ${error.response.data.error}`))
             } else {
-                console.error(chalk.gray(`Error: ${error.message}`))
+                console.error(chalk.dim(`Error: ${error.message}`))
             }
             process.exit(1)
         }
 
         // Step 3: Save configuration
         console.log('')
-        console.log(chalk.bold('Step 5: Saving configuration...'))
+        console.log(chalk.bold.white('Step 5: Saving configuration...'))
 
         await updateSettings(current => ({
             ...current,
@@ -286,19 +286,19 @@ async function handleAutoLogin(): Promise<void> {
 
         console.log(chalk.green(`\n✅ Configuration saved to ${configuration.settingsFile}`))
         console.log('')
-        console.log(chalk.bold('Configuration summary:'))
-        console.log(chalk.gray(`  Server URL: ${finalServerUrl}`))
-        console.log(chalk.gray(`  Username: ${username.trim()}`))
-        console.log(chalk.gray(`  CLI Token: ${'*'.repeat(20)}...`))
+        console.log(chalk.bold.white('Configuration summary:'))
+        console.log(chalk.dim(`  Server URL: ${finalServerUrl}`))
+        console.log(chalk.dim(`  Username: ${username.trim()}`))
+        console.log(chalk.dim(`  CLI Token: ${'*'.repeat(20)}...`))
         console.log('')
         console.log(chalk.bold.cyan('🎉 Auto login complete!'))
         console.log('')
-        console.log(chalk.gray('Your machine will be automatically registered when you start a session.'))
+        console.log(chalk.dim('Your machine will be automatically registered when you start a session.'))
         console.log('')
-        console.log(chalk.gray('You can now run:'))
-        console.log(chalk.cyan('  hapi            ') + chalk.gray('- Start a Claude Code session'))
-        console.log(chalk.cyan('  hapi daemon start') + chalk.gray(' - Start background daemon'))
-        console.log(chalk.cyan('  hapi doctor     ') + chalk.gray('- Check connection status'))
+        console.log(chalk.dim('You can now run:'))
+        console.log(chalk.cyan('  hapi            ') + chalk.dim('- Start a Claude Code session'))
+        console.log(chalk.cyan('  hapi daemon start') + chalk.dim(' - Start background daemon'))
+        console.log(chalk.cyan('  hapi doctor     ') + chalk.dim('- Check connection status'))
         console.log('')
     } finally {
         rl.close()
@@ -307,21 +307,21 @@ async function handleAutoLogin(): Promise<void> {
 
 function showHelp(): void {
     console.log(`
-${chalk.bold('hapi auth')} - Authentication management
+${chalk.bold.white('hapi auth')} - Authentication management
 
-${chalk.bold('Usage:')}
+${chalk.bold.white('Usage:')}
   hapi auth setup             Interactive setup wizard (first-time setup)
   hapi auth login             Enter and save CLI_API_TOKEN manually
   hapi auth login --auto      Auto login with username/password (recommended)
   hapi auth status            Show current configuration
   hapi auth logout            Clear saved credentials
 
-${chalk.bold('Token priority (highest to lowest):')}
+${chalk.bold.white('Token priority (highest to lowest):')}
   1. CLI_API_TOKEN environment variable
   2. ~/.hapi/settings.json
   3. Interactive prompt (on first run)
 
-${chalk.bold('Recommended workflow for new users:')}
+${chalk.bold.white('Recommended workflow for new users:')}
   1. Run: hapi auth login --auto
   2. Enter your server URL, username, and password
   3. CLI token will be automatically generated and saved
