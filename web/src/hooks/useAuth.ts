@@ -7,6 +7,59 @@ export type AuthSource =
     | { type: 'accessToken'; token: string }
     | { type: 'password'; username: string; password: string }
 
+const JWT_TOKEN_PREFIX = 'hapi_jwt_token::'
+const JWT_USER_PREFIX = 'hapi_jwt_user::'
+
+function getJwtTokenKey(baseUrl: string): string {
+    return `${JWT_TOKEN_PREFIX}${baseUrl}`
+}
+
+function getJwtUserKey(baseUrl: string): string {
+    return `${JWT_USER_PREFIX}${baseUrl}`
+}
+
+function getStoredJwtToken(key: string): string | null {
+    try {
+        return localStorage.getItem(key)
+    } catch {
+        return null
+    }
+}
+
+function getStoredJwtUser(key: string): AuthResponse['user'] | null {
+    try {
+        const stored = localStorage.getItem(key)
+        return stored ? JSON.parse(stored) : null
+    } catch {
+        return null
+    }
+}
+
+function storeJwtToken(key: string, token: string): void {
+    try {
+        localStorage.setItem(key, token)
+    } catch {
+        // Ignore storage errors
+    }
+}
+
+function storeJwtUser(key: string, user: AuthResponse['user']): void {
+    try {
+        localStorage.setItem(key, JSON.stringify(user))
+    } catch {
+        // Ignore storage errors
+    }
+}
+
+function clearStoredJwt(tokenKey: string, userKey: string): void {
+    try {
+        localStorage.removeItem(tokenKey)
+        localStorage.removeItem(userKey)
+    } catch {
+        // Ignore storage errors
+    }
+}
+
 function decodeJwtExpMs(token: string): number | null {
     const parts = token.split('.')
     if (parts.length < 2) return null
@@ -44,6 +97,9 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
     isLoading: boolean
     error: string | null
 } {
+    const jwtTokenKey = useMemo(() => getJwtTokenKey(baseUrl), [baseUrl])
+    const jwtUserKey = useMemo(() => getJwtUserKey(baseUrl), [baseUrl])
+
     const [token, setToken] = useState<string | null>(null)
     const [user, setUser] = useState<AuthResponse['user'] | null>(null)
     const [isLoading, setIsLoading] = useState<boolean>(false)
@@ -93,6 +149,9 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                 setToken(auth.token)
                 setUser(auth.user)
                 setError(null)
+                // Persist JWT token and user info to localStorage
+                storeJwtToken(jwtTokenKey, auth.token)
+                storeJwtUser(jwtUserKey, auth.user)
                 return auth.token
             } catch {
                 const isExpired = expMs ? Date.now() >= expMs : false
@@ -100,6 +159,8 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                     tokenRef.current = null
                     setToken(null)
                     setUser(null)
+                    // Clear stored JWT on failure
+                    clearStoredJwt(jwtTokenKey, jwtUserKey)
                     const msg = currentSource.type === 'telegram'
                         ? 'Session expired. Reopen the Mini App from Telegram.'
                         : 'Session expired. Please login again.'
@@ -148,9 +209,14 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                 if (isCancelled) return
                 setToken(auth.token)
                 setUser(auth.user)
+                // Persist JWT token and user info to localStorage
+                storeJwtToken(jwtTokenKey, auth.token)
+                storeJwtUser(jwtUserKey, auth.user)
             } catch (e) {
                 if (isCancelled) return
                 setError(e instanceof Error ? e.message : 'Auth failed')
+                // Clear stored JWT on auth failure
+                clearStoredJwt(jwtTokenKey, jwtUserKey)
             } finally {
                 if (!isCancelled) {
                     setIsLoading(false)
@@ -163,7 +229,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
         return () => {
             isCancelled = true
         }
-    }, [authSource, baseUrl])
+    }, [authSource, baseUrl, jwtTokenKey, jwtUserKey])
 
     useEffect(() => {
         tokenRef.current = null
@@ -172,7 +238,9 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
         setToken(null)
         setUser(null)
         setError(null)
-    }, [baseUrl])
+        // Clear stored JWT when baseUrl changes
+        clearStoredJwt(jwtTokenKey, jwtUserKey)
+    }, [baseUrl, jwtTokenKey, jwtUserKey])
 
     useEffect(() => {
         if (!token || !authSource) {

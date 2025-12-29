@@ -3,6 +3,7 @@ import { getTelegramWebApp, isTelegramEnvironment } from './useTelegram'
 import type { AuthSource } from './useAuth'
 
 const ACCESS_TOKEN_PREFIX = 'hapi_access_token::'
+const JWT_TOKEN_PREFIX = 'hapi_jwt_token::'
 
 function getTelegramInitData(): string | null {
     const tg = getTelegramWebApp()
@@ -25,7 +26,19 @@ function getAccessTokenKey(baseUrl: string): string {
     return `${ACCESS_TOKEN_PREFIX}${baseUrl}`
 }
 
+function getJwtTokenKey(baseUrl: string): string {
+    return `${JWT_TOKEN_PREFIX}${baseUrl}`
+}
+
 function getStoredAccessToken(key: string): string | null {
+    try {
+        return localStorage.getItem(key)
+    } catch {
+        return null
+    }
+}
+
+function getStoredJwtToken(key: string): string | null {
     try {
         return localStorage.getItem(key)
     } catch {
@@ -49,6 +62,29 @@ function clearStoredAccessToken(key: string): void {
     }
 }
 
+function isJwtTokenValid(token: string): boolean {
+    try {
+        const parts = token.split('.')
+        if (parts.length < 2) return false
+
+        const payloadBase64Url = parts[1] ?? ''
+        const payloadBase64 = payloadBase64Url
+            .replace(/-/g, '+')
+            .replace(/_/g, '/')
+            .padEnd(Math.ceil(payloadBase64Url.length / 4) * 4, '=')
+
+        const decoded = globalThis.atob(payloadBase64)
+        const payload = JSON.parse(decoded) as { exp?: unknown }
+        if (typeof payload.exp !== 'number') return false
+
+        // Check if token expires in more than 1 minute
+        const expMs = payload.exp * 1000
+        return expMs > Date.now() + 60_000
+    } catch {
+        return false
+    }
+}
+
 export function useAuthSource(baseUrl: string): {
     authSource: AuthSource | null
     isLoading: boolean
@@ -62,6 +98,7 @@ export function useAuthSource(baseUrl: string): {
     const [isTelegram, setIsTelegram] = useState(false)
     const retryCountRef = useRef(0)
     const accessTokenKey = useMemo(() => getAccessTokenKey(baseUrl), [baseUrl])
+    const jwtTokenKey = useMemo(() => getJwtTokenKey(baseUrl), [baseUrl])
 
     // Initialize auth source on mount, with retry for delayed Telegram initData
     useEffect(() => {
@@ -76,6 +113,16 @@ export function useAuthSource(baseUrl: string): {
             // Telegram Mini App environment
             setAuthSource({ type: 'telegram', initData: telegramInitData })
             setIsTelegram(true)
+            setIsLoading(false)
+            return
+        }
+
+        // Check for stored JWT token first (from previous password login)
+        const storedJwt = getStoredJwtToken(jwtTokenKey)
+        if (storedJwt && isJwtTokenValid(storedJwt)) {
+            // Valid JWT token found - create a synthetic auth source
+            // This will trigger useAuth to validate and potentially refresh the token
+            setAuthSource({ type: 'accessToken', token: storedJwt })
             setIsLoading(false)
             return
         }
@@ -119,7 +166,7 @@ export function useAuthSource(baseUrl: string): {
         return () => {
             clearInterval(interval)
         }
-    }, [accessTokenKey])
+    }, [accessTokenKey, jwtTokenKey])
 
     const setAccessToken = useCallback((token: string) => {
         storeAccessToken(accessTokenKey, token)
