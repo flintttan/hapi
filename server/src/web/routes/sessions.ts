@@ -295,20 +295,25 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Unauthorized' }, 401)
         }
 
-        const sessionResult = requireSessionFromParam(c, engine, userId)
-        if (sessionResult instanceof Response) {
-            return sessionResult
+        const sessionId = c.req.param('id')
+
+        // Check if session exists and belongs to user
+        const session = engine.getSession(sessionId, userId)
+        if (!session) {
+            // Session doesn't exist or doesn't belong to user
+            // Return 204 to make delete idempotent (already deleted is success)
+            return c.body(null, 204)
         }
 
+        // Check if force flag is required for active sessions
         const force = c.req.query('force') === 'true' || c.req.query('force') === '1'
-        if (sessionResult.session.active && !force) {
+        if (session.active && !force) {
             return c.json({ error: 'Session is active' }, 409)
         }
 
-        const deleted = engine.deleteSession(sessionResult.sessionId, userId)
-        if (!deleted) {
-            return c.json({ error: 'Session not found' }, 404)
-        }
+        // Attempt to delete
+        engine.deleteSession(sessionId, userId)
+        // Always return 204 if we reach here (delete succeeded or was already gone)
         return c.body(null, 204)
     })
 
