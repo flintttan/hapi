@@ -42,3 +42,11 @@ docker-compose.*.yml
 **/*.db
 **/*.db-shm
 **/*.db-wal
+
+# Debug and temporary files
+DEBUG_REPORT.md
+scripts/debug-*.mjs
+scripts/debug-*.sh
+scripts/inspect-*.mjs
+scripts/inspect-*.py
+.mcp.json
