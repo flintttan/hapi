@@ -77,7 +77,7 @@ function generatePlatformPackageJson(
     mainPkg: MainPackageJson
 ): object {
     return {
-        name: `@twsxtd/hapi-${platform.name}`,
+        name: `@flintttan/hapi-${platform.name}`,
         version: mainPkg.version,
         description: `hapi binary for ${platform.os} ${platform.cpu}`,
         os: [platform.os],
@@ -134,7 +134,7 @@ function updateMainPackageOptionalDeps(version: string): void {
     }
 
     for (const platform of PLATFORMS) {
-        pkg.optionalDependencies[`@twsxtd/hapi-${platform.name}`] = version;
+        pkg.optionalDependencies[`@flintttan/hapi-${platform.name}`] = version;
     }
 
     writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');

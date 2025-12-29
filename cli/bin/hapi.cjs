@@ -5,7 +5,7 @@ const path = require('path');
 
 const platform = process.platform;
 const arch = process.arch;
-const pkgName = `@twsxtd/hapi-${platform}-${arch}`;
+const pkgName = `@flintttan/hapi-${platform}-${arch}`;
 
 function getBinaryPath() {
     try {
