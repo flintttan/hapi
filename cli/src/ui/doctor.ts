@@ -83,59 +83,59 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
     // For 'all' filter, show everything. For 'daemon', only show daemon-related info
     if (filter === 'all') {
         // Version and basic info
-        console.log(chalk.bold('📋 Basic Information'));
+        console.log(chalk.bold.white('📋 Basic Information'));
         console.log(`hapi CLI Version: ${chalk.green(packageJson.version)}`);
         console.log(`Platform: ${chalk.green(process.platform)} ${process.arch}`);
         console.log(`Node.js Version: ${chalk.green(process.version)}`);
         console.log('');
 
         // Daemon spawn diagnostics
-        console.log(chalk.bold('🔧 Daemon Spawn Diagnostics'));
+        console.log(chalk.bold.white('🔧 Daemon Spawn Diagnostics'));
         const projectRoot = projectPath();
         const cliEntrypoint = join(projectRoot, 'src', 'index.ts');
 
         if (isBunCompiled()) {
-            console.log(`Executable: ${chalk.blue(process.execPath)}`);
-            console.log(`Runtime Assets: ${chalk.blue(runtimePath())}`);
+            console.log(`Executable: ${chalk.cyan(process.execPath)}`);
+            console.log(`Runtime Assets: ${chalk.cyan(runtimePath())}`);
         } else {
-            console.log(`Project Root: ${chalk.blue(projectRoot)}`);
-            console.log(`CLI Entrypoint: ${chalk.blue(cliEntrypoint)}`);
+            console.log(`Project Root: ${chalk.cyan(projectRoot)}`);
+            console.log(`CLI Entrypoint: ${chalk.cyan(cliEntrypoint)}`);
             console.log(`CLI Exists: ${existsSync(cliEntrypoint) ? chalk.green('✓ Yes') : chalk.red('❌ No')}`);
         }
         console.log('');
 
         // Configuration
-        console.log(chalk.bold('⚙️  Configuration'));
-        console.log(`hapi Home: ${chalk.blue(configuration.happyHomeDir)}`);
-        console.log(`Bot URL: ${chalk.blue(configuration.serverUrl)}`);
-        console.log(`Logs Dir: ${chalk.blue(configuration.logsDir)}`);
+        console.log(chalk.bold.white('⚙️  Configuration'));
+        console.log(`hapi Home: ${chalk.cyan(configuration.happyHomeDir)}`);
+        console.log(`Bot URL: ${chalk.cyan(configuration.serverUrl)}`);
+        console.log(`Logs Dir: ${chalk.cyan(configuration.logsDir)}`);
 
         // Environment
-        console.log(chalk.bold('\n🌍 Environment Variables'));
+        console.log(chalk.bold.white('\n🌍 Environment Variables'));
         const env = getEnvironmentInfo();
-        console.log(`HAPI_HOME: ${env.HAPI_HOME ? chalk.green(env.HAPI_HOME) : chalk.gray('not set')}`);
-        console.log(`HAPI_SERVER_URL: ${env.HAPI_SERVER_URL ? chalk.green(env.HAPI_SERVER_URL) : chalk.gray('not set')}`);
-        console.log(`CLI_API_TOKEN: ${env.CLI_API_TOKEN_SET ? chalk.green('set') : chalk.gray('not set')}`);
-        console.log(`DANGEROUSLY_LOG_TO_SERVER: ${env.DANGEROUSLY_LOG_TO_SERVER_FOR_AI_AUTO_DEBUGGING ? chalk.yellow('ENABLED') : chalk.gray('not set')}`);
-        console.log(`DEBUG: ${env.DEBUG ? chalk.green(env.DEBUG) : chalk.gray('not set')}`);
-        console.log(`NODE_ENV: ${env.NODE_ENV ? chalk.green(env.NODE_ENV) : chalk.gray('not set')}`);
+        console.log(`HAPI_HOME: ${env.HAPI_HOME ? chalk.green(env.HAPI_HOME) : chalk.dim('not set')}`);
+        console.log(`HAPI_SERVER_URL: ${env.HAPI_SERVER_URL ? chalk.green(env.HAPI_SERVER_URL) : chalk.dim('not set')}`);
+        console.log(`CLI_API_TOKEN: ${env.CLI_API_TOKEN_SET ? chalk.green('set') : chalk.dim('not set')}`);
+        console.log(`DANGEROUSLY_LOG_TO_SERVER: ${env.DANGEROUSLY_LOG_TO_SERVER_FOR_AI_AUTO_DEBUGGING ? chalk.yellow('ENABLED') : chalk.dim('not set')}`);
+        console.log(`DEBUG: ${env.DEBUG ? chalk.green(env.DEBUG) : chalk.dim('not set')}`);
+        console.log(`NODE_ENV: ${env.NODE_ENV ? chalk.green(env.NODE_ENV) : chalk.dim('not set')}`);
 
         // Settings
         let settings;
         try {
             settings = await readSettings();
-            console.log(chalk.bold('\n📄 Settings (settings.json):'));
+            console.log(chalk.bold.white('\n📄 Settings (settings.json):'));
             // Hide cliApiToken in output for security
             const displaySettings = { ...settings, cliApiToken: settings.cliApiToken ? '***' : undefined };
-            console.log(chalk.gray(JSON.stringify(displaySettings, null, 2)));
+            console.log(chalk.dim(JSON.stringify(displaySettings, null, 2)));
         } catch (error) {
-            console.log(chalk.bold('\n📄 Settings:'));
+            console.log(chalk.bold.white('\n📄 Settings:'));
             console.log(chalk.red('❌ Failed to read settings'));
             settings = {};
         }
 
         // Authentication status (direct-connect)
-        console.log(chalk.bold('\n🔐 Direct Connect Auth'));
+        console.log(chalk.bold.white('\n🔐 Direct Connect Auth'));
         const envToken = process.env.CLI_API_TOKEN;
         const settingsToken = settings.cliApiToken;
         const hasToken = Boolean(envToken || settingsToken);
@@ -144,7 +144,7 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
             console.log(chalk.green(`✓ CLI_API_TOKEN is set (from ${tokenSource})`));
         } else {
             console.log(chalk.red('❌ CLI_API_TOKEN is not set'));
-            console.log(chalk.gray('  Run `hapi auth login` to configure or set CLI_API_TOKEN env var'));
+            console.log(chalk.dim('  Run `hapi auth login` to configure or set CLI_API_TOKEN env var'));
         }
 
         // Legacy credentials (unused in direct-connect mode)
@@ -159,7 +159,7 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
     }
 
     // Daemon status - shown for both 'all' and 'daemon' filters
-    console.log(chalk.bold('\n🤖 Daemon Status'));
+    console.log(chalk.bold.white('\n🤖 Daemon Status'));
     try {
         const isRunning = await checkIfDaemonRunningAndCleanupStaleState();
         const state = await readDaemonState();
@@ -180,15 +180,15 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
 
         // Show daemon state file
         if (state) {
-            console.log(chalk.bold('\n📄 Daemon State:'));
-            console.log(chalk.blue(`Location: ${configuration.daemonStateFile}`));
-            console.log(chalk.gray(JSON.stringify(state, null, 2)));
+            console.log(chalk.bold.white('\n📄 Daemon State:'));
+            console.log(chalk.cyan(`Location: ${configuration.daemonStateFile}`));
+            console.log(chalk.dim(JSON.stringify(state, null, 2)));
         }
 
         // All hapi processes
         const allProcesses = await findAllHappyProcesses();
         if (allProcesses.length > 0) {
-            console.log(chalk.bold('\n🔍 All hapi CLI Processes'));
+            console.log(chalk.bold.white('\n🔍 All hapi CLI Processes'));
 
             // Group by type
             const grouped = allProcesses.reduce((groups, process) => {
@@ -214,12 +214,12 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
                     'unknown': '❓ Unknown'
                 };
 
-                console.log(chalk.blue(`\n${typeLabels[type] || type}:`));
+                console.log(chalk.cyan(`\n${typeLabels[type] || type}:`));
                 processes.forEach(({ pid, command }) => {
                     const color = type === 'current' ? chalk.green :
                         type.startsWith('dev') ? chalk.cyan :
-                            type.includes('daemon') ? chalk.blue : chalk.gray;
-                    console.log(`  ${color(`PID ${pid}`)}: ${chalk.gray(command)}`);
+                            type.includes('daemon') ? chalk.cyan : chalk.dim;
+                    console.log(`  ${color(`PID ${pid}`)}: ${chalk.dim(command)}`);
                 });
             });
         } else {
@@ -227,8 +227,8 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
         }
 
         if (filter === 'all' && allProcesses.length > 1) { // More than just current process
-            console.log(chalk.bold('\n💡 Process Management'));
-            console.log(chalk.gray('To clean up runaway processes: hapi doctor clean'));
+            console.log(chalk.bold.white('\n💡 Process Management'));
+            console.log(chalk.dim('To clean up runaway processes: hapi doctor clean'));
         }
     } catch (error) {
         console.log(chalk.red('❌ Error checking daemon status'));
@@ -236,7 +236,7 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
 
     // Log files - only show for 'all' filter
     if (filter === 'all') {
-        console.log(chalk.bold('\n📝 Log Files'));
+        console.log(chalk.bold.white('\n📝 Log Files'));
 
         // Get ALL log files
         const allLogs = getLogFiles(configuration.logsDir);
@@ -248,27 +248,27 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
 
             // Show regular logs (max 10)
             if (regularLogs.length > 0) {
-                console.log(chalk.blue('\nRecent Logs:'));
+                console.log(chalk.cyan('\nRecent Logs:'));
                 const logsToShow = regularLogs.slice(0, 10);
                 logsToShow.forEach(({ file, path, modified }) => {
                     console.log(`  ${chalk.green(file)} - ${modified.toLocaleString()}`);
-                    console.log(chalk.gray(`    ${path}`));
+                    console.log(chalk.dim(`    ${path}`));
                 });
                 if (regularLogs.length > 10) {
-                    console.log(chalk.gray(`  ... and ${regularLogs.length - 10} more log files`));
+                    console.log(chalk.dim(`  ... and ${regularLogs.length - 10} more log files`));
                 }
             }
 
             // Show daemon logs (max 5)
             if (daemonLogs.length > 0) {
-                console.log(chalk.blue('\nDaemon Logs:'));
+                console.log(chalk.cyan('\nDaemon Logs:'));
                 const daemonLogsToShow = daemonLogs.slice(0, 5);
                 daemonLogsToShow.forEach(({ file, path, modified }) => {
                     console.log(`  ${chalk.green(file)} - ${modified.toLocaleString()}`);
-                    console.log(chalk.gray(`    ${path}`));
+                    console.log(chalk.dim(`    ${path}`));
                 });
                 if (daemonLogs.length > 5) {
-                    console.log(chalk.gray(`  ... and ${daemonLogs.length - 5} more daemon log files`));
+                    console.log(chalk.dim(`  ... and ${daemonLogs.length - 5} more daemon log files`));
                 }
             } else {
                 console.log(chalk.yellow('\nNo daemon log files found'));
@@ -278,13 +278,13 @@ export async function runDoctorCommand(filter?: 'all' | 'daemon'): Promise<void>
         }
 
         // Support and bug reports
-        console.log(chalk.bold('\n🐛 Support & Bug Reports'));
+        console.log(chalk.bold.white('\n🐛 Support & Bug Reports'));
         const pkg = packageJson as unknown as { bugs?: string | { url?: string }; homepage?: string }
         const bugsUrl = typeof pkg.bugs === 'string' ? pkg.bugs : pkg.bugs?.url
         if (bugsUrl) {
-            console.log(`Report issues: ${chalk.blue(bugsUrl)}`);
+            console.log(`Report issues: ${chalk.cyan(bugsUrl)}`);
         }
-        console.log(`Documentation: ${chalk.blue(pkg.homepage ?? 'See project README')}`);
+        console.log(`Documentation: ${chalk.cyan(pkg.homepage ?? 'See project README')}`);
     }
 
     console.log(chalk.green('\n✅ Doctor diagnosis complete!\n'));
