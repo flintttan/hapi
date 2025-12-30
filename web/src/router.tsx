@@ -98,6 +98,8 @@ function SessionsPage() {
         }
     }, [api, refetch, sessions])
 
+    const projectCount = new Set(sessions.map(s => s.metadata?.path ?? 'Other')).size
+
     return (
         <div className="flex h-full flex-col">
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
@@ -105,7 +107,7 @@ function SessionsPage() {
                     <div className="flex items-center gap-3">
                         <UserMenu user={user} onLogout={onLogout} />
                         <div className="text-xs text-[var(--app-hint)]">
-                            {sessions.length} sessions
+                            {sessions.length} sessions in {projectCount} projects
                         </div>
                     </div>
                     <button

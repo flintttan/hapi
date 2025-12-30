@@ -1185,4 +1185,15 @@ export class Store {
             return false
         }
     }
+
+    getMessagesAfter(sessionId: string, afterSeq: number, limit: number = 200): StoredMessage[] {
+        const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 200
+        const safeAfterSeq = Number.isFinite(afterSeq) ? afterSeq : 0
+
+        const rows = this.db.prepare(
+            'SELECT * FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?'
+        ).all(sessionId, safeAfterSeq, safeLimit) as DbMessageRow[]
+
+        return rows.map(toStoredMessage)
+    }
 }
