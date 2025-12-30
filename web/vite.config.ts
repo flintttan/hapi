@@ -3,6 +3,8 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 import { resolve } from 'node:path'
 
+const base = process.env.VITE_BASE_URL || '/'
+
 export default defineConfig({
     server: {
         host: true,
@@ -24,15 +26,15 @@ export default defineConfig({
             registerType: 'autoUpdate',
             includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'mask-icon.svg'],
             manifest: {
-                name: 'Hapi',
-                short_name: 'Hapi',
+                name: 'HAPI',
+                short_name: 'HAPI',
                 description: 'AI-powered development assistant',
                 theme_color: '#ffffff',
                 background_color: '#ffffff',
                 display: 'standalone',
                 orientation: 'portrait',
-                scope: '/',
-                start_url: '/',
+                scope: base,
+                start_url: base,
                 icons: [
                     {
                         src: 'pwa-64x64.png',
@@ -126,7 +128,7 @@ export default defineConfig({
             }
         })
     ],
-    base: '/',
+    base,
     resolve: {
         alias: {
             '@': resolve(__dirname, 'src')
