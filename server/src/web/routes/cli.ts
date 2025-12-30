@@ -69,8 +69,14 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         if (!engine) {
             return c.json({ error: 'Not ready' }, 503)
         }
+
+        const userId = c.get('userId') as string
+        if (!userId) {
+            return c.json({ error: 'Unauthorized' }, 401)
+        }
+
         const sessionId = c.req.param('id')
-        const session = engine.getSession(sessionId)
+        const session = engine.getSession(sessionId, userId)
         if (!session) {
             return c.json({ error: 'Session not found' }, 404)
         }
@@ -81,7 +87,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<We
         }
 
         const limit = parsed.data.limit ?? 200
-        const messages = engine.getMessagesAfter(sessionId, { afterSeq: parsed.data.afterSeq, limit })
+        const messages = engine.getMessagesAfter(sessionId, userId, { afterSeq: parsed.data.afterSeq, limit })
         return c.json({ messages })
     })
 

@@ -1186,13 +1186,15 @@ export class Store {
         }
     }
 
-    getMessagesAfter(sessionId: string, afterSeq: number, limit: number = 200): StoredMessage[] {
+    getMessagesAfter(sessionId: string, afterSeq: number, limit: number = 200, userId: string): StoredMessage[] {
+        validateUserId(userId)
         const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 200
         const safeAfterSeq = Number.isFinite(afterSeq) ? afterSeq : 0
 
+        // Verify session ownership via JOIN to ensure multi-user isolation
         const rows = this.db.prepare(
-            'SELECT * FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?'
-        ).all(sessionId, safeAfterSeq, safeLimit) as DbMessageRow[]
+            'SELECT m.* FROM messages m JOIN sessions s ON m.session_id = s.id WHERE m.session_id = ? AND s.user_id = ? AND m.seq > ? ORDER BY m.seq ASC LIMIT ?'
+        ).all(sessionId, userId, safeAfterSeq, safeLimit) as DbMessageRow[]
 
         return rows.map(toStoredMessage)
     }

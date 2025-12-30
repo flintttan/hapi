@@ -373,8 +373,8 @@ export class SyncEngine {
         }
     }
 
-    getMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number }): DecryptedMessage[] {
-        const stored = this.store.getMessagesAfter(sessionId, options.afterSeq, options.limit)
+    getMessagesAfter(sessionId: string, userId: string, options: { afterSeq: number; limit: number }): DecryptedMessage[] {
+        const stored = this.store.getMessagesAfter(sessionId, options.afterSeq, options.limit, userId)
         return stored.map((m) => ({
             id: m.id,
             seq: m.seq,
