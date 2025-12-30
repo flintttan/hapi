@@ -1,0 +1,96 @@
+{
+  "summary": "Fix null reference errors in two locations: CodexBash tool rendering (knownTools.tsx) and message normalization (normalize.ts). Both issues stem from unsafe property access without proper null validation. Apply defensive null checks before accessing nested properties to prevent runtime crashes.",
+  "root_cause": "Unsafe property access patterns in two separate codepaths: (1) web/src/components/ToolCard/knownTools.tsx lines 112-120 accessing parsed_cmd[0].type without null validation, and (2) web/src/chat/normalize.ts lines 240-244 and 284-286 evaluating data.type before confirming data is non-null. The validation pattern 'if (!data || typeof data.type !== string)' fails because JavaScript evaluates both sides of the OR operator even when data is null.",
+  "strategy": "comprehensive_fix",
+  "tasks": [
+    {
+      "id": "FIX1",
+      "title": "Fix null validation in CodexBash tool rendering",
+      "scope": "web/src/components/ToolCard/",
+      "action": "Fix",
+      "description": "Add explicit null/undefined element validation in CodexBash icon and title functions before accessing .type property on parsed_cmd array elements.",
+      "modification_points": [
+        {
+          "file": "web/src/components/ToolCard/knownTools.tsx",
+          "target": "CodexBash.icon:112-120",
+          "change": "Add null check after extracting first = parsed_cmd[0] before accessing first.type"
+        },
+        {
+          "file": "web/src/components/ToolCard/knownTools.tsx",
+          "target": "CodexBash.title:121-129",
+          "change": "Add null check after extracting parsed = parsed_cmd[0] before accessing parsed.type"
+        }
+      ],
+      "implementation": [
+        "In CodexBash.icon function (lines 112-120), after 'const first = opts.input.parsed_cmd[0]', add: 'if (!first || !isObject(first)) return <TerminalIcon className={DEFAULT_ICON_CLASS} />'",
+        "In CodexBash.title function (lines 121-129), after 'const parsed = opts.input.parsed_cmd[0]', add: 'if (!parsed || !isObject(parsed)) return opts.description ?? \"Terminal\"'",
+        "Test by triggering CodexBash tool calls with malformed parsed_cmd data containing null elements"
+      ],
+      "verification": [
+        "Navigate to web UI and view sessions containing CodexBash tool calls",
+        "Verify tool cards render without errors, displaying fallback icons/titles for malformed data",
+        "Check browser console for absence of 'null is not an object' errors"
+      ],
+      "reference": {
+        "pattern": "Defensive null checking pattern",
+        "files": ["web/src/components/ToolCard/knownTools.tsx:305-320"],
+        "examples": "AskUserQuestion tool (lines 305-320, 335-350) demonstrates correct pattern: uses ?? null fallback and subsequent isObject checks"
+      },
+      "risk": "low"
+    },
+    {
+      "id": "FIX2",
+      "title": "Fix null validation in message normalization",
+      "scope": "web/src/chat/",
+      "action": "Fix",
+      "description": "Split unsafe null checking pattern into separate validation steps to prevent property access on null objects in message normalization pipeline.",
+      "modification_points": [
+        {
+          "file": "web/src/chat/normalize.ts",
+          "target": "normalizeAgentRecord:240-244",
+          "change": "Replace single-line validation with two-step null check: first validate data exists, then validate data.type"
+        },
+        {
+          "file": "web/src/chat/normalize.ts",
+          "target": "normalizeCodexRecord:284-286",
+          "change": "Apply same two-step validation pattern for consistency"
+        }
+      ],
+      "implementation": [
+        "At line 243-244, replace 'if (!data || typeof data.type !== \"string\") return null' with two lines: 'if (!data) return null' followed by 'if (typeof data.type !== \"string\") return null'",
+        "At line 285-286, apply identical fix pattern for normalizeCodexRecord function",
+        "Test message normalization with various malformed message payloads"
+      ],
+      "verification": [
+        "Send test messages with null data fields through the message pipeline",
+        "Verify messages are safely filtered without throwing errors",
+        "Confirm UI displays valid messages without crashes"
+      ],
+      "risk": "low"
+    }
+  ],
+  "focus_paths": [
+    "web/src/components/ToolCard/knownTools.tsx",
+    "web/src/chat/normalize.ts"
+  ],
+  "test_strategy": {
+    "scope": "integration",
+    "specific_tests": [],
+    "manual_verification": [
+      "Test CodexBash tool rendering with various parsed_cmd payloads (null, undefined, empty)",
+      "Send messages with malformed content.data through normalization pipeline",
+      "Verify browser console shows no null reference errors",
+      "Confirm UI gracefully handles and displays fallback content for malformed data"
+    ]
+  },
+  "estimated_time": "30 minutes",
+  "recommended_execution": "Agent",
+  "severity": "Medium",
+  "risk_level": "low",
+  "_metadata": {
+    "timestamp": "2025-12-31T08:45:00Z",
+    "source": "direct-planning",
+    "planning_mode": "direct",
+    "diagnosis_angles": ["error-handling", "dataflow"]
+  }
+}

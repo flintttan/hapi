@@ -1,0 +1,21 @@
+{
+  "session_id": "api-error-null-object-ht-value-type-2025-12-31",
+  "bug_description": "API Error: null is not an object (evaluating 'hT.value.type')",
+  "timestamp": "2025-12-31T08:40:00Z",
+  "severity": "Medium",
+  "diagnosis_count": 2,
+  "diagnoses": [
+    {
+      "angle": "error-handling",
+      "file": "diagnosis-error-handling.json",
+      "path": ".workflow/.lite-fix/api-error-null-object-ht-value-type-2025-12-31/diagnosis-error-handling.json",
+      "index": 1
+    },
+    {
+      "angle": "dataflow",
+      "file": "diagnosis-dataflow.json",
+      "path": ".workflow/.lite-fix/api-error-null-object-ht-value-type-2025-12-31/diagnosis-dataflow.json",
+      "index": 2
+    }
+  ]
+}

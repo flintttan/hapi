@@ -1,0 +1,108 @@
+{
+  "symptom": {
+    "description": "Null reference error occurring during API message processing when accessing the 'type' property of a 'value' object. The error manifests in the message normalization pipeline when processing decrypted messages from the API.",
+    "error_message": "null is not an object (evaluating 'hT.value.type')",
+    "stack_trace": null,
+    "frequency": "intermittent",
+    "user_impact": "Messages fail to render in the UI, causing blank screens or incomplete message displays when certain message types are received from the server"
+  },
+  "root_cause": {
+    "file": "web/src/chat/normalize.ts",
+    "line_range": "240-244",
+    "function": "normalizeAgentRecord",
+    "issue": "Data validation logic assumes content.data exists but does not validate nested data.type property before accessing it. When content.type is 'output' but content.data is null or lacks a 'type' property, the subsequent check 'typeof data.type !== string' fails because it attempts to access .type on a null object. The minified variable 'hT' in the error message likely represents the 'data' variable after transpilation.",
+    "confidence": 0.9,
+    "introduced_by": null,
+    "category": "null_reference"
+  },
+  "affected_files": [
+    {
+      "path": "web/src/chat/normalize.ts",
+      "relevance": 0.95,
+      "rationale": "Primary file containing the dataflow bug. Lines 240-244 and 284-286 have identical patterns where data.type is accessed without proper null checking. The validation pattern 'if (!data || typeof data.type !== string)' checks if data is null BUT still evaluates typeof data.type even when data is null, causing the error.",
+      "change_type": "fix_target"
+    },
+    {
+      "path": "web/src/types/api.ts",
+      "relevance": 0.7,
+      "rationale": "Defines the DecryptedMessage type and API response structures that flow into normalize.ts. The content field is typed as 'unknown', which provides no type safety for the nested structure, contributing to the dataflow issue.",
+      "change_type": "needs_update"
+    },
+    {
+      "path": "web/src/api/client.ts",
+      "relevance": 0.6,
+      "rationale": "API client that retrieves messages from the server. The JSON parsing logic (lines 95-98) doesn't validate the structure of received data before passing it to normalization pipeline, allowing malformed messages to reach normalize.ts.",
+      "change_type": "needs_update"
+    },
+    {
+      "path": "web/src/chat/types.ts",
+      "relevance": 0.5,
+      "rationale": "Defines the normalized message types that are the output of the normalization pipeline. Understanding expected types helps validate the dataflow transformation.",
+      "change_type": "reference_only"
+    }
+  ],
+  "reproduction_steps": [
+    "Start the web application and authenticate",
+    "Establish a session with message synchronization",
+    "Trigger a server message that sends content with type='output' but content.data is null or missing the 'type' property",
+    "Observe the error 'null is not an object (evaluating 'hT.value.type')' in browser console",
+    "UI fails to render the message, showing blank or incomplete chat history"
+  ],
+  "fix_hints": [
+    {
+      "description": "Fix null-safe property access in normalize.ts lines 240-244",
+      "approach": "Change the validation order to check data existence first before accessing nested properties. The current pattern 'if (!data || typeof data.type !== string)' evaluates both conditions even when data is null due to JavaScript's type coercion. Use explicit null checks: 'if (!data) return null' followed by 'if (typeof data.type !== string) return null'",
+      "code_example": "// Current (line 243-244):\nconst data = isObject(content.data) ? content.data : null\nif (!data || typeof data.type !== 'string') return null\n\n// Fixed:\nconst data = isObject(content.data) ? content.data : null\nif (!data) return null\nif (typeof data.type !== 'string') return null",
+      "risk": "low"
+    },
+    {
+      "description": "Apply same fix pattern to line 284-286 (codex message handling)",
+      "approach": "The exact same vulnerability exists in the codex message normalization path. Apply identical fix pattern to ensure consistency.",
+      "code_example": "// Current (line 285-286):\nconst data = isObject(content.data) ? content.data : null\nif (!data || typeof data.type !== 'string') return null\n\n// Fixed:\nconst data = isObject(content.data) ? content.data : null\nif (!data) return null\nif (typeof data.type !== 'string') return null",
+      "risk": "low"
+    },
+    {
+      "description": "Add server-side message validation",
+      "approach": "Implement schema validation on the server before sending messages to clients. Use Zod or similar validation library to ensure all messages conform to expected structure before transmission.",
+      "code_example": "// In server message handler:\nimport { z } from 'zod'\n\nconst MessageContentSchema = z.object({\n  type: z.string(),\n  data: z.object({\n    type: z.string(),\n    // ... other fields\n  }).nullable()\n})\n\n// Validate before sending:\nconst validated = MessageContentSchema.safeParse(messageContent)\nif (!validated.success) {\n  logger.error('Invalid message structure', validated.error)\n  return\n}",
+      "risk": "medium"
+    },
+    {
+      "description": "Add defensive fallback for malformed messages",
+      "approach": "Instead of returning null for malformed messages, create a fallback representation that displays an error message to users, improving debuggability.",
+      "code_example": "// After validation:\nif (!data || typeof data.type !== 'string') {\n  return {\n    id: messageId,\n    localId,\n    createdAt,\n    role: 'agent',\n    isSidechain: false,\n    content: [{\n      type: 'text',\n      text: '[Message format error: invalid data structure]',\n      uuid: messageId,\n      parentUUID: null\n    }]\n  }\n}",
+      "risk": "low"
+    }
+  ],
+  "dependencies": "React, TypeScript, Zod (for potential validation), Browser Fetch API, Socket.IO (for real-time message synchronization)",
+  "constraints": "Must maintain backward compatibility with existing message formats. Fix must not break normalization for valid messages. Changes should be minimal to avoid introducing new bugs. TypeScript type checking does not catch this issue due to 'unknown' type for message content.",
+  "clarification_needs": [
+    {
+      "question": "Should malformed messages be silently dropped or displayed with error indicators?",
+      "context": "Currently, malformed messages return null and are filtered out. This hides the problem from users but may cause confusion about missing messages. Displaying error indicators would improve transparency but might clutter the UI.",
+      "options": [
+        "Silent drop (current behavior, maintain consistency)",
+        "Display error indicator (improve transparency, aid debugging)",
+        "Log error and display generic placeholder (hybrid approach)"
+      ]
+    },
+    {
+      "question": "Should server-side validation be added as part of this fix?",
+      "context": "The root cause is client-side null checking, but adding server-side validation would prevent malformed messages from ever reaching clients. This requires changes across both web and server codebases.",
+      "options": [
+        "Client-side fix only (minimal change, faster deployment)",
+        "Client-side fix + server-side validation (comprehensive solution, higher effort)",
+        "Client-side fix now, server-side validation as follow-up task"
+      ]
+    }
+  ],
+  "_metadata": {
+    "timestamp": "2025-12-31T08:39:00.000Z",
+    "bug_description": "API Error: null is not an object (evaluating 'hT.value.type')",
+    "source": "cli-explore-agent",
+    "diagnosis_angle": "dataflow",
+    "diagnosis_index": 2,
+    "total_diagnoses": 2,
+    "duration_seconds": 180
+  }
+}
