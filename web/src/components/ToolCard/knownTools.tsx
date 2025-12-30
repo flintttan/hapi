@@ -111,8 +111,9 @@ export const knownTools: Record<string, {
     CodexBash: {
         icon: (opts) => {
             if (isObject(opts.input) && Array.isArray(opts.input.parsed_cmd) && opts.input.parsed_cmd.length > 0) {
-                const first = opts.input.parsed_cmd[0]
-                const type = isObject(first) ? first.type : null
+                const first = opts.input.parsed_cmd[0] ?? null
+                if (!first || !isObject(first)) return <TerminalIcon className={DEFAULT_ICON_CLASS} />
+                const type = first.type
                 if (type === 'read') return <EyeIcon className={DEFAULT_ICON_CLASS} />
                 if (type === 'write') return <FileDiffIcon className={DEFAULT_ICON_CLASS} />
             }
@@ -120,8 +121,9 @@ export const knownTools: Record<string, {
         },
         title: (opts) => {
             if (isObject(opts.input) && Array.isArray(opts.input.parsed_cmd) && opts.input.parsed_cmd.length === 1) {
-                const parsed = opts.input.parsed_cmd[0]
-                if (isObject(parsed) && parsed.type === 'read' && typeof parsed.name === 'string') {
+                const parsed = opts.input.parsed_cmd[0] ?? null
+                if (!parsed || !isObject(parsed)) return opts.description ?? 'Terminal'
+                if (parsed.type === 'read' && typeof parsed.name === 'string') {
                     return resolveDisplayPath(parsed.name, opts.metadata)
                 }
             }

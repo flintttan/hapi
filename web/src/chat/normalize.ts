@@ -241,7 +241,8 @@ function normalizeAgentRecord(
 
     if (content.type === 'output') {
         const data = isObject(content.data) ? content.data : null
-        if (!data || typeof data.type !== 'string') return null
+        if (!data) return null
+        if (typeof data.type !== 'string') return null
 
         // Skip meta/compact-summary messages (parity with hapi-app)
         if (data.isMeta) return null
@@ -283,7 +284,8 @@ function normalizeAgentRecord(
 
     if (content.type === 'codex') {
         const data = isObject(content.data) ? content.data : null
-        if (!data || typeof data.type !== 'string') return null
+        if (!data) return null
+        if (typeof data.type !== 'string') return null
 
         if (data.type === 'message' && typeof data.message === 'string') {
             return {
