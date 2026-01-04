@@ -1,0 +1,4 @@
+/docs/  /docs/guide/quick-start  301
+/docs   /docs/guide/quick-start  301
+/docs/*  /docs/:splat  200
+/*       /index.html   200

@@ -1,3 +1,4 @@
+import { getPermissionModeOptionsForFlavor, MODEL_MODE_LABELS, MODEL_MODES } from '@hapi/protocol'
 import { ComposerPrimitive, useAssistantApi, useAssistantState } from '@assistant-ui/react'
 import {
     type ChangeEvent as ReactChangeEvent,
@@ -24,25 +25,6 @@ import { ComposerButtons } from '@/components/AssistantChat/ComposerButtons'
 export interface TextInputState {
     text: string
     selection: { start: number; end: number }
-}
-
-const CLAUDE_PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'bypassPermissions'] as const
-const CODEX_PERMISSION_MODES = ['default', 'read-only', 'safe-yolo', 'yolo'] as const
-const PERMISSION_MODE_LABELS: Record<string, string> = {
-    default: 'Default',
-    acceptEdits: 'Accept Edits',
-    plan: 'Plan Mode',
-    bypassPermissions: 'Yolo',
-    'read-only': 'Read Only',
-    'safe-yolo': 'Safe Yolo',
-    yolo: 'Yolo'
-}
-
-const MODEL_MODES = ['default', 'sonnet', 'opus'] as const
-const MODEL_MODE_LABELS: Record<string, string> = {
-    default: 'Default',
-    sonnet: 'Sonnet',
-    opus: 'Opus'
 }
 
 const defaultSuggestionHandler = async (): Promise<Suggestion[]> => []
@@ -156,12 +138,20 @@ export function HappyComposer(props: {
         const suggestion = suggestions[index]
         if (!suggestion || !textareaRef.current) return
 
+        // For Codex user prompts with content, expand the content instead of command name
+        let textToInsert = suggestion.text
+        let addSpace = true
+        if (agentFlavor === 'codex' && suggestion.source === 'user' && suggestion.content) {
+            textToInsert = suggestion.content
+            addSpace = false
+        }
+
         const result = applySuggestion(
             inputState.text,
             inputState.selection,
-            suggestion.text,
+            textToInsert,
             autocompletePrefixes,
-            true
+            addSpace
         )
 
         api.composer().setText(result.text)
@@ -182,7 +172,7 @@ export function HappyComposer(props: {
         }, 0)
 
         haptic('light')
-    }, [api, suggestions, inputState, autocompletePrefixes, haptic])
+    }, [api, suggestions, inputState, autocompletePrefixes, haptic, agentFlavor])
 
     const abortDisabled = controlsDisabled || isAborting || !threadIsRunning
     const switchDisabled = controlsDisabled || isSwitching || !controlledByUser
@@ -219,15 +209,14 @@ export function HappyComposer(props: {
         }
     }, [switchDisabled, onSwitchToRemote, haptic])
 
-    const permissionModes = useMemo(() => {
-        if (agentFlavor === 'codex') {
-            return CODEX_PERMISSION_MODES as readonly PermissionMode[]
-        }
-        if (agentFlavor === 'gemini') {
-            return [] as readonly PermissionMode[]
-        }
-        return CLAUDE_PERMISSION_MODES as readonly PermissionMode[]
-    }, [agentFlavor])
+    const permissionModeOptions = useMemo(
+        () => getPermissionModeOptionsForFlavor(agentFlavor),
+        [agentFlavor]
+    )
+    const permissionModes = useMemo(
+        () => permissionModeOptions.map((option) => option.mode),
+        [permissionModeOptions]
+    )
 
     const handleKeyDown = useCallback((e: ReactKeyboardEvent<HTMLTextAreaElement>) => {
         const key = e.key
@@ -354,7 +343,7 @@ export function HappyComposer(props: {
         haptic('light')
     }, [onModelModeChange, controlsDisabled, haptic])
 
-    const showPermissionSettings = Boolean(onPermissionModeChange && permissionModes.length > 0)
+    const showPermissionSettings = Boolean(onPermissionModeChange && permissionModeOptions.length > 0)
     const showModelSettings = Boolean(onModelModeChange && agentFlavor !== 'codex' && agentFlavor !== 'gemini')
     const showSettingsButton = Boolean(showPermissionSettings || showModelSettings)
     const showAbortButton = true
@@ -369,9 +358,9 @@ export function HappyComposer(props: {
                                 <div className="px-3 pb-1 text-xs font-semibold text-[var(--app-hint)]">
                                     Permission Mode
                                 </div>
-                                {permissionModes.map((mode) => (
+                                {permissionModeOptions.map((option) => (
                                     <button
-                                        key={mode}
+                                        key={option.mode}
                                         type="button"
                                         disabled={controlsDisabled}
                                         className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
@@ -379,22 +368,22 @@ export function HappyComposer(props: {
                                                 ? 'cursor-not-allowed opacity-50'
                                                 : 'cursor-pointer hover:bg-[var(--app-secondary-bg)]'
                                         }`}
-                                        onClick={() => handlePermissionChange(mode)}
+                                        onClick={() => handlePermissionChange(option.mode)}
                                         onMouseDown={(e) => e.preventDefault()}
                                     >
                                         <div
                                             className={`flex h-4 w-4 items-center justify-center rounded-full border-2 ${
-                                                permissionMode === mode
+                                                permissionMode === option.mode
                                                     ? 'border-[var(--app-link)]'
                                                     : 'border-[var(--app-hint)]'
                                             }`}
                                         >
-                                            {permissionMode === mode && (
+                                            {permissionMode === option.mode && (
                                                 <div className="h-2 w-2 rounded-full bg-[var(--app-link)]" />
                                             )}
                                         </div>
-                                        <span className={permissionMode === mode ? 'text-[var(--app-link)]' : ''}>
-                                            {PERMISSION_MODE_LABELS[mode]}
+                                        <span className={permissionMode === option.mode ? 'text-[var(--app-link)]' : ''}>
+                                            {option.label}
                                         </span>
                                     </button>
                                 ))}
@@ -470,7 +459,7 @@ export function HappyComposer(props: {
         controlsDisabled,
         permissionMode,
         modelMode,
-        permissionModes,
+        permissionModeOptions,
         handlePermissionChange,
         handleModelChange,
         handleSuggestionSelect

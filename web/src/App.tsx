@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { Outlet, useLocation, useMatchRoute } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
-import { getTelegramWebApp } from '@/hooks/useTelegram'
+import { getTelegramWebApp, isTelegramApp } from '@/hooks/useTelegram'
 import { initializeTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthSource } from '@/hooks/useAuthSource'
 import { useServerUrl } from '@/hooks/useServerUrl'
 import { useSSE } from '@/hooks/useSSE'
 import { useSyncingState } from '@/hooks/useSyncingState'
+import { usePushNotifications } from '@/hooks/usePushNotifications'
 import { queryKeys } from '@/lib/query-keys'
 import { AppContextProvider } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
@@ -19,8 +20,8 @@ import { LoadingState } from '@/components/LoadingState'
 
 export function App() {
     const { serverUrl, baseUrl, setServerUrl, clearServerUrl } = useServerUrl()
-    const { authSource, isLoading: isAuthSourceLoading, setAccessToken, setPasswordAuth, clearAuth } = useAuthSource(baseUrl)
-    const { token, user, api, isLoading: isAuthLoading, error: authError } = useAuth(authSource, baseUrl)
+    const { authSource, isLoading: isAuthSourceLoading, setAccessToken } = useAuthSource(baseUrl)
+    const { token, api, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl)
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
     const matchRoute = useMatchRoute()
@@ -93,6 +94,8 @@ export function App() {
     const syncTokenRef = useRef(0)
     const isFirstConnectRef = useRef(true)
     const baseUrlRef = useRef(baseUrl)
+    const pushPromptedRef = useRef(false)
+    const { isSupported: isPushSupported, permission: pushPermission, requestPermission, subscribe } = usePushNotifications(api)
 
     useEffect(() => {
         if (baseUrlRef.current === baseUrl) {
@@ -103,6 +106,35 @@ export function App() {
         syncTokenRef.current = 0
         queryClient.clear()
     }, [baseUrl, queryClient])
+
+    useEffect(() => {
+        if (!api || !token) {
+            pushPromptedRef.current = false
+            return
+        }
+        if (isTelegramApp() || !isPushSupported) {
+            return
+        }
+        if (pushPromptedRef.current) {
+            return
+        }
+        pushPromptedRef.current = true
+
+        const run = async () => {
+            if (pushPermission === 'granted') {
+                await subscribe()
+                return
+            }
+            if (pushPermission === 'default') {
+                const granted = await requestPermission()
+                if (granted) {
+                    await subscribe()
+                }
+            }
+        }
+
+        void run()
+    }, [api, isPushSupported, pushPermission, requestPermission, subscribe, token])
 
     const handleSseConnect = useCallback(() => {
         // Increment token to track this specific connection
@@ -168,11 +200,24 @@ export function App() {
         return (
             <LoginPrompt
                 onLogin={setAccessToken}
-                onPasswordLogin={setPasswordAuth}
                 baseUrl={baseUrl}
                 serverUrl={serverUrl}
                 setServerUrl={setServerUrl}
                 clearServerUrl={clearServerUrl}
+            />
+        )
+    }
+
+    if (needsBinding) {
+        return (
+            <LoginPrompt
+                mode="bind"
+                onBind={bind}
+                baseUrl={baseUrl}
+                serverUrl={serverUrl}
+                setServerUrl={setServerUrl}
+                clearServerUrl={clearServerUrl}
+                error={authError ?? undefined}
             />
         )
     }
@@ -187,13 +232,12 @@ export function App() {
     }
 
     // Auth error
-    if (authError || !token || !api || !user) {
-        // If using access token or password and auth failed, show login again
-        if (authSource.type === 'accessToken' || authSource.type === 'password') {
+    if (authError || !token || !api) {
+        // If using access token and auth failed, show login again
+        if (authSource.type === 'accessToken') {
             return (
                 <LoginPrompt
                     onLogin={setAccessToken}
-                    onPasswordLogin={setPasswordAuth}
                     baseUrl={baseUrl}
                     serverUrl={serverUrl}
                     setServerUrl={setServerUrl}
@@ -218,7 +262,7 @@ export function App() {
     }
 
     return (
-        <AppContextProvider value={{ api, token, user, onLogout: clearAuth }}>
+        <AppContextProvider value={{ api, token }}>
             <SyncingBanner isSyncing={isSyncing} />
             <OfflineBanner />
             <div className="h-full flex flex-col">

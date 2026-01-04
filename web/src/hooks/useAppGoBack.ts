@@ -13,6 +13,13 @@ export function useAppGoBack(): () => void {
             return
         }
 
+        // For single file view, go back to files list
+        if (pathname.match(/^\/sessions\/[^/]+\/file$/)) {
+            const filesPath = pathname.replace(/\/file$/, '/files')
+            navigate({ to: filesPath })
+            return
+        }
+
         // For session routes, navigate to parent path
         if (pathname.startsWith('/sessions/')) {
             const parentPath = pathname.replace(/\/[^/]+$/, '') || '/sessions'

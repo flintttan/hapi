@@ -1,30 +1,19 @@
-import os from 'node:os';
-import { randomUUID } from 'node:crypto';
-
-import { ApiClient } from '@/api/api';
 import { logger } from '@/ui/logger';
-import { restoreTerminalState } from '@/ui/terminalState';
 import { loop } from '@/claude/loop';
-import { AgentState, Metadata, SessionModelMode } from '@/api/types';
-import packageJson from '../../package.json';
-import { readSettings } from '@/persistence';
+import { AgentState, SessionModelMode } from '@/api/types';
 import { EnhancedMode, PermissionMode } from './loop';
 import { MessageQueue2 } from '@/utils/MessageQueue2';
 import { hashObject } from '@/utils/deterministicJson';
 import { extractSDKMetadataAsync } from '@/claude/sdk/metadataExtractor';
 import { parseSpecialCommand } from '@/parsers/specialCommands';
 import { getEnvironmentInfo } from '@/ui/doctor';
-import { configuration } from '@/configuration';
-import { notifyDaemonSessionStarted } from '@/daemon/controlClient';
-import { initialMachineMetadata } from '@/daemon/run';
 import { startHappyServer } from '@/claude/utils/startHappyServer';
 import { startHookServer } from '@/claude/utils/startHookServer';
 import { generateHookSettingsFile, cleanupHookSettingsFile } from '@/claude/utils/generateHookSettings';
 import { registerKillSessionHandler } from './registerKillSessionHandler';
-import { runtimePath } from '../projectPath';
-import { resolve } from 'node:path';
 import type { Session } from './session';
-import { readWorktreeEnv } from '@/utils/worktreeEnv';
+import { bootstrapSession } from '@/agent/sessionFactory';
+import { createModeChangeHandler, createRunnerLifecycle, setControlledByUser } from '@/agent/runnerLifecycle';
 
 export interface StartOptions {
     model?: string
@@ -38,7 +27,6 @@ export interface StartOptions {
 
 export async function runClaude(options: StartOptions = {}): Promise<void> {
     const workingDirectory = process.cwd();
-    const sessionTag = randomUUID();
     const startedBy = options.startedBy ?? 'terminal';
 
     // Log environment info at startup
@@ -53,69 +41,21 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         // throw new Error('Daemon-spawned sessions cannot use local/interactive mode');
     }
 
-    // Create session service
-    const api = await ApiClient.create();
-
-    // Create a new session
-    let state: AgentState = {};
-
-    // Get machine ID from settings (should already be set up)
-    const settings = await readSettings();
-    let machineId = settings?.machineId
-    if (!machineId) {
-        console.error(`[START] No machine ID found in settings, which is unexpected since authAndSetupMachineIfNeeded should have created it. Please report this issue on ${packageJson.bugs}`);
-        process.exit(1);
-    }
-    logger.debug(`Using machineId: ${machineId}`);
-
-    // Create machine if it doesn't exist
-    await api.getOrCreateMachine({
-        machineId,
-        metadata: initialMachineMetadata
-    });
-
-    const worktreeInfo = readWorktreeEnv();
-    let metadata: Metadata = {
-        path: workingDirectory,
-        host: os.hostname(),
-        version: packageJson.version,
-        os: os.platform(),
-        machineId: machineId,
-        homeDir: os.homedir(),
-        happyHomeDir: configuration.happyHomeDir,
-        happyLibDir: runtimePath(),
-        happyToolsDir: resolve(runtimePath(), 'tools', 'unpacked'),
-        startedFromDaemon: startedBy === 'daemon',
-        hostPid: process.pid,
-        startedBy,
-        // Initialize lifecycle state
-        lifecycleState: 'running',
-        lifecycleStateSince: Date.now(),
+    const initialState: AgentState = {};
+    const { api, session, sessionInfo } = await bootstrapSession({
         flavor: 'claude',
-        worktree: worktreeInfo ?? undefined
-    };
-    const response = await api.getOrCreateSession({ tag: sessionTag, metadata, state });
-    logger.debug(`Session created: ${response.id}`);
-
-    // Always report to daemon if it exists
-    try {
-        logger.debug(`[START] Reporting session ${response.id} to daemon`);
-        const result = await notifyDaemonSessionStarted(response.id, metadata);
-        if (result.error) {
-            logger.debug(`[START] Failed to report to daemon (may not be running):`, result.error);
-        } else {
-            logger.debug(`[START] Reported session ${response.id} to daemon`);
-        }
-    } catch (error) {
-        logger.debug('[START] Failed to report to daemon (may not be running):', error);
-    }
+        startedBy,
+        workingDirectory,
+        agentState: initialState
+    });
+    logger.debug(`Session created: ${sessionInfo.id}`);
 
     // Extract SDK metadata in background and update session when ready
     extractSDKMetadataAsync(async (sdkMetadata) => {
         logger.debug('[start] SDK metadata extracted, updating session:', sdkMetadata);
         try {
             // Update session metadata with tools and slash commands
-            api.sessionSyncClient(response).updateMetadata((currentMetadata) => ({
+            session.updateMetadata((currentMetadata) => ({
                 ...currentMetadata,
                 tools: sdkMetadata.tools,
                 slashCommands: sdkMetadata.slashCommands
@@ -126,17 +66,12 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         }
     });
 
-    // Create realtime session
-    const session = api.sessionSyncClient(response);
-
     // Start HAPI MCP server
     const happyServer = await startHappyServer(session);
     logger.debug(`[START] HAPI MCP server started at ${happyServer.url}`);
 
     // Variable to track current session instance (updated via onSessionReady callback)
     const currentSessionRef: { current: Session | null } = { current: null };
-    let exitCode = 0;
-    let archiveReason: string | undefined;
 
     const formatFailureReason = (message: string): string => {
         const maxLength = 200;
@@ -168,15 +103,26 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
 
     // Print log file path
     const logPath = logger.logFilePath;
-    logger.infoDeveloper(`Session: ${response.id}`);
+    logger.infoDeveloper(`Session: ${sessionInfo.id}`);
     logger.infoDeveloper(`Logs: ${logPath}`);
+
+    const lifecycle = createRunnerLifecycle({
+        session,
+        logTag: 'claude',
+        stopKeepAlive: () => currentSessionRef.current?.stopKeepAlive(),
+        onAfterClose: () => {
+            happyServer.stop();
+            hookServer.stop();
+            cleanupHookSettingsFile(hookSettingsPath);
+        }
+    });
+
+    lifecycle.registerProcessHandlers();
+    registerKillSessionHandler(session.rpcHandlerManager, lifecycle.cleanupAndExit);
 
     // Set initial agent state
     const startingMode = options.startingMode ?? (startedBy === 'daemon' ? 'remote' : 'local');
-    session.updateAgentState((currentState) => ({
-        ...currentState,
-        controlledByUser: startingMode !== 'remote'
-    }));
+    setControlledByUser(session, startingMode);
 
     // Import MessageQueue2 and create message queue
     const messageQueue = new MessageQueue2<EnhancedMode>(mode => hashObject({
@@ -321,65 +267,6 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         logger.debugLargeJson('User message pushed to queue:', message)
     });
 
-    // Setup signal handlers for graceful shutdown
-    const cleanup = async () => {
-        logger.debug('[START] Received termination signal, cleaning up...');
-        restoreTerminalState();
-
-        try {
-            // Update lifecycle state to archived before closing
-            if (session) {
-                const reason = archiveReason ?? 'User terminated';
-                session.updateMetadata((currentMetadata) => ({
-                    ...currentMetadata,
-                    lifecycleState: 'archived',
-                    lifecycleStateSince: Date.now(),
-                    archivedBy: 'cli',
-                    archiveReason: reason
-                }));
-                
-                // Send session death message
-                session.sendSessionDeath();
-                await session.flush();
-                await session.close();
-            }
-
-            // Stop HAPI MCP server
-            happyServer.stop();
-
-            // Stop Hook server and cleanup settings file
-            hookServer.stop();
-            cleanupHookSettingsFile(hookSettingsPath);
-
-            logger.debug('[START] Cleanup complete, exiting');
-            process.exit(exitCode);
-        } catch (error) {
-            logger.debug('[START] Error during cleanup:', error);
-            process.exit(1);
-        }
-    };
-
-    // Handle termination signals
-    process.on('SIGTERM', cleanup);
-    process.on('SIGINT', cleanup);
-
-    // Handle uncaught exceptions and rejections
-    process.on('uncaughtException', (error) => {
-        logger.debug('[START] Uncaught exception:', error);
-        exitCode = 1;
-        archiveReason = 'Session crashed';
-        cleanup();
-    });
-
-    process.on('unhandledRejection', (reason) => {
-        logger.debug('[START] Unhandled rejection:', reason);
-        exitCode = 1;
-        archiveReason = 'Session crashed';
-        cleanup();
-    });
-
-    registerKillSessionHandler(session.rpcHandlerManager, cleanup);
-
     session.rpcHandlerManager.registerHandler('set-session-config', async (payload: unknown) => {
         if (!payload || typeof payload !== 'object') {
             throw new Error('Invalid session config payload');
@@ -407,72 +294,50 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         return { applied: { permissionMode: currentPermissionMode, modelMode: currentModelMode } };
     });
 
-    // Create claude loop
-    await loop({
-        path: workingDirectory,
-        model: options.model,
-        permissionMode: options.permissionMode,
-        startingMode,
-        messageQueue,
-        api,
-        allowedTools: happyServer.toolNames.map(toolName => `mcp__hapi__${toolName}`),
-        onModeChange: (newMode) => {
-            session.sendSessionEvent({ type: 'switch', mode: newMode });
-            session.updateAgentState((currentState) => ({
-                ...currentState,
-                controlledByUser: newMode === 'local'
-            }));
-        },
-        onSessionReady: (sessionInstance) => {
-            currentSessionRef.current = sessionInstance;
-            syncSessionModes();
-        },
-        mcpServers: {
-            'hapi': {
-                type: 'http' as const,
-                url: happyServer.url,
-            }
-        },
-        session,
-        claudeEnvVars: options.claudeEnvVars,
-        claudeArgs: options.claudeArgs,
-        startedBy,
-        hookSettingsPath
-    });
+    let loopError: unknown = null;
+    let loopFailed = false;
+    try {
+        await loop({
+            path: workingDirectory,
+            model: options.model,
+            permissionMode: options.permissionMode,
+            startingMode,
+            messageQueue,
+            api,
+            allowedTools: happyServer.toolNames.map(toolName => `mcp__hapi__${toolName}`),
+            onModeChange: createModeChangeHandler(session),
+            onSessionReady: (sessionInstance) => {
+                currentSessionRef.current = sessionInstance;
+                syncSessionModes();
+            },
+            mcpServers: {
+                'hapi': {
+                    type: 'http' as const,
+                    url: happyServer.url,
+                }
+            },
+            session,
+            claudeEnvVars: options.claudeEnvVars,
+            claudeArgs: options.claudeArgs,
+            startedBy,
+            hookSettingsPath
+        });
+    } catch (error) {
+        loopError = error;
+        loopFailed = true;
+        lifecycle.markCrash(error);
+    }
 
     const localFailure = currentSessionRef.current?.localLaunchFailure;
     if (localFailure?.exitReason === 'exit') {
-        exitCode = 1;
-        archiveReason = `Local launch failed: ${formatFailureReason(localFailure.message)}`;
-        session.updateMetadata((currentMetadata) => ({
-            ...currentMetadata,
-            lifecycleState: 'archived',
-            lifecycleStateSince: Date.now(),
-            archivedBy: 'cli',
-            archiveReason
-        }));
+        lifecycle.setExitCode(1);
+        lifecycle.setArchiveReason(`Local launch failed: ${formatFailureReason(localFailure.message)}`);
     }
 
-    // Send session death message
-    session.sendSessionDeath();
+    if (loopFailed) {
+        await lifecycle.cleanup();
+        throw loopError;
+    }
 
-    // Wait for socket to flush
-    logger.debug('Waiting for socket to flush...');
-    await session.flush();
-
-    // Close session
-    logger.debug('Closing session...');
-    await session.close();
-
-    // Stop HAPI MCP server
-    happyServer.stop();
-    logger.debug('Stopped HAPI MCP server');
-
-    // Stop Hook server and cleanup settings file
-    hookServer.stop();
-    cleanupHookSettingsFile(hookSettingsPath);
-    logger.debug('Stopped Hook server and cleaned up settings file');
-
-    // Exit
-    process.exit(exitCode);
+    await lifecycle.cleanupAndExit();
 }

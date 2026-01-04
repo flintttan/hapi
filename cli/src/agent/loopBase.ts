@@ -3,6 +3,27 @@ import type { AgentSessionBase } from './sessionBase';
 
 export type LoopLauncher<TSession> = (session: TSession) => Promise<'switch' | 'exit'>;
 
+export async function runLocalRemoteSession<TSession extends AgentSessionBase<any>>(opts: {
+    session: TSession;
+    startingMode?: 'local' | 'remote';
+    logTag: string;
+    runLocal: LoopLauncher<TSession>;
+    runRemote: LoopLauncher<TSession>;
+    onSessionReady?: (session: TSession) => void;
+}): Promise<void> {
+    if (opts.onSessionReady) {
+        opts.onSessionReady(opts.session);
+    }
+
+    await runLocalRemoteLoop({
+        session: opts.session,
+        startingMode: opts.startingMode,
+        logTag: opts.logTag,
+        runLocal: opts.runLocal,
+        runRemote: opts.runRemote
+    });
+}
+
 export async function runLocalRemoteLoop<TSession extends AgentSessionBase<any>>(opts: {
     session: TSession;
     startingMode?: 'local' | 'remote';

@@ -8,6 +8,11 @@ import type {
     MachinePathsExistsResponse,
     MachinesResponse,
     MessagesResponse,
+    ModelMode,
+    PermissionMode,
+    PushSubscriptionPayload,
+    PushUnsubscribePayload,
+    PushVapidPublicKeyResponse,
     SlashCommandsResponse,
     SpawnResponse,
     SessionResponse,
@@ -18,6 +23,33 @@ type ApiClientOptions = {
     baseUrl?: string
     getToken?: () => string | null
     onUnauthorized?: () => Promise<string | null>
+}
+
+type ErrorPayload = {
+    error?: unknown
+}
+
+function parseErrorCode(bodyText: string): string | undefined {
+    try {
+        const parsed = JSON.parse(bodyText) as ErrorPayload
+        return typeof parsed.error === 'string' ? parsed.error : undefined
+    } catch {
+        return undefined
+    }
+}
+
+export class ApiError extends Error {
+    status: number
+    code?: string
+    body?: string
+
+    constructor(message: string, status: number, code?: string, body?: string) {
+        super(message)
+        this.name = 'ApiError'
+        this.status = status
+        this.code = code
+        this.body = body
+    }
 }
 
 export class ApiClient {
@@ -108,7 +140,26 @@ export class ApiClient {
 
         if (!res.ok) {
             const body = await res.text().catch(() => '')
-            throw new Error(`Auth failed: HTTP ${res.status} ${res.statusText}: ${body}`)
+            const code = parseErrorCode(body)
+            const detail = body ? `: ${body}` : ''
+            throw new ApiError(`Auth failed: HTTP ${res.status} ${res.statusText}${detail}`, res.status, code, body || undefined)
+        }
+
+        return await res.json() as AuthResponse
+    }
+
+    async bind(auth: { initData: string; accessToken: string }): Promise<AuthResponse> {
+        const res = await fetch(this.buildUrl('/api/bind'), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(auth)
+        })
+
+        if (!res.ok) {
+            const body = await res.text().catch(() => '')
+            const code = parseErrorCode(body)
+            const detail = body ? `: ${body}` : ''
+            throw new ApiError(`Bind failed: HTTP ${res.status} ${res.statusText}${detail}`, res.status, code, body || undefined)
         }
 
         return await res.json() as AuthResponse
@@ -116,6 +167,24 @@ export class ApiClient {
 
     async getSessions(): Promise<SessionsResponse> {
         return await this.request<SessionsResponse>('/api/sessions')
+    }
+
+    async getPushVapidPublicKey(): Promise<PushVapidPublicKeyResponse> {
+        return await this.request<PushVapidPublicKeyResponse>('/api/push/vapid-public-key')
+    }
+
+    async subscribePushNotifications(payload: PushSubscriptionPayload): Promise<void> {
+        await this.request('/api/push/subscribe', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        })
+    }
+
+    async unsubscribePushNotifications(payload: PushUnsubscribePayload): Promise<void> {
+        await this.request('/api/push/subscribe', {
+            method: 'DELETE',
+            body: JSON.stringify(payload)
+        })
     }
 
     async getSession(sessionId: string): Promise<SessionResponse> {
@@ -212,6 +281,13 @@ export class ApiClient {
         })
     }
 
+    async archiveSession(sessionId: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/archive`, {
+            method: 'POST',
+            body: JSON.stringify({})
+        })
+    }
+
     async switchSession(sessionId: string): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/switch`, {
             method: 'POST',
@@ -219,14 +295,14 @@ export class ApiClient {
         })
     }
 
-    async setPermissionMode(sessionId: string, mode: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'read-only' | 'safe-yolo' | 'yolo'): Promise<void> {
+    async setPermissionMode(sessionId: string, mode: PermissionMode): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/permission-mode`, {
             method: 'POST',
             body: JSON.stringify({ mode })
         })
     }
 
-    async setModelMode(sessionId: string, model: 'default' | 'sonnet' | 'opus'): Promise<void> {
+    async setModelMode(sessionId: string, model: ModelMode): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/model`, {
             method: 'POST',
             body: JSON.stringify({ model })
@@ -300,5 +376,18 @@ export class ApiClient {
         return await this.request<SlashCommandsResponse>(
             `/api/sessions/${encodeURIComponent(sessionId)}/slash-commands`
         )
+    }
+
+    async renameSession(sessionId: string, name: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ name })
+        })
+    }
+
+    async deleteSession(sessionId: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+            method: 'DELETE'
+        })
     }
 }

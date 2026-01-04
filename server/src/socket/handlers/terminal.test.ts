@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
-import type { Server, Socket } from 'socket.io'
 import { registerTerminalHandlers } from './terminal'
 import { TerminalRegistry } from '../terminalRegistry'
+import type { SocketServer, SocketWithData } from '../socketTypes'
 
 type EmittedEvent = {
     event: string
@@ -75,14 +75,15 @@ function createHarness(options?: {
 }): Harness {
     const io = new FakeServer()
     const terminalSocket = new FakeSocket('terminal-socket')
+    terminalSocket.data.namespace = 'default'
     const terminalRegistry = new TerminalRegistry({ idleTimeoutMs: 0 })
     const cliNamespace = io.of('/cli')
     const terminalNamespace = io.of('/terminal')
     terminalNamespace.sockets.set(terminalSocket.id, terminalSocket)
 
-    registerTerminalHandlers(terminalSocket as unknown as Socket, {
-        io: io as unknown as Server,
-        getSession: () => ({ active: options?.sessionActive ?? true }),
+    registerTerminalHandlers(terminalSocket as unknown as SocketWithData, {
+        io: io as unknown as SocketServer,
+        getSession: () => ({ active: options?.sessionActive ?? true, namespace: 'default' }),
         terminalRegistry,
         maxTerminalsPerSocket: options?.maxTerminalsPerSocket ?? 4,
         maxTerminalsPerSession: options?.maxTerminalsPerSession ?? 4
@@ -92,6 +93,7 @@ function createHarness(options?: {
 }
 
 function connectCliSocket(cliNamespace: FakeNamespace, cliSocket: FakeSocket, sessionId: string): void {
+    cliSocket.data.namespace = 'default'
     cliNamespace.sockets.set(cliSocket.id, cliSocket)
     const roomId = `session:${sessionId}`
     const room = cliNamespace.adapter.rooms.get(roomId) ?? new Set<string>()

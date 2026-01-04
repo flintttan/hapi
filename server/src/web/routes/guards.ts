@@ -1,5 +1,5 @@
 import type { Context } from 'hono'
-import type { Session, SyncEngine, Machine } from '../../sync/syncEngine'
+import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 
 export function requireSyncEngine(
@@ -17,16 +17,16 @@ export function requireSession(
     c: Context<WebAppEnv>,
     engine: SyncEngine,
     sessionId: string,
-    userId: string,
     options?: { requireActive?: boolean }
 ): Session | Response {
-    const session = engine.getSession(sessionId, userId)
+    const namespace = c.get('namespace')
+    const session = engine.getSession(sessionId)
     if (!session) {
-        // Return 404 to hide resource existence
-        console.warn(`[Security] User ${userId} attempted to access non-existent session ${sessionId}`)
         return c.json({ error: 'Session not found' }, 404)
     }
-
+    if (session.namespace !== namespace) {
+        return c.json({ error: 'Session access denied' }, 403)
+    }
     if (options?.requireActive && !session.active) {
         return c.json({ error: 'Session is inactive' }, 409)
     }
@@ -36,47 +36,29 @@ export function requireSession(
 export function requireMachine(
     c: Context<WebAppEnv>,
     engine: SyncEngine,
-    machineId: string,
-    userId: string
+    machineId: string
 ): Machine | Response {
-    const machine = engine.getMachine(machineId, userId)
+    const namespace = c.get('namespace')
+    const machine = engine.getMachine(machineId)
     if (!machine) {
-        // Return 404 to hide resource existence
-        console.warn(`[Security] User ${userId} attempted to access non-existent machine ${machineId}`)
         return c.json({ error: 'Machine not found' }, 404)
     }
-
+    if (machine.namespace !== namespace) {
+        return c.json({ error: 'Machine access denied' }, 403)
+    }
     return machine
 }
 
 export function requireSessionFromParam(
     c: Context<WebAppEnv>,
     engine: SyncEngine,
-    userId: string,
     options?: { paramName?: string; requireActive?: boolean }
 ): { sessionId: string; session: Session } | Response {
     const paramName = options?.paramName ?? 'id'
     const sessionId = c.req.param(paramName)
-    const session = requireSession(c, engine, sessionId, userId, { requireActive: options?.requireActive })
+    const session = requireSession(c, engine, sessionId, { requireActive: options?.requireActive })
     if (session instanceof Response) {
         return session
     }
     return { sessionId, session }
 }
-
-export function requireUserOwnsResource<T extends Session | Machine>(
-    c: Context<WebAppEnv>,
-    engine: SyncEngine,
-    resourceType: 'session' | 'machine',
-    resourceId: string,
-    userId: string
-): T | Response {
-    if (resourceType === 'session') {
-        return requireSession(c, engine, resourceId, userId) as T | Response
-    } else if (resourceType === 'machine') {
-        return requireMachine(c, engine, resourceId, userId) as T | Response
-    } else {
-        return c.json({ error: 'Invalid resource type' }, 400)
-    }
-}
-

@@ -2,10 +2,10 @@ import type { SyncEvent } from '../sync/syncEngine'
 
 export type SSESubscription = {
     id: string
+    namespace: string
     all: boolean
     sessionId: string | null
     machineId: string | null
-    userId: string | null
 }
 
 type SSEConnection = SSESubscription & {
@@ -24,19 +24,19 @@ export class SSEManager {
 
     subscribe(options: {
         id: string
+        namespace: string
         all?: boolean
         sessionId?: string | null
         machineId?: string | null
-        userId?: string | null
         send: (event: SyncEvent) => void | Promise<void>
         sendHeartbeat: () => void | Promise<void>
     }): SSESubscription {
         const subscription: SSEConnection = {
             id: options.id,
+            namespace: options.namespace,
             all: Boolean(options.all),
             sessionId: options.sessionId ?? null,
             machineId: options.machineId ?? null,
-            userId: options.userId ?? null,
             send: options.send,
             sendHeartbeat: options.sendHeartbeat
         }
@@ -45,10 +45,10 @@ export class SSEManager {
         this.ensureHeartbeat()
         return {
             id: subscription.id,
+            namespace: subscription.namespace,
             all: subscription.all,
             sessionId: subscription.sessionId,
-            machineId: subscription.machineId,
-            userId: subscription.userId
+            machineId: subscription.machineId
         }
     }
 
@@ -100,13 +100,15 @@ export class SSEManager {
     }
 
     private shouldSend(connection: SSEConnection, event: SyncEvent): boolean {
-        // User-level isolation: Only send events matching the connection's userId
-        if (connection.userId && event.userId && connection.userId !== event.userId) {
-            return false
+        if (event.type !== 'connection-changed') {
+            const eventNamespace = event.namespace
+            if (!eventNamespace || eventNamespace !== connection.namespace) {
+                return false
+            }
         }
 
         if (event.type === 'message-received') {
-            return Boolean(event.sessionId && connection.sessionId === event.sessionId)
+            return connection.sessionId === event.sessionId
         }
 
         if (event.type === 'connection-changed') {
@@ -117,11 +119,11 @@ export class SSEManager {
             return true
         }
 
-        if (event.sessionId && connection.sessionId === event.sessionId) {
+        if ('sessionId' in event && connection.sessionId === event.sessionId) {
             return true
         }
 
-        if (event.machineId && connection.machineId === event.machineId) {
+        if ('machineId' in event && connection.machineId === event.machineId) {
             return true
         }
 

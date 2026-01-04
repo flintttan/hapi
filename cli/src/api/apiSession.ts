@@ -31,6 +31,7 @@ import {
     TerminalResizePayloadSchema,
     TerminalWritePayloadSchema
 } from '@/terminal/types'
+import { applyVersionedAck } from './versionedUpdate'
 
 export class ApiSessionClient extends EventEmitter {
     private readonly token: string
@@ -119,6 +120,10 @@ export class ApiSessionClient extends EventEmitter {
         this.socket.on('connect_error', (error) => {
             logger.debug('[API] Socket connection error:', error)
             this.rpcHandlerManager.onSocketDisconnect()
+        })
+
+        this.socket.on('error', (payload) => {
+            logger.debug('[API] Socket error:', payload)
         })
 
         const handleTerminalEvent = <T extends { sessionId: string }>(
@@ -455,42 +460,26 @@ export class ApiSessionClient extends EventEmitter {
                     metadata: updated
                 }) as unknown
 
-                if (!answer || typeof answer !== 'object') {
-                    throw new Error('Invalid update-metadata response')
-                }
-
-                const obj = answer as { result?: unknown; version?: unknown; metadata?: unknown }
-                if (obj.result === 'success' && typeof obj.version === 'number') {
-                    const next = obj.metadata
-                    if (next == null) {
-                        this.metadata = null
-                    } else {
-                        const parsed = MetadataSchema.safeParse(next)
-                        if (parsed.success) {
-                            this.metadata = parsed.data
-                        } else {
-                            logger.debug('[API] Ignoring invalid metadata value from ack', { version: obj.version })
-                        }
-                    }
-                    this.metadataVersion = obj.version
-                    return
-                }
-
-                if (obj.result === 'version-mismatch' && typeof obj.version === 'number') {
-                    const next = obj.metadata
-                    if (next == null) {
-                        this.metadata = null
-                    } else {
-                        const parsed = MetadataSchema.safeParse(next)
-                        if (parsed.success) {
-                            this.metadata = parsed.data
-                        } else {
-                            logger.debug('[API] Ignoring invalid metadata value from version-mismatch ack', { version: obj.version })
-                        }
-                    }
-                    this.metadataVersion = obj.version
-                    throw new Error('Metadata version mismatch')
-                }
+                applyVersionedAck(answer, {
+                    valueKey: 'metadata',
+                    parseValue: (value) => {
+                        const parsed = MetadataSchema.safeParse(value)
+                        return parsed.success ? parsed.data : null
+                    },
+                    applyValue: (value) => {
+                        this.metadata = value
+                    },
+                    applyVersion: (version) => {
+                        this.metadataVersion = version
+                    },
+                    logInvalidValue: (context, version) => {
+                        const suffix = context === 'success' ? 'ack' : 'version-mismatch ack'
+                        logger.debug(`[API] Ignoring invalid metadata value from ${suffix}`, { version })
+                    },
+                    invalidResponseMessage: 'Invalid update-metadata response',
+                    errorMessage: 'Metadata update failed',
+                    versionMismatchMessage: 'Metadata version mismatch'
+                })
             })
         })
     }
@@ -507,42 +496,26 @@ export class ApiSessionClient extends EventEmitter {
                     agentState: updated
                 }) as unknown
 
-                if (!answer || typeof answer !== 'object') {
-                    throw new Error('Invalid update-state response')
-                }
-
-                const obj = answer as { result?: unknown; version?: unknown; agentState?: unknown }
-                if (obj.result === 'success' && typeof obj.version === 'number') {
-                    const next = obj.agentState
-                    if (next == null) {
-                        this.agentState = null
-                    } else {
-                        const parsed = AgentStateSchema.safeParse(next)
-                        if (parsed.success) {
-                            this.agentState = parsed.data
-                        } else {
-                            logger.debug('[API] Ignoring invalid agentState value from ack', { version: obj.version })
-                        }
-                    }
-                    this.agentStateVersion = obj.version
-                    return
-                }
-
-                if (obj.result === 'version-mismatch' && typeof obj.version === 'number') {
-                    const next = obj.agentState
-                    if (next == null) {
-                        this.agentState = null
-                    } else {
-                        const parsed = AgentStateSchema.safeParse(next)
-                        if (parsed.success) {
-                            this.agentState = parsed.data
-                        } else {
-                            logger.debug('[API] Ignoring invalid agentState value from version-mismatch ack', { version: obj.version })
-                        }
-                    }
-                    this.agentStateVersion = obj.version
-                    throw new Error('Agent state version mismatch')
-                }
+                applyVersionedAck(answer, {
+                    valueKey: 'agentState',
+                    parseValue: (value) => {
+                        const parsed = AgentStateSchema.safeParse(value)
+                        return parsed.success ? parsed.data : null
+                    },
+                    applyValue: (value) => {
+                        this.agentState = value
+                    },
+                    applyVersion: (version) => {
+                        this.agentStateVersion = version
+                    },
+                    logInvalidValue: (context, version) => {
+                        const suffix = context === 'success' ? 'ack' : 'version-mismatch ack'
+                        logger.debug(`[API] Ignoring invalid agentState value from ${suffix}`, { version })
+                    },
+                    invalidResponseMessage: 'Invalid update-state response',
+                    errorMessage: 'Agent state update failed',
+                    versionMismatchMessage: 'Agent state version mismatch'
+                })
             })
         })
     }

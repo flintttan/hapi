@@ -1,22 +1,23 @@
 {
-  "name": "@flintttan/hapi",
-  "version": "0.3.4",
+  "name": "@twsxtd/hapi",
+  "version": "0.5.0",
   "description": "App for agentic coding - access coding agent anywhere",
   "author": "Kirill Dubovitskiy & weishu",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "type": "module",
-  "homepage": "https://github.com/flintttan/hapi",
-  "bugs": "https://github.com/flintttan/hapi/issues",
+  "homepage": "https://github.com/tiann/hapi",
+  "bugs": "https://github.com/tiann/hapi/issues",
   "repository": {
     "type": "git",
-    "url": "https://github.com/flintttan/hapi",
+    "url": "git+https://github.com/tiann/hapi.git",
     "directory": "cli"
   },
   "bin": {
     "hapi": "bin/hapi.cjs"
   },
   "files": [
-    "bin/hapi.cjs"
+    "bin/hapi.cjs",
+    "NOTICE"
   ],
   "imports": {
     "#embedded-assets": {
@@ -25,11 +26,11 @@
     }
   },
   "optionalDependencies": {
-    "@flintttan/hapi-darwin-arm64": "0.3.4",
-    "@flintttan/hapi-darwin-x64": "0.3.4",
-    "@flintttan/hapi-linux-arm64": "0.3.4",
-    "@flintttan/hapi-linux-x64": "0.3.4",
-    "@flintttan/hapi-win32-x64": "0.3.4"
+    "@twsxtd/hapi-darwin-arm64": "0.5.0",
+    "@twsxtd/hapi-darwin-x64": "0.5.0",
+    "@twsxtd/hapi-linux-arm64": "0.5.0",
+    "@twsxtd/hapi-linux-x64": "0.5.0",
+    "@twsxtd/hapi-win32-x64": "0.5.0"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
@@ -49,6 +50,7 @@
     "release-all": "bun run scripts/release-all.ts"
   },
   "dependencies": {
+    "@hapi/protocol": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.25.1",
     "@types/cross-spawn": "^6.0.6",
     "@types/ps-list": "^6.2.1",
@@ -63,6 +65,7 @@
     "react": "^19.2.3",
     "socket.io-client": "^4.8.3",
     "tar": "^7.5.2",
+    "yaml": "^2.8.2",
     "zod": "^4.2.1"
   },
   "devDependencies": {

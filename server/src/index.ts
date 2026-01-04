@@ -11,11 +11,16 @@
 import { createConfiguration, type ConfigSource } from './configuration'
 import { Store } from './store'
 import { SyncEngine, type SyncEvent } from './sync/syncEngine'
+import { NotificationHub } from './notifications/notificationHub'
+import type { NotificationChannel } from './notifications/notificationTypes'
 import { HappyBot } from './telegram/bot'
 import { startWebServer } from './web/server'
 import { getOrCreateJwtSecret } from './web/jwtSecret'
 import { createSocketServer } from './socket/server'
 import { SSEManager } from './sse/sseManager'
+import { getOrCreateVapidKeys } from './push/vapidKeys'
+import { PushService } from './push/pushService'
+import { PushNotificationChannel } from './push/pushNotificationChannel'
 import type { Server as BunServer } from 'bun'
 import type { WebSocketData } from '@socket.io/bun-engine'
 
@@ -37,6 +42,7 @@ let syncEngine: SyncEngine | null = null
 let happyBot: HappyBot | null = null
 let webServer: BunServer<WebSocketData> | null = null
 let sseManager: SSEManager | null = null
+let notificationHub: NotificationHub | null = null
 
 async function main() {
     console.log('HAPI Server starting...')
@@ -69,16 +75,14 @@ async function main() {
         console.log('[Server] Telegram: disabled (no TELEGRAM_BOT_TOKEN)')
     } else {
         const tokenSource = formatSource(config.sources.telegramBotToken)
-        if (config.allowedChatIds.length === 0) {
-            console.log(`[Server] Telegram: enabled (${tokenSource}), allowlist empty - /start shows chat ID`)
-        } else {
-            const idsSource = formatSource(config.sources.allowedChatIds)
-            console.log(`[Server] Telegram: enabled (${tokenSource}), chat IDs: ${config.allowedChatIds.join(', ')} (${idsSource})`)
-        }
+        console.log(`[Server] Telegram: enabled (${tokenSource})`)
     }
 
     const store = new Store(config.dbPath)
     const jwtSecret = await getOrCreateJwtSecret()
+    const vapidKeys = await getOrCreateVapidKeys(config.dataDir)
+    const vapidSubject = process.env.VAPID_SUBJECT ?? 'mailto:admin@hapi.run'
+    const pushService = new PushService(vapidKeys, vapidSubject, store)
 
     sseManager = new SSEManager(30_000)
 
@@ -94,15 +98,22 @@ async function main() {
 
     syncEngine = new SyncEngine(store, socketServer.io, socketServer.rpcRegistry, sseManager)
 
+    const notificationChannels: NotificationChannel[] = [
+        new PushNotificationChannel(pushService, config.miniAppUrl)
+    ]
+
     // Initialize Telegram bot (optional)
     if (config.telegramEnabled && config.telegramBotToken) {
         happyBot = new HappyBot({
             syncEngine,
             botToken: config.telegramBotToken,
-            allowedChatIds: config.allowedChatIds,
-            miniAppUrl: config.miniAppUrl
+            miniAppUrl: config.miniAppUrl,
+            store
         })
+        notificationChannels.push(happyBot)
     }
+
+    notificationHub = new NotificationHub(syncEngine, notificationChannels)
 
     // Start HTTP server for Telegram Mini App
     webServer = await startWebServer({
@@ -110,6 +121,8 @@ async function main() {
         getSyncEngine: () => syncEngine,
         getSseManager: () => sseManager,
         jwtSecret,
+        store,
+        vapidPublicKey: vapidKeys.publicKey,
         socketEngine: socketServer.engine
     })
 
@@ -124,6 +137,7 @@ async function main() {
     const shutdown = async () => {
         console.log('\nShutting down...')
         await happyBot?.stop()
+        notificationHub?.stop()
         syncEngine?.stop()
         sseManager?.stop()
         webServer?.stop()

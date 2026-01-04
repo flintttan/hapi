@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { randomUUID } from 'node:crypto'
 import type { SSEManager } from '../../sse/sseManager'
+import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 
 function parseOptionalId(value: string | undefined): string | null {
@@ -18,7 +19,10 @@ function parseBoolean(value: string | undefined): boolean {
     return value === 'true' || value === '1'
 }
 
-export function createEventsRoutes(getSseManager: () => SSEManager | null): Hono<WebAppEnv> {
+export function createEventsRoutes(
+    getSseManager: () => SSEManager | null,
+    getSyncEngine: () => SyncEngine | null
+): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
     app.get('/events', (c) => {
@@ -37,9 +41,32 @@ export function createEventsRoutes(getSseManager: () => SSEManager | null): Hono
         const sessionId = parseOptionalId(query.sessionId)
         const machineId = parseOptionalId(query.machineId)
         const subscriptionId = randomUUID()
+        const namespace = c.get('namespace')
 
-        // Extract userId from authenticated context
-        const userId = c.get('userId') ?? null
+        if (sessionId || machineId) {
+            const engine = getSyncEngine()
+            if (!engine) {
+                return c.json({ error: 'Not connected' }, 503)
+            }
+            if (sessionId) {
+                const session = engine.getSession(sessionId)
+                if (!session) {
+                    return c.json({ error: 'Session not found' }, 404)
+                }
+                if (session.namespace !== namespace) {
+                    return c.json({ error: 'Session access denied' }, 403)
+                }
+            }
+            if (machineId) {
+                const machine = engine.getMachine(machineId)
+                if (!machine) {
+                    return c.json({ error: 'Machine not found' }, 404)
+                }
+                if (machine.namespace !== namespace) {
+                    return c.json({ error: 'Machine access denied' }, 403)
+                }
+            }
+        }
 
         return streamSSE(c, async (stream) => {
             // Send an initial chunk immediately so intermediaries don't buffer the response.
@@ -47,10 +74,10 @@ export function createEventsRoutes(getSseManager: () => SSEManager | null): Hono
 
             manager.subscribe({
                 id: subscriptionId,
+                namespace,
                 all,
                 sessionId,
                 machineId,
-                userId,
                 send: (event) => stream.writeSSE({ data: JSON.stringify(event) }),
                 sendHeartbeat: async () => {
                     await stream.write(': heartbeat\n\n')

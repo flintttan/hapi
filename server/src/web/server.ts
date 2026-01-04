@@ -1,29 +1,30 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
-import { join } from 'node:path'
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { serveStatic } from 'hono/bun'
+import type { Server as BunServer } from 'bun'
+import type { Server as SocketEngine, WebSocketData } from '@socket.io/bun-engine'
 import { configuration } from '../configuration'
+import type { SSEManager } from '../sse/sseManager'
 import type { SyncEngine } from '../sync/syncEngine'
 import type { Store } from '../store'
+import { isBunCompiled } from '../utils/bunCompiled'
+import { loadEmbeddedAssetMap, type EmbeddedWebAsset } from './embeddedAssets'
 import { createAuthMiddleware, type WebAppEnv } from './middleware/auth'
 import { createAuthRoutes } from './routes/auth'
-import { createRegisterRoutes } from './routes/register'
-import { createEventsRoutes } from './routes/events'
-import { createSessionsRoutes } from './routes/sessions'
-import { createMessagesRoutes } from './routes/messages'
-import { createPermissionsRoutes } from './routes/permissions'
-import { createMachinesRoutes } from './routes/machines'
-import { createGitRoutes } from './routes/git'
+import { createBindRoutes } from './routes/bind'
 import { createCliRoutes } from './routes/cli'
 import { createCliTokenRoutes } from './routes/cli-tokens'
-import type { SSEManager } from '../sse/sseManager'
-import type { Server as BunServer } from 'bun'
-import type { Server as SocketEngine } from '@socket.io/bun-engine'
-import type { WebSocketData } from '@socket.io/bun-engine'
-import { loadEmbeddedAssetMap, type EmbeddedWebAsset } from './embeddedAssets'
-import { isBunCompiled } from '../utils/bunCompiled'
+import { createEventsRoutes } from './routes/events'
+import { createGitRoutes } from './routes/git'
+import { createMachinesRoutes } from './routes/machines'
+import { createMessagesRoutes } from './routes/messages'
+import { createPermissionsRoutes } from './routes/permissions'
+import { createPushRoutes } from './routes/push'
+import { createRegisterRoutes } from './routes/register'
+import { createSessionsRoutes } from './routes/sessions'
 
 function findWebappDistDir(): { distDir: string; indexHtmlPath: string } {
     const candidates = [
@@ -52,43 +53,45 @@ function serveEmbeddedAsset(asset: EmbeddedWebAsset): Response {
 }
 
 function createWebApp(options: {
-    store: Store
     getSyncEngine: () => SyncEngine | null
     getSseManager: () => SSEManager | null
     jwtSecret: Uint8Array
+    store: Store
+    vapidPublicKey: string
     embeddedAssetMap: Map<string, EmbeddedWebAsset> | null
 }): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
     app.use('*', logger())
 
+    app.get('/health', (c) => c.json({ status: 'ok' }))
+
     const corsOrigins = configuration.corsOrigins
     const corsOriginOption = corsOrigins.includes('*') ? '*' : corsOrigins
     const corsMiddleware = cors({
         origin: corsOriginOption,
-        allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+        allowMethods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
         allowHeaders: ['authorization', 'content-type']
     })
     app.use('/api/*', corsMiddleware)
     app.use('/cli/*', corsMiddleware)
 
+    app.route('/cli', createCliRoutes(options.getSyncEngine, options.store))
+
     app.route('/api', createAuthRoutes(options.jwtSecret, options.store))
     app.route('/api', createRegisterRoutes(options.jwtSecret, options.store))
+    app.route('/api', createBindRoutes(options.jwtSecret, options.store))
 
-    // Apply auth middleware to both /api/* and /cli/* routes
-    const authMiddleware = createAuthMiddleware(options.jwtSecret, options.store)
-    app.use('/api/*', authMiddleware)
-    app.use('/cli/*', authMiddleware)
+    app.use('/api/*', createAuthMiddleware(options.jwtSecret, options.store))
 
-    // CLI routes (now protected by auth middleware)
-    app.route('/cli', createCliRoutes(options.getSyncEngine))
-    app.route('/api', createEventsRoutes(options.getSseManager))
+    app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine))
     app.route('/api', createSessionsRoutes(options.getSyncEngine))
     app.route('/api', createMessagesRoutes(options.getSyncEngine))
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
     app.route('/api', createMachinesRoutes(options.getSyncEngine))
     app.route('/api', createGitRoutes(options.getSyncEngine))
     app.route('/api', createCliTokenRoutes(options.store))
+    app.route('/api', createPushRoutes(options.store, options.vapidPublicKey))
 
     if (options.embeddedAssetMap) {
         const embeddedAssetMap = options.embeddedAssetMap
@@ -105,7 +108,7 @@ function createWebApp(options: {
         }
 
         app.use('*', async (c, next) => {
-            if (c.req.path.startsWith('/api')) {
+            if (c.req.path.startsWith('/api') || c.req.path.startsWith('/cli')) {
                 return await next()
             }
 
@@ -122,7 +125,7 @@ function createWebApp(options: {
         })
 
         app.get('*', async (c, next) => {
-            if (c.req.path.startsWith('/api')) {
+            if (c.req.path.startsWith('/api') || c.req.path.startsWith('/cli')) {
                 await next()
                 return
             }
@@ -148,7 +151,7 @@ function createWebApp(options: {
     app.use('/assets/*', serveStatic({ root: distDir }))
 
     app.use('*', async (c, next) => {
-        if (c.req.path.startsWith('/api')) {
+        if (c.req.path.startsWith('/api') || c.req.path.startsWith('/cli')) {
             await next()
             return
         }
@@ -157,7 +160,7 @@ function createWebApp(options: {
     })
 
     app.get('*', async (c, next) => {
-        if (c.req.path.startsWith('/api')) {
+        if (c.req.path.startsWith('/api') || c.req.path.startsWith('/cli')) {
             await next()
             return
         }
@@ -169,19 +172,21 @@ function createWebApp(options: {
 }
 
 export async function startWebServer(options: {
-    store: Store
     getSyncEngine: () => SyncEngine | null
     getSseManager: () => SSEManager | null
     jwtSecret: Uint8Array
+    store: Store
+    vapidPublicKey: string
     socketEngine: SocketEngine
 }): Promise<BunServer<WebSocketData>> {
     const isCompiled = isBunCompiled()
     const embeddedAssetMap = isCompiled ? await loadEmbeddedAssetMap() : null
     const app = createWebApp({
-        store: options.store,
         getSyncEngine: options.getSyncEngine,
         getSseManager: options.getSseManager,
         jwtSecret: options.jwtSecret,
+        store: options.store,
+        vapidPublicKey: options.vapidPublicKey,
         embeddedAssetMap
     })
 

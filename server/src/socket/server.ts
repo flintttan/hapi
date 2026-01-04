@@ -1,18 +1,21 @@
 import { Server as Engine } from '@socket.io/bun-engine'
-import { Server } from 'socket.io'
+import { Server, type DefaultEventsMap } from 'socket.io'
 import { jwtVerify } from 'jose'
 import { z } from 'zod'
 import type { Store } from '../store'
 import { configuration } from '../configuration'
-import { safeCompareStrings } from '../utils/crypto'
+import { constantTimeEquals } from '../utils/crypto'
+import { parseAccessToken } from '../utils/accessToken'
 import { registerCliHandlers } from './handlers/cli'
 import { registerTerminalHandlers } from './handlers/terminal'
 import { RpcRegistry } from './rpcRegistry'
 import type { SyncEvent } from '../sync/syncEngine'
 import { TerminalRegistry } from './terminalRegistry'
+import type { SocketData, SocketServer } from './socketTypes'
 
 const jwtPayloadSchema = z.object({
-    uid: z.string()
+    uid: z.union([z.string(), z.number()]),
+    ns: z.string().optional()
 })
 
 const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60_000
@@ -30,7 +33,7 @@ function resolveEnvNumber(name: string, fallback: number): number {
 export type SocketServerDeps = {
     store: Store
     jwtSecret: Uint8Array
-    getSession?: (sessionId: string) => { active: boolean } | null
+    getSession?: (sessionId: string) => { active: boolean; namespace: string } | null
     onWebappEvent?: (event: SyncEvent) => void
     onSessionAlive?: (payload: { sid: string; time: number; thinking?: boolean; mode?: 'local' | 'remote' }) => void
     onSessionEnd?: (payload: { sid: string; time: number }) => void
@@ -38,14 +41,14 @@ export type SocketServerDeps = {
 }
 
 export function createSocketServer(deps: SocketServerDeps): {
-    io: Server
+    io: SocketServer
     engine: Engine
     rpcRegistry: RpcRegistry
 } {
     const corsOrigins = configuration.corsOrigins
     const allowAllOrigins = corsOrigins.includes('*')
 
-    const io = new Server({
+    const io = new Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>({
         cors: {
             origin: (origin, callback) => {
                 if (!origin) {
@@ -98,36 +101,21 @@ export function createSocketServer(deps: SocketServerDeps): {
             return next(new Error('Missing token'))
         }
 
-        // Try database CLI token first
         const perUserTokenResult = deps.store.validateCliToken(token)
         if (perUserTokenResult) {
-            socket.handshake.auth = {
-                ...auth,
-                userId: perUserTokenResult.userId,
-                machineId: auth?.machineId,
-                sessionId: auth?.sessionId
-            }
+            socket.data.namespace = perUserTokenResult.userId
+            socket.data.userId = perUserTokenResult.userId
             next()
             return
         }
 
-        // Fallback to hardcoded token for backward compatibility
-        if (safeCompareStrings(token, configuration.cliApiToken)) {
-            const defaultCliUserId = deps.store.getDefaultCliUserId()
-            const cliUser = deps.store.getUserById(defaultCliUserId)
-            if (cliUser) {
-                socket.handshake.auth = {
-                    ...auth,
-                    userId: cliUser.id,
-                    machineId: auth?.machineId,
-                    sessionId: auth?.sessionId
-                }
-                next()
-                return
-            }
+        const parsedToken = parseAccessToken(token)
+        if (!parsedToken || !constantTimeEquals(parsedToken.baseToken, configuration.cliApiToken)) {
+            return next(new Error('Invalid token'))
         }
 
-        return next(new Error('Invalid token'))
+        socket.data.namespace = parsedToken.namespace
+        next()
     })
     cliNs.on('connection', (socket) => registerCliHandlers(socket, {
         io,
@@ -153,7 +141,11 @@ export function createSocketServer(deps: SocketServerDeps): {
             if (!parsed.success) {
                 return next(new Error('Invalid token payload'))
             }
-            socket.data.userId = parsed.data.uid
+            const userId = String(parsed.data.uid)
+            const namespace = parsed.data.ns ?? userId
+
+            socket.data.userId = userId
+            socket.data.namespace = namespace
             next()
             return
         } catch {
@@ -162,7 +154,7 @@ export function createSocketServer(deps: SocketServerDeps): {
     })
     terminalNs.on('connection', (socket) => registerTerminalHandlers(socket, {
         io,
-        getSession: (sessionId) => deps.getSession?.(sessionId) ?? deps.store._unsafeGetSession(sessionId),
+        getSession: (sessionId) => deps.getSession?.(sessionId) ?? deps.store.getSession(sessionId),
         terminalRegistry,
         maxTerminalsPerSocket,
         maxTerminalsPerSession

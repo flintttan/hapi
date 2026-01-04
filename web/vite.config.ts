@@ -25,6 +25,9 @@ export default defineConfig({
         VitePWA({
             registerType: 'autoUpdate',
             includeAssets: ['favicon.ico', 'apple-touch-icon-180x180.png', 'mask-icon.svg'],
+            strategies: 'injectManifest',
+            srcDir: 'src',
+            filename: 'sw.ts',
             manifest: {
                 name: 'HAPI',
                 short_name: 'HAPI',
@@ -59,68 +62,8 @@ export default defineConfig({
                     }
                 ]
             },
-            workbox: {
-                globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
-                runtimeCaching: [
-                    {
-                        urlPattern: /^\/api\/sessions$/,
-                        handler: 'NetworkFirst',
-                        options: {
-                            cacheName: 'api-sessions',
-                            expiration: {
-                                maxEntries: 10,
-                                maxAgeSeconds: 60 * 5
-                            },
-                            networkTimeoutSeconds: 10
-                        }
-                    },
-                    {
-                        urlPattern: /^\/api\/sessions\/[^/]+$/,
-                        handler: 'NetworkFirst',
-                        options: {
-                            cacheName: 'api-session-detail',
-                            expiration: {
-                                maxEntries: 20,
-                                maxAgeSeconds: 60 * 5
-                            },
-                            networkTimeoutSeconds: 10
-                        }
-                    },
-                    {
-                        urlPattern: /^\/api\/machines$/,
-                        handler: 'NetworkFirst',
-                        options: {
-                            cacheName: 'api-machines',
-                            expiration: {
-                                maxEntries: 5,
-                                maxAgeSeconds: 60 * 10
-                            },
-                            networkTimeoutSeconds: 10
-                        }
-                    },
-                    {
-                        urlPattern: /^https:\/\/cdn\.socket\.io\/.*/,
-                        handler: 'CacheFirst',
-                        options: {
-                            cacheName: 'cdn-socketio',
-                            expiration: {
-                                maxEntries: 5,
-                                maxAgeSeconds: 60 * 60 * 24 * 30
-                            }
-                        }
-                    },
-                    {
-                        urlPattern: /^https:\/\/telegram\.org\/.*/,
-                        handler: 'CacheFirst',
-                        options: {
-                            cacheName: 'cdn-telegram',
-                            expiration: {
-                                maxEntries: 5,
-                                maxAgeSeconds: 60 * 60 * 24 * 7
-                            }
-                        }
-                    }
-                ]
+            injectManifest: {
+                globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}']
             },
             devOptions: {
                 enabled: true,

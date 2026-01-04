@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { SessionSummary } from '@/types/api'
+import type { ApiClient } from '@/api/client'
+import { useLongPress } from '@/hooks/useLongPress'
+import { usePlatform } from '@/hooks/usePlatform'
+import { useSessionActions } from '@/hooks/mutations/useSessionActions'
+import { SessionActionMenu } from '@/components/SessionActionMenu'
+import { RenameSessionDialog } from '@/components/RenameSessionDialog'
+import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 
 type SessionGroup = {
     directory: string
@@ -94,29 +101,6 @@ function BulbIcon(props: { className?: string }) {
     )
 }
 
-function TrashIcon(props: { className?: string }) {
-    return (
-        <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className={props.className}
-        >
-            <path d="M3 6h18" />
-            <path d="M8 6V4h8v2" />
-            <path d="M6 6l1 16h10l1-16" />
-            <path d="M10 11v6" />
-            <path d="M14 11v6" />
-        </svg>
-    )
-}
-
 function ChevronIcon(props: { className?: string; collapsed?: boolean }) {
     return (
         <svg
@@ -183,81 +167,136 @@ function formatRelativeTime(value: number): string | null {
 function SessionItem(props: {
     session: SessionSummary
     onSelect: (sessionId: string) => void
-    onDelete?: (sessionId: string) => void
     showPath?: boolean
+    api: ApiClient | null
 }) {
-    const { session: s, onSelect, onDelete, showPath = true } = props
+    const { session: s, onSelect, showPath = true, api } = props
+    const { haptic } = usePlatform()
+    const [menuOpen, setMenuOpen] = useState(false)
+    const [renameOpen, setRenameOpen] = useState(false)
+    const [archiveOpen, setArchiveOpen] = useState(false)
+    const [deleteOpen, setDeleteOpen] = useState(false)
+
+    const { archiveSession, renameSession, deleteSession, isPending } = useSessionActions(
+        api,
+        s.id,
+        s.metadata?.flavor ?? null
+    )
+
+    const longPressHandlers = useLongPress({
+        onLongPress: () => {
+            haptic.impact('medium')
+            setMenuOpen(true)
+        },
+        onClick: () => onSelect(s.id),
+        threshold: 500
+    })
+
+    const sessionName = getSessionTitle(s)
+    const statusDotClass = s.active
+        ? (s.thinking ? 'bg-[#007AFF]' : 'bg-[var(--app-badge-success-text)]')
+        : 'bg-[var(--app-hint)]'
+
     return (
-        <button
-            type="button"
-            onClick={() => onSelect(s.id)}
-            className="session-list-item flex w-full flex-col gap-1.5 px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-        >
-            <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 min-w-0">
-                    <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true">
-                        <span
-                            className={`h-2 w-2 rounded-full ${s.active ? 'bg-[var(--app-badge-success-text)]' : 'bg-[var(--app-hint)]'}`}
-                        />
-                    </span>
-                    <div className="truncate text-sm font-medium">
-                        {getSessionTitle(s)}
+        <>
+            <button
+                type="button"
+                {...longPressHandlers}
+                className="session-list-item flex w-full flex-col gap-1.5 px-3 py-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none"
+                style={{ WebkitTouchCallout: 'none' }}
+            >
+                <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true">
+                            <span
+                                className={`h-2 w-2 rounded-full ${statusDotClass}`}
+                            />
+                        </span>
+                        <div className="truncate text-sm font-medium">
+                            {sessionName}
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0 text-xs">
+                        {(() => {
+                            const progress = getTodoProgress(s)
+                            if (!progress) return null
+                            return (
+                                <span className="flex items-center gap-1 text-[var(--app-hint)]">
+                                    <BulbIcon className="h-3 w-3" />
+                                    {progress.completed}/{progress.total}
+                                </span>
+                            )
+                        })()}
+                        {s.pendingRequestsCount > 0 ? (
+                            <span className="text-[var(--app-badge-warning-text)]">
+                                pending {s.pendingRequestsCount}
+                            </span>
+                        ) : null}
+                        <span className="text-[var(--app-hint)]">
+                            {formatRelativeTime(s.updatedAt)}
+                        </span>
                     </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0 text-xs">
-                    {(() => {
-                        const progress = getTodoProgress(s)
-                        if (!progress) return null
-                        return (
-                            <span className="flex items-center gap-1 text-[var(--app-hint)]">
-                                <BulbIcon className="h-3 w-3" />
-                                {progress.completed}/{progress.total}
-                            </span>
-                        )
-                    })()}
-                    {s.pendingRequestsCount > 0 ? (
-                        <span className="text-[var(--app-badge-warning-text)]">
-                            pending {s.pendingRequestsCount}
-                        </span>
-                    ) : null}
-                    <span className="text-[var(--app-hint)]">
-                        {formatRelativeTime(s.updatedAt)}
-                    </span>
-                    {onDelete ? (
-                        <button
-                            type="button"
-                            onClick={(e) => {
-                                e.preventDefault()
-                                e.stopPropagation()
-                                onDelete(s.id)
-                            }}
-                            className="rounded p-1 text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
-                            title="Delete session"
-                            aria-label="Delete session"
-                        >
-                            <TrashIcon className="h-4 w-4" />
-                        </button>
-                    ) : null}
-                </div>
-            </div>
-            {showPath ? (
-                <div className="truncate text-xs text-[var(--app-hint)]">
-                    {s.metadata?.path ?? s.id}
-                </div>
-            ) : null}
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--app-hint)]">
-                <span className="inline-flex items-center gap-2">
-                    <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true">
-                        ❖
-                    </span>
-                    {getAgentLabel(s)}
-                </span>
-                <span>model: {getModelLabel(s)}</span>
-                {s.metadata?.worktree?.branch ? (
-                    <span>worktree: {s.metadata.worktree.branch}</span>
+                {showPath ? (
+                    <div className="truncate text-xs text-[var(--app-hint)]">
+                        {s.metadata?.path ?? s.id}
+                    </div>
                 ) : null}
-            </div>
-        </button>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--app-hint)]">
+                    <span className="inline-flex items-center gap-2">
+                        <span className="flex h-4 w-4 items-center justify-center" aria-hidden="true">
+                            ❖
+                        </span>
+                        {getAgentLabel(s)}
+                    </span>
+                    <span>model: {getModelLabel(s)}</span>
+                    {s.metadata?.worktree?.branch ? (
+                        <span>worktree: {s.metadata.worktree.branch}</span>
+                    ) : null}
+                </div>
+            </button>
+
+            <SessionActionMenu
+                isOpen={menuOpen}
+                onClose={() => setMenuOpen(false)}
+                sessionActive={s.active}
+                onRename={() => setRenameOpen(true)}
+                onArchive={() => setArchiveOpen(true)}
+                onDelete={() => setDeleteOpen(true)}
+            />
+
+            <RenameSessionDialog
+                isOpen={renameOpen}
+                onClose={() => setRenameOpen(false)}
+                currentName={sessionName}
+                onRename={renameSession}
+                isPending={isPending}
+            />
+
+            <ConfirmDialog
+                isOpen={archiveOpen}
+                onClose={() => setArchiveOpen(false)}
+                title="Archive Session"
+                description={`Are you sure you want to archive "${sessionName}"? This will disconnect the active session.`}
+                confirmLabel="Archive"
+                confirmingLabel="Archiving..."
+                onConfirm={archiveSession}
+                isPending={isPending}
+                destructive
+            />
+
+            <ConfirmDialog
+                isOpen={deleteOpen}
+                onClose={() => setDeleteOpen(false)}
+                title="Delete Session"
+                description={`Are you sure you want to delete "${sessionName}"? This action cannot be undone.`}
+                confirmLabel="Delete"
+                confirmingLabel="Deleting..."
+                onConfirm={deleteSession}
+                isPending={isPending}
+                destructive
+            />
+        </>
     )
 }
 
@@ -266,11 +305,11 @@ export function SessionList(props: {
     onSelect: (sessionId: string) => void
     onNewSession: () => void
     onRefresh: () => void
-    onDelete?: (sessionId: string) => void
     isLoading: boolean
     renderHeader?: boolean
+    api: ApiClient | null
 }) {
-    const { renderHeader = true } = props
+    const { renderHeader = true, api } = props
     const groups = useMemo(
         () => groupSessionsByDirectory(props.sessions),
         [props.sessions]
@@ -356,8 +395,8 @@ export function SessionList(props: {
                                             key={s.id}
                                             session={s}
                                             onSelect={props.onSelect}
-                                            onDelete={props.onDelete}
                                             showPath={false}
+                                            api={api}
                                         />
                                     ))}
                                 </div>

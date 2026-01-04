@@ -1,6 +1,6 @@
 import { MessageQueue2 } from '@/utils/MessageQueue2';
 import { logger } from '@/ui/logger';
-import { runLocalRemoteLoop } from '@/agent/loopBase';
+import { runLocalRemoteSession } from '@/agent/loopBase';
 import { CodexSession } from './session';
 import { codexLocalLauncher } from './codexLocalLauncher';
 import { codexRemoteLauncher } from './codexRemoteLauncher';
@@ -48,15 +48,12 @@ export async function loop(opts: LoopOptions): Promise<void> {
         permissionMode: opts.permissionMode ?? 'default'
     });
 
-    if (opts.onSessionReady) {
-        opts.onSessionReady(session);
-    }
-
-    await runLocalRemoteLoop({
+    await runLocalRemoteSession({
         session,
         startingMode: opts.startingMode,
         logTag: 'codex-loop',
         runLocal: codexLocalLauncher,
-        runRemote: codexRemoteLauncher
+        runRemote: codexRemoteLauncher,
+        onSessionReady: opts.onSessionReady
     });
 }

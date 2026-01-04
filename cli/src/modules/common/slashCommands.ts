@@ -1,11 +1,13 @@
-import { readdir, stat } from 'fs/promises';
-import { join, relative, sep } from 'path';
+import { readdir, readFile } from 'fs/promises';
+import { join } from 'path';
 import { homedir } from 'os';
+import { parse as parseYaml } from 'yaml';
 
 export interface SlashCommand {
     name: string;
     description?: string;
     source: 'builtin' | 'user';
+    content?: string;  // Expanded content for Codex user prompts
 }
 
 export interface ListSlashCommandsRequest {
@@ -43,6 +45,29 @@ const BUILTIN_COMMANDS: Record<string, SlashCommand[]> = {
 };
 
 /**
+ * Parse frontmatter from a markdown file content.
+ * Returns the description (from frontmatter) and the body content.
+ */
+function parseFrontmatter(fileContent: string): { description?: string; content: string } {
+    // Match frontmatter: starts with ---, ends with ---
+    const match = fileContent.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
+    if (match) {
+        const yamlContent = match[1];
+        const body = match[2].trim();
+        try {
+            const parsed = parseYaml(yamlContent) as Record<string, unknown> | null;
+            const description = typeof parsed?.description === 'string' ? parsed.description : undefined;
+            return { description, content: body };
+        } catch {
+            // Invalid YAML - the --- block is not valid frontmatter, return entire file
+            return { content: fileContent.trim() };
+        }
+    }
+    // No frontmatter, entire file is content
+    return { content: fileContent.trim() };
+}
+
+/**
  * Get the user commands directory for an agent type.
  * Returns null if the agent doesn't support user commands.
  */
@@ -63,40 +88,9 @@ function getUserCommandsDir(agent: string): string | null {
 }
 
 /**
- * Recursively scan a directory for .md files.
- * Returns paths relative to the base directory.
- */
-async function scanDirectoryRecursive(dir: string, baseDir: string): Promise<string[]> {
-    const results: string[] = [];
-
-    try {
-        const entries = await readdir(dir, { withFileTypes: true });
-
-        for (const entry of entries) {
-            const fullPath = join(dir, entry.name);
-
-            if (entry.isDirectory()) {
-                // Recursively scan subdirectories
-                const subResults = await scanDirectoryRecursive(fullPath, baseDir);
-                results.push(...subResults);
-            } else if (entry.isFile() && entry.name.endsWith('.md')) {
-                // Get relative path from base directory
-                const relativePath = relative(baseDir, fullPath);
-                results.push(relativePath);
-            }
-        }
-    } catch {
-        // Ignore errors for individual directories
-    }
-
-    return results;
-}
-
-/**
  * Scan a directory for user-defined commands (*.md files).
+ * For Codex, reads file content and parses frontmatter.
  * Returns the command names (filename without extension).
- * Supports nested directories - converts path separators to colons.
- * Example: workflow/ui-design/capture.md -> workflow:ui-design:capture
  */
 async function scanUserCommands(agent: string): Promise<SlashCommand[]> {
     const dir = getUserCommandsDir(agent);
@@ -104,30 +98,46 @@ async function scanUserCommands(agent: string): Promise<SlashCommand[]> {
         return [];
     }
 
+    const shouldReadContent = agent === 'codex';
+
     try {
-        const filePaths = await scanDirectoryRecursive(dir, dir);
-        const commands: SlashCommand[] = [];
+        const entries = await readdir(dir, { withFileTypes: true });
+        const mdFiles = entries.filter(e => e.isFile() && e.name.endsWith('.md'));
 
-        for (const filePath of filePaths) {
-            // Remove .md extension
-            const nameWithPath = filePath.slice(0, -3);
-            if (!nameWithPath) continue;
+        // Read all files in parallel
+        const commands = await Promise.all(
+            mdFiles.map(async (entry): Promise<SlashCommand | null> => {
+                const name = entry.name.slice(0, -3);
+                if (!name) return null;
 
-            // Convert path separators to colons
-            // Example: workflow/ui-design/capture -> workflow:ui-design:capture
-            const name = nameWithPath.split(sep).join(':');
+                const command: SlashCommand = {
+                    name,
+                    description: 'Custom command',
+                    source: 'user',
+                };
 
-            commands.push({
-                name,
-                description: 'Custom command',
-                source: 'user',
-            });
-        }
+                if (shouldReadContent) {
+                    try {
+                        const filePath = join(dir, entry.name);
+                        const fileContent = await readFile(filePath, 'utf-8');
+                        const parsed = parseFrontmatter(fileContent);
+                        if (parsed.description) {
+                            command.description = parsed.description;
+                        }
+                        command.content = parsed.content;
+                    } catch {
+                        // Failed to read file, keep default description
+                    }
+                }
 
-        // Sort alphabetically
-        commands.sort((a, b) => a.name.localeCompare(b.name));
+                return command;
+            })
+        );
 
-        return commands;
+        // Filter nulls and sort alphabetically
+        return commands
+            .filter((cmd): cmd is SlashCommand => cmd !== null)
+            .sort((a, b) => a.name.localeCompare(b.name));
     } catch {
         // Directory doesn't exist or not accessible - return empty array
         return [];

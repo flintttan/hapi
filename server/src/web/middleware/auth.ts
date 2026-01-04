@@ -3,22 +3,24 @@ import { z } from 'zod'
 import { jwtVerify } from 'jose'
 import type { Store } from '../../store'
 import { configuration } from '../../configuration'
-import { safeCompareStrings } from '../../utils/crypto'
+import { constantTimeEquals } from '../../utils/crypto'
 
 export type WebAppEnv = {
     Variables: {
         userId: string
+        namespace: string
     }
 }
 
 const jwtPayloadSchema = z.object({
-    uid: z.string()
+    uid: z.union([z.string(), z.number()]),
+    ns: z.string().optional()
 })
 
 export function createAuthMiddleware(jwtSecret: Uint8Array, store: Store): MiddlewareHandler<WebAppEnv> {
     return async (c, next) => {
         const path = c.req.path
-        if (path === '/api/auth') {
+        if (path === '/api/auth' || path === '/api/bind' || path.startsWith('/api/cli')) {
             await next()
             return
         }
@@ -36,15 +38,17 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, store: Store): Middl
             const perUserTokenResult = store.validateCliToken(token)
             if (perUserTokenResult) {
                 c.set('userId', perUserTokenResult.userId)
+                c.set('namespace', perUserTokenResult.userId)
                 await next()
                 return
             }
 
-            if (safeCompareStrings(token, configuration.cliApiToken)) {
+            if (constantTimeEquals(token, configuration.cliApiToken)) {
                 const defaultCliUserId = store.getDefaultCliUserId()
                 const cliUser = store.getUserById(defaultCliUserId)
                 if (cliUser) {
                     c.set('userId', cliUser.id)
+                    c.set('namespace', cliUser.id)
                     await next()
                     return
                 }
@@ -56,7 +60,11 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, store: Store): Middl
                 return c.json({ error: 'Invalid token payload' }, 401)
             }
 
-            c.set('userId', parsed.data.uid)
+            const userId = String(parsed.data.uid)
+            const namespace = parsed.data.ns ?? userId
+
+            c.set('userId', userId)
+            c.set('namespace', namespace)
             await next()
             return
         } catch {

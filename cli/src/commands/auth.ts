@@ -5,6 +5,7 @@ import { stdin as input, stdout as output } from 'node:process'
 import axios from 'axios'
 import { configuration } from '@/configuration'
 import { readSettings, clearMachineId, updateSettings } from '@/persistence'
+import type { CommandDefinition } from './types'
 
 export async function handleAuthCommand(args: string[]): Promise<void> {
     const subcommand = args[0]
@@ -327,4 +328,20 @@ ${chalk.bold.white('Recommended workflow for new users:')}
   3. CLI token will be automatically generated and saved
   4. Your machine will be registered when you start a session
 `)
+}
+
+export const authCommand: CommandDefinition = {
+    name: 'auth',
+    requiresRuntimeAssets: true,
+    run: async ({ commandArgs }) => {
+        try {
+            await handleAuthCommand(commandArgs)
+        } catch (error) {
+            console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error')
+            if (process.env.DEBUG) {
+                console.error(error)
+            }
+            process.exit(1)
+        }
+    }
 }

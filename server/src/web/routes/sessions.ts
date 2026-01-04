@@ -1,5 +1,8 @@
+import { getPermissionModesForFlavor, isModelModeAllowedForFlavor } from '@hapi/protocol'
+import { ModelModeSchema, PermissionModeSchema } from '@hapi/protocol/schemas'
 import { Hono } from 'hono'
 import { z } from 'zod'
+import type { ModelMode } from '@hapi/protocol/types'
 import type { SyncEngine, Session } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
@@ -22,12 +25,13 @@ type SessionSummaryMetadata = {
 type SessionSummary = {
     id: string
     active: boolean
+    thinking: boolean
     activeAt: number
     updatedAt: number
     metadata: SessionSummaryMetadata | null
     todoProgress: { completed: number; total: number } | null
     pendingRequestsCount: number
-    modelMode?: 'default' | 'sonnet' | 'opus'
+    modelMode?: ModelMode
 }
 
 function toSessionSummary(session: Session): SessionSummary {
@@ -50,6 +54,7 @@ function toSessionSummary(session: Session): SessionSummary {
     return {
         id: session.id,
         active: session.active,
+        thinking: session.thinking,
         activeAt: session.activeAt,
         updatedAt: session.updatedAt,
         metadata,
@@ -60,11 +65,15 @@ function toSessionSummary(session: Session): SessionSummary {
 }
 
 const permissionModeSchema = z.object({
-    mode: z.enum(['default', 'acceptEdits', 'bypassPermissions', 'plan', 'read-only', 'safe-yolo', 'yolo'])
+    mode: PermissionModeSchema
 })
 
 const modelModeSchema = z.object({
-    model: z.enum(['default', 'sonnet', 'opus'])
+    model: ModelModeSchema
+})
+
+const renameSessionSchema = z.object({
+    name: z.string().min(1).max(255)
 })
 
 export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
@@ -76,26 +85,19 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
         const getPendingCount = (s: Session) => s.agentState?.requests ? Object.keys(s.agentState.requests).length : 0
 
-        const sessions = engine.getSessions(userId)
+        const namespace = c.get('namespace')
+        const sessions = engine.getSessionsByNamespace(namespace)
             .sort((a, b) => {
-                // Active sessions first
                 if (a.active !== b.active) {
                     return a.active ? -1 : 1
                 }
-                // Within active sessions, sort by pending requests count
                 const aPending = getPendingCount(a)
                 const bPending = getPendingCount(b)
                 if (a.active && aPending !== bPending) {
                     return bPending - aPending
                 }
-                // Then by updatedAt
                 return b.updatedAt - a.updatedAt
             })
             .map(toSessionSummary)
@@ -109,12 +111,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine, userId)
+        const sessionResult = requireSessionFromParam(c, engine)
         if (sessionResult instanceof Response) {
             return sessionResult
         }
@@ -128,17 +125,27 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine, userId, { requireActive: true })
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
         if (sessionResult instanceof Response) {
             return sessionResult
         }
 
         await engine.abortSession(sessionResult.sessionId)
+        return c.json({ ok: true })
+    })
+
+    app.post('/sessions/:id/archive', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        await engine.archiveSession(sessionResult.sessionId)
         return c.json({ ok: true })
     })
 
@@ -148,12 +155,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine, userId, { requireActive: true })
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
         if (sessionResult instanceof Response) {
             return sessionResult
         }
@@ -168,12 +170,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine, userId, { requireActive: true })
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
         if (sessionResult instanceof Response) {
             return sessionResult
         }
@@ -186,14 +183,13 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
 
         const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
         const mode = parsed.data.mode
-        const claudeModes = new Set(['default', 'acceptEdits', 'bypassPermissions', 'plan'])
-        const codexModes = new Set(['default', 'read-only', 'safe-yolo', 'yolo'])
 
-        if (flavor === 'gemini') {
-            return c.json({ error: 'Permission mode not supported for Gemini sessions' }, 400)
+        const allowedModes = getPermissionModesForFlavor(flavor)
+        if (allowedModes.length === 0) {
+            return c.json({ error: 'Permission mode not supported for session flavor' }, 400)
         }
 
-        if (flavor === 'codex' ? !codexModes.has(mode) : !claudeModes.has(mode)) {
+        if (!allowedModes.includes(mode)) {
             return c.json({ error: 'Invalid permission mode for session flavor' }, 400)
         }
 
@@ -212,12 +208,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine, userId, { requireActive: true })
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
         if (sessionResult instanceof Response) {
             return sessionResult
         }
@@ -229,7 +220,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
-        if (flavor !== 'claude') {
+        if (!isModelModeAllowedForFlavor(parsed.data.model, flavor)) {
             return c.json({ error: 'Model mode is only supported for Claude sessions' }, 400)
         }
 
@@ -242,35 +233,82 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
     })
 
+    app.patch('/sessions/:id', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = renameSessionSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body: name is required' }, 400)
+        }
+
+        try {
+            await engine.renameSession(sessionResult.sessionId, parsed.data.name)
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to rename session'
+            if (message.includes('concurrently') || message.includes('version')) {
+                return c.json({ error: message }, 409)
+            }
+            return c.json({ error: message }, 500)
+        }
+    })
+
+    app.delete('/sessions/:id', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        if (sessionResult.session.active) {
+            return c.json({ error: 'Cannot delete active session. Archive it first.' }, 409)
+        }
+
+        try {
+            await engine.deleteSession(sessionResult.sessionId)
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to delete session'
+            if (message.includes('active')) {
+                return c.json({ error: message }, 409)
+            }
+            return c.json({ error: message }, 500)
+        }
+    })
+
     app.get('/sessions/:id/slash-commands', async (c) => {
         const engine = requireSyncEngine(c, getSyncEngine)
         if (engine instanceof Response) {
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
-        // Session must exist but doesn't need to be active
-        const sessionResult = requireSessionFromParam(c, engine, userId)
+        const sessionResult = requireSessionFromParam(c, engine)
         if (sessionResult instanceof Response) {
             return sessionResult
         }
 
-        // Check if commands are already cached in session metadata
-        if (sessionResult.session.metadata?.slashCommands && Array.isArray(sessionResult.session.metadata.slashCommands)) {
-            // Convert array of command names to SlashCommand objects
-            const commands = sessionResult.session.metadata.slashCommands.map(name => ({
+        const cached = sessionResult.session.metadata?.slashCommands
+        if (cached && Array.isArray(cached)) {
+            const commands = cached.map((name) => ({
                 name,
                 source: 'user' as const
             }))
             return c.json({ success: true, commands })
         }
 
-        // Fallback to RPC call if not cached
-        // Get agent type from session metadata, default to 'claude'
         const agent = sessionResult.session.metadata?.flavor ?? 'claude'
 
         try {
@@ -282,39 +320,6 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 error: error instanceof Error ? error.message : 'Failed to list slash commands'
             })
         }
-    })
-
-    app.delete('/sessions/:id', (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
-        const sessionId = c.req.param('id')
-
-        // Check if session exists and belongs to user
-        const session = engine.getSession(sessionId, userId)
-        if (!session) {
-            // Session doesn't exist or doesn't belong to user
-            // Return 204 to make delete idempotent (already deleted is success)
-            return c.body(null, 204)
-        }
-
-        // Check if force flag is required for active sessions
-        const force = c.req.query('force') === 'true' || c.req.query('force') === '1'
-        if (session.active && !force) {
-            return c.json({ error: 'Session is active' }, 409)
-        }
-
-        // Attempt to delete
-        engine.deleteSession(sessionId, userId)
-        // Always return 204 if we reach here (delete succeeded or was already gone)
-        return c.body(null, 204)
     })
 
     return app

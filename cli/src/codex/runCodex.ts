@@ -1,24 +1,13 @@
-import os from 'node:os';
-import { randomUUID } from 'node:crypto';
-import { resolve } from 'node:path';
-
-import { ApiClient } from '@/api/api';
 import { logger } from '@/ui/logger';
-import { restoreTerminalState } from '@/ui/terminalState';
 import { loop, type EnhancedMode, type PermissionMode } from './loop';
 import { MessageQueue2 } from '@/utils/MessageQueue2';
 import { hashObject } from '@/utils/deterministicJson';
-import { readSettings } from '@/persistence';
-import { configuration } from '@/configuration';
-import { notifyDaemonSessionStarted } from '@/daemon/controlClient';
-import { initialMachineMetadata } from '@/daemon/run';
 import { registerKillSessionHandler } from '@/claude/registerKillSessionHandler';
-import type { AgentState, Metadata } from '@/api/types';
-import packageJson from '../../package.json';
-import { runtimePath } from '@/projectPath';
+import type { AgentState } from '@/api/types';
 import type { CodexSession } from './session';
 import { parseCodexCliOverrides } from './utils/codexCliOverrides';
-import { readWorktreeEnv } from '@/utils/worktreeEnv';
+import { bootstrapSession } from '@/agent/sessionFactory';
+import { createModeChangeHandler, createRunnerLifecycle, setControlledByUser } from '@/agent/runnerLifecycle';
 
 export { emitReadyIfIdle } from './utils/emitReadyIfIdle';
 
@@ -28,71 +17,23 @@ export async function runCodex(opts: {
     permissionMode?: PermissionMode;
 }): Promise<void> {
     const workingDirectory = process.cwd();
-    const sessionTag = randomUUID();
     const startedBy = opts.startedBy ?? 'terminal';
 
     logger.debug(`[codex] Starting with options: startedBy=${startedBy}`);
 
-    const api = await ApiClient.create();
-
-    const settings = await readSettings();
-    const machineId = settings?.machineId;
-    if (!machineId) {
-        console.error(`[START] No machine ID found in settings, which is unexpected since authAndSetupMachineIfNeeded should have created it. Please report this issue on ${packageJson.bugs}`);
-        process.exit(1);
-    }
-    logger.debug(`Using machineId: ${machineId}`);
-
-    await api.getOrCreateMachine({
-        machineId,
-        metadata: initialMachineMetadata
-    });
-
     let state: AgentState = {
         controlledByUser: false
     };
-
-    const worktreeInfo = readWorktreeEnv();
-    const metadata: Metadata = {
-        path: workingDirectory,
-        host: os.hostname(),
-        version: packageJson.version,
-        os: os.platform(),
-        machineId: machineId,
-        homeDir: os.homedir(),
-        happyHomeDir: configuration.happyHomeDir,
-        happyLibDir: runtimePath(),
-        happyToolsDir: resolve(runtimePath(), 'tools', 'unpacked'),
-        startedFromDaemon: startedBy === 'daemon',
-        hostPid: process.pid,
-        startedBy,
-        lifecycleState: 'running',
-        lifecycleStateSince: Date.now(),
+    const { api, session } = await bootstrapSession({
         flavor: 'codex',
-        worktree: worktreeInfo ?? undefined
-    };
-
-    const response = await api.getOrCreateSession({ tag: sessionTag, metadata, state });
-    const session = api.sessionSyncClient(response);
-
-    try {
-        logger.debug(`[START] Reporting session ${response.id} to daemon`);
-        const result = await notifyDaemonSessionStarted(response.id, metadata);
-        if (result.error) {
-            logger.debug(`[START] Failed to report to daemon (may not be running):`, result.error);
-        } else {
-            logger.debug(`[START] Reported session ${response.id} to daemon`);
-        }
-    } catch (error) {
-        logger.debug('[START] Failed to report to daemon (may not be running):', error);
-    }
+        startedBy,
+        workingDirectory,
+        agentState: state
+    });
 
     const startingMode: 'local' | 'remote' = startedBy === 'daemon' ? 'remote' : 'local';
 
-    session.updateAgentState((currentState) => ({
-        ...currentState,
-        controlledByUser: startingMode === 'local'
-    }));
+    setControlledByUser(session, startingMode);
 
     const messageQueue = new MessageQueue2<EnhancedMode>((mode) => hashObject({
         permissionMode: mode.permissionMode,
@@ -103,6 +44,15 @@ export async function runCodex(opts: {
     const sessionWrapperRef: { current: CodexSession | null } = { current: null };
 
     let currentPermissionMode: PermissionMode = opts.permissionMode ?? 'default';
+
+    const lifecycle = createRunnerLifecycle({
+        session,
+        logTag: 'codex',
+        stopKeepAlive: () => sessionWrapperRef.current?.stopKeepAlive()
+    });
+
+    lifecycle.registerProcessHandlers();
+    registerKillSessionHandler(session.rpcHandlerManager, lifecycle.cleanupAndExit);
 
     const syncSessionMode = () => {
         const sessionInstance = sessionWrapperRef.current;
@@ -123,10 +73,6 @@ export async function runCodex(opts: {
         messageQueue.push(message.content.text, enhancedMode);
     });
 
-    let cleanupStarted = false;
-    let exitCode = 0;
-    let archiveReason = 'User terminated';
-
     const formatFailureReason = (message: string): string => {
         const maxLength = 200;
         if (message.length <= maxLength) {
@@ -134,58 +80,6 @@ export async function runCodex(opts: {
         }
         return `${message.slice(0, maxLength)}...`;
     };
-
-    const cleanup = async (code: number = exitCode) => {
-        if (cleanupStarted) {
-            return;
-        }
-        cleanupStarted = true;
-        logger.debug('[codex] Cleanup start');
-        restoreTerminalState();
-        try {
-            const sessionWrapper = sessionWrapperRef.current;
-            if (sessionWrapper) {
-                sessionWrapper.stopKeepAlive();
-            }
-
-            session.updateMetadata((currentMetadata) => ({
-                ...currentMetadata,
-                lifecycleState: 'archived',
-                lifecycleStateSince: Date.now(),
-                archivedBy: 'cli',
-                archiveReason
-            }));
-
-            session.sendSessionDeath();
-            await session.flush();
-            await session.close();
-
-            logger.debug('[codex] Cleanup complete, exiting');
-            process.exit(code);
-        } catch (error) {
-            logger.debug('[codex] Error during cleanup:', error);
-            process.exit(1);
-        }
-    };
-
-    process.on('SIGTERM', () => cleanup(0));
-    process.on('SIGINT', () => cleanup(0));
-
-    process.on('uncaughtException', (error) => {
-        logger.debug('[codex] Uncaught exception:', error);
-        exitCode = 1;
-        archiveReason = 'Session crashed';
-        cleanup(1);
-    });
-
-    process.on('unhandledRejection', (reason) => {
-        logger.debug('[codex] Unhandled rejection:', reason);
-        exitCode = 1;
-        archiveReason = 'Session crashed';
-        cleanup(1);
-    });
-
-    registerKillSessionHandler(session.rpcHandlerManager, cleanup);
 
     session.rpcHandlerManager.registerHandler('set-session-config', async (payload: unknown) => {
         if (!payload || typeof payload !== 'object') {
@@ -205,7 +99,6 @@ export async function runCodex(opts: {
         return { applied: { permissionMode: currentPermissionMode } };
     });
 
-    let loopError: unknown = null;
     try {
         await loop({
             path: workingDirectory,
@@ -217,29 +110,21 @@ export async function runCodex(opts: {
             codexCliOverrides,
             startedBy,
             permissionMode: currentPermissionMode,
-            onModeChange: (newMode) => {
-                session.sendSessionEvent({ type: 'switch', mode: newMode });
-                session.updateAgentState((currentState) => ({
-                    ...currentState,
-                    controlledByUser: newMode === 'local'
-                }));
-            },
+            onModeChange: createModeChangeHandler(session),
             onSessionReady: (instance) => {
                 sessionWrapperRef.current = instance;
                 syncSessionMode();
             }
         });
     } catch (error) {
-        loopError = error;
-        exitCode = 1;
-        archiveReason = 'Session crashed';
+        lifecycle.markCrash(error);
         logger.debug('[codex] Loop error:', error);
     } finally {
         const localFailure = sessionWrapperRef.current?.localLaunchFailure;
         if (localFailure?.exitReason === 'exit') {
-            exitCode = 1;
-            archiveReason = `Local launch failed: ${formatFailureReason(localFailure.message)}`;
+            lifecycle.setExitCode(1);
+            lifecycle.setArchiveReason(`Local launch failed: ${formatFailureReason(localFailure.message)}`);
         }
-        await cleanup(loopError ? 1 : exitCode);
+        await lifecycle.cleanupAndExit();
     }
 }

@@ -4,8 +4,8 @@
  * 1. Bump version
  * 2. Build binaries (with embedded web assets)
  * 3. Publish platform packages first (so lockfile can resolve them)
- * 4. bun install (to get complete lockfile with published packages)
- * 5. Publish main package
+ * 4. Publish main package
+ * 5. bun install (to get complete lockfile with published packages)
  * 6. Git commit + tag + push
  */
 
@@ -113,8 +113,9 @@ async function main(): Promise<void> {
     }
 
     // Step 4: Publish main package
-    console.log('\n📤 Step 5: Publishing main package...');
-    run(`npm publish --access public${dryRun ? ' --dry-run' : ''}`);
+    console.log('\n📤 Step 4: Publishing main package...');
+    const mainNpmDir = join(projectRoot, 'npm', 'main');
+    run(`npm publish --access public${dryRun ? ' --dry-run' : ''}`, mainNpmDir);
 
     // --publish-npm 模式到此结束
     if (publishNpm) {
@@ -123,7 +124,7 @@ async function main(): Promise<void> {
     }
 
     // Step 5: bun install to get complete lockfile
-    console.log('\n📥 Step 4: Updating lockfile...');
+    console.log('\n📥 Step 5: Updating lockfile...');
 
     await runWithTimeoutRetry('bun install', repoRoot);
     // Step 6: Git commit + tag + push

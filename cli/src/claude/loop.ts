@@ -1,7 +1,7 @@
 import { ApiSessionClient } from "@/api/apiSession"
 import { MessageQueue2 } from "@/utils/MessageQueue2"
 import { logger } from "@/ui/logger"
-import { runLocalRemoteLoop } from "@/agent/loopBase"
+import { runLocalRemoteSession } from "@/agent/loopBase"
 import { Session } from "./session"
 import { claudeLocalLauncher } from "./claudeLocalLauncher"
 import { claudeRemoteLauncher } from "./claudeRemoteLauncher"
@@ -47,7 +47,7 @@ export async function loop(opts: LoopOptions) {
     const modelMode: SessionModelMode = opts.model === 'sonnet' || opts.model === 'opus'
         ? opts.model
         : 'default';
-    let session = new Session({
+    const session = new Session({
         api: opts.api,
         client: opts.session,
         path: opts.path,
@@ -67,16 +67,12 @@ export async function loop(opts: LoopOptions) {
         modelMode
     });
 
-    // Notify that session is ready
-    if (opts.onSessionReady) {
-        opts.onSessionReady(session);
-    }
-
-    await runLocalRemoteLoop({
+    await runLocalRemoteSession({
         session,
         startingMode: opts.startingMode,
         logTag: 'loop',
         runLocal: claudeLocalLauncher,
-        runRemote: claudeRemoteLauncher
+        runRemote: claudeRemoteLauncher,
+        onSessionReady: opts.onSessionReady
     });
 }

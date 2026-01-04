@@ -8,10 +8,10 @@
  * Optional environment variables:
  * - CLI_API_TOKEN: Shared secret for hapi CLI authentication (auto-generated if not set)
  * - TELEGRAM_BOT_TOKEN: Telegram Bot API token from @BotFather
- * - ALLOWED_CHAT_IDS: Comma-separated list of allowed Telegram chat IDs
  * - WEBAPP_PORT: Port for Mini App HTTP server (default: 3006)
  * - WEBAPP_URL: Public URL for Telegram Mini App
  * - CORS_ORIGINS: Comma-separated CORS origins
+ * - VAPID_SUBJECT: Contact email or URL for Web Push (defaults to mailto:admin@hapi.run)
  * - HAPI_HOME: Data directory (default: ~/.hapi)
  * - DB_PATH: SQLite database path (default: {HAPI_HOME}/hapi.db)
  */
@@ -26,7 +26,6 @@ export type ConfigSource = 'env' | 'file' | 'default'
 
 export interface ConfigSources {
     telegramBotToken: ConfigSource
-    allowedChatIds: ConfigSource
     webappPort: ConfigSource
     webappUrl: ConfigSource
     corsOrigins: ConfigSource
@@ -36,9 +35,6 @@ export interface ConfigSources {
 class Configuration {
     /** Telegram Bot API token */
     public readonly telegramBotToken: string | null
-
-    /** List of allowed Telegram chat IDs (security whitelist) */
-    public readonly allowedChatIds: number[]
 
     /** Telegram bot enabled status (token present) */
     public readonly telegramEnabled: boolean
@@ -87,7 +83,6 @@ class Configuration {
         // Apply server settings
         this.telegramBotToken = serverSettings.telegramBotToken
         this.telegramEnabled = Boolean(this.telegramBotToken)
-        this.allowedChatIds = serverSettings.allowedChatIds
         this.webappPort = serverSettings.webappPort
         this.miniAppUrl = serverSettings.webappUrl
         this.corsOrigins = serverSettings.corsOrigins
@@ -145,11 +140,6 @@ class Configuration {
         config._setCliApiToken(tokenResult.token, tokenResult.source, tokenResult.isNew)
 
         return config
-    }
-
-    /** Check if a chat ID is allowed */
-    isChatIdAllowed(chatId: number): boolean {
-        return this.allowedChatIds.includes(chatId)
     }
 
     /** Set CLI API token (called during async initialization) */

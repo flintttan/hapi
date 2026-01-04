@@ -23,12 +23,7 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine, userId)
+        const sessionResult = requireSessionFromParam(c, engine)
         if (sessionResult instanceof Response) {
             return sessionResult
         }
@@ -37,7 +32,7 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const parsed = querySchema.safeParse(c.req.query())
         const limit = parsed.success ? (parsed.data.limit ?? 50) : 50
         const beforeSeq = parsed.success ? (parsed.data.beforeSeq ?? null) : null
-        return c.json(engine.getMessagesPage(sessionId, userId, { limit, beforeSeq }))
+        return c.json(engine.getMessagesPage(sessionId, { limit, beforeSeq }))
     })
 
     app.post('/sessions/:id/messages', async (c) => {
@@ -46,12 +41,7 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
-        const sessionResult = requireSessionFromParam(c, engine, userId, { requireActive: true })
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
         if (sessionResult instanceof Response) {
             return sessionResult
         }
@@ -63,7 +53,7 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Invalid body' }, 400)
         }
 
-        await engine.sendMessage(sessionId, userId, { text: parsed.data.text, localId: parsed.data.localId, sentFrom: 'webapp' })
+        await engine.sendMessage(sessionId, { text: parsed.data.text, localId: parsed.data.localId, sentFrom: 'webapp' })
         return c.json({ ok: true })
     })
 

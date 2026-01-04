@@ -10,7 +10,9 @@ import type { DaemonState, Machine, MachineMetadata, Update, UpdateMachineBody }
 import { DaemonStateSchema, MachineMetadataSchema } from './types'
 import { backoff } from '@/utils/time'
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
-import { registerCommonHandlers, type SpawnSessionOptions, type SpawnSessionResult } from '../modules/common/registerCommonHandlers'
+import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
+import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/rpcTypes'
+import { applyVersionedAck } from './versionedUpdate'
 
 interface ServerToDaemonEvents {
     update: (data: Update) => void
@@ -156,42 +158,26 @@ export class ApiMachineClient {
                 expectedVersion: this.machine.metadataVersion
             }) as unknown
 
-            if (!answer || typeof answer !== 'object') {
-                throw new Error('Invalid machine-update-metadata response')
-            }
-
-            const obj = answer as { result?: unknown; version?: unknown; metadata?: unknown }
-            if (obj.result === 'success' && typeof obj.version === 'number') {
-                const next = obj.metadata
-                if (next == null) {
-                    this.machine.metadata = null
-                } else {
-                    const parsed = MachineMetadataSchema.safeParse(next)
-                    if (parsed.success) {
-                        this.machine.metadata = parsed.data
-                    } else {
-                        logger.debug('[API MACHINE] Ignoring invalid metadata value from ack', { version: obj.version })
-                    }
-                }
-                this.machine.metadataVersion = obj.version
-                return
-            }
-
-            if (obj.result === 'version-mismatch' && typeof obj.version === 'number') {
-                const next = obj.metadata
-                if (next == null) {
-                    this.machine.metadata = null
-                } else {
-                    const parsed = MachineMetadataSchema.safeParse(next)
-                    if (parsed.success) {
-                        this.machine.metadata = parsed.data
-                    } else {
-                        logger.debug('[API MACHINE] Ignoring invalid metadata value from version-mismatch ack', { version: obj.version })
-                    }
-                }
-                this.machine.metadataVersion = obj.version
-                throw new Error('Metadata version mismatch')
-            }
+            applyVersionedAck(answer, {
+                valueKey: 'metadata',
+                parseValue: (value) => {
+                    const parsed = MachineMetadataSchema.safeParse(value)
+                    return parsed.success ? parsed.data : null
+                },
+                applyValue: (value) => {
+                    this.machine.metadata = value
+                },
+                applyVersion: (version) => {
+                    this.machine.metadataVersion = version
+                },
+                logInvalidValue: (context, version) => {
+                    const suffix = context === 'success' ? 'ack' : 'version-mismatch ack'
+                    logger.debug(`[API MACHINE] Ignoring invalid metadata value from ${suffix}`, { version })
+                },
+                invalidResponseMessage: 'Invalid machine-update-metadata response',
+                errorMessage: 'Machine metadata update failed',
+                versionMismatchMessage: 'Metadata version mismatch'
+            })
         })
     }
 
@@ -205,42 +191,26 @@ export class ApiMachineClient {
                 expectedVersion: this.machine.daemonStateVersion
             }) as unknown
 
-            if (!answer || typeof answer !== 'object') {
-                throw new Error('Invalid machine-update-state response')
-            }
-
-            const obj = answer as { result?: unknown; version?: unknown; daemonState?: unknown }
-            if (obj.result === 'success' && typeof obj.version === 'number') {
-                const next = obj.daemonState
-                if (next == null) {
-                    this.machine.daemonState = null
-                } else {
-                    const parsed = DaemonStateSchema.safeParse(next)
-                    if (parsed.success) {
-                        this.machine.daemonState = parsed.data
-                    } else {
-                        logger.debug('[API MACHINE] Ignoring invalid daemonState value from ack', { version: obj.version })
-                    }
-                }
-                this.machine.daemonStateVersion = obj.version
-                return
-            }
-
-            if (obj.result === 'version-mismatch' && typeof obj.version === 'number') {
-                const next = obj.daemonState
-                if (next == null) {
-                    this.machine.daemonState = null
-                } else {
-                    const parsed = DaemonStateSchema.safeParse(next)
-                    if (parsed.success) {
-                        this.machine.daemonState = parsed.data
-                    } else {
-                        logger.debug('[API MACHINE] Ignoring invalid daemonState value from version-mismatch ack', { version: obj.version })
-                    }
-                }
-                this.machine.daemonStateVersion = obj.version
-                throw new Error('Daemon state version mismatch')
-            }
+            applyVersionedAck(answer, {
+                valueKey: 'daemonState',
+                parseValue: (value) => {
+                    const parsed = DaemonStateSchema.safeParse(value)
+                    return parsed.success ? parsed.data : null
+                },
+                applyValue: (value) => {
+                    this.machine.daemonState = value
+                },
+                applyVersion: (version) => {
+                    this.machine.daemonStateVersion = version
+                },
+                logInvalidValue: (context, version) => {
+                    const suffix = context === 'success' ? 'ack' : 'version-mismatch ack'
+                    logger.debug(`[API MACHINE] Ignoring invalid daemonState value from ${suffix}`, { version })
+                },
+                invalidResponseMessage: 'Invalid machine-update-state response',
+                errorMessage: 'Machine state update failed',
+                versionMismatchMessage: 'Daemon state version mismatch'
+            })
         })
     }
 
@@ -321,6 +291,10 @@ export class ApiMachineClient {
 
         this.socket.on('connect_error', (error) => {
             logger.debug(`[API MACHINE] Connection error: ${error.message}`)
+        })
+
+        this.socket.on('error', (payload) => {
+            logger.debug('[API MACHINE] Socket error:', payload)
         })
     }
 

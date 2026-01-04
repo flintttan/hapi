@@ -1,13 +1,12 @@
-export type PermissionMode = 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | 'read-only' | 'safe-yolo' | 'yolo'
-export type ModelMode = 'default' | 'sonnet' | 'opus'
+import type {
+    DecryptedMessage as ProtocolDecryptedMessage,
+    ModelMode,
+    Session,
+    SyncEvent as ProtocolSyncEvent,
+    WorktreeMetadata
+} from '@hapi/protocol/types'
 
-export type WorktreeMetadata = {
-    basePath: string
-    branch: string
-    name: string
-    worktreePath?: string
-    createdAt?: number
-}
+export type { AgentState, ModelMode, PermissionMode, Session, TodoItem, WorktreeMetadata } from '@hapi/protocol/types'
 
 export type SessionMetadataSummary = {
     path: string
@@ -22,51 +21,6 @@ export type SessionMetadataSummary = {
     worktree?: WorktreeMetadata
 }
 
-export type AgentStateRequest = {
-    tool: string
-    arguments: unknown
-    createdAt?: number | null
-}
-
-export type AgentStateCompletedRequest = {
-    tool: string
-    arguments: unknown
-    createdAt?: number | null
-    completedAt?: number | null
-    status: 'canceled' | 'denied' | 'approved'
-    reason?: string
-    mode?: string
-    decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort'
-    allowTools?: string[]
-    answers?: Record<string, string[]>
-}
-
-export type AgentState = {
-    controlledByUser?: boolean | null
-    requests?: Record<string, AgentStateRequest> | null
-    completedRequests?: Record<string, AgentStateCompletedRequest> | null
-}
-
-export type TodoItem = {
-    content: string
-    status: 'pending' | 'in_progress' | 'completed'
-    priority: 'high' | 'medium' | 'low'
-    id: string
-}
-
-export type Session = {
-    id: string
-    createdAt: number
-    updatedAt: number
-    active: boolean
-    thinking: boolean
-    metadata: SessionMetadataSummary | null
-    agentState: AgentState | null
-    todos?: TodoItem[]
-    permissionMode?: PermissionMode
-    modelMode?: ModelMode
-}
-
 export type SessionSummaryMetadata = {
     name?: string
     path: string
@@ -79,6 +33,7 @@ export type SessionSummaryMetadata = {
 export type SessionSummary = {
     id: string
     active: boolean
+    thinking: boolean
     activeAt: number
     updatedAt: number
     metadata: SessionSummaryMetadata | null
@@ -89,12 +44,7 @@ export type SessionSummary = {
 
 export type MessageStatus = 'sending' | 'sent' | 'failed'
 
-export type DecryptedMessage = {
-    id: string
-    seq: number | null
-    localId: string | null
-    content: unknown
-    createdAt: number
+export type DecryptedMessage = ProtocolDecryptedMessage & {
     status?: MessageStatus
     originalText?: string
 }
@@ -205,6 +155,7 @@ export type SlashCommand = {
     name: string
     description?: string
     source: 'builtin' | 'user'
+    content?: string  // Expanded content for Codex user prompts
 }
 
 export type SlashCommandsResponse = {
@@ -213,10 +164,22 @@ export type SlashCommandsResponse = {
     error?: string
 }
 
-export type SyncEvent =
-    | { type: 'session-added'; sessionId: string; data?: unknown }
-    | { type: 'session-updated'; sessionId: string; data?: unknown }
-    | { type: 'session-removed'; sessionId: string }
-    | { type: 'message-received'; sessionId: string; message: DecryptedMessage }
-    | { type: 'machine-updated'; machineId: string; data?: unknown }
-    | { type: 'connection-changed'; data?: { status: string } }
+export type PushSubscriptionKeys = {
+    p256dh: string
+    auth: string
+}
+
+export type PushSubscriptionPayload = {
+    endpoint: string
+    keys: PushSubscriptionKeys
+}
+
+export type PushUnsubscribePayload = {
+    endpoint: string
+}
+
+export type PushVapidPublicKeyResponse = {
+    publicKey: string
+}
+
+export type SyncEvent = ProtocolSyncEvent

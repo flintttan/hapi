@@ -25,12 +25,8 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
-        const machines = engine.getOnlineMachines(userId)
+        const namespace = c.get('namespace')
+        const machines = engine.getOnlineMachinesByNamespace(namespace)
         return c.json({ machines })
     })
 
@@ -40,13 +36,8 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
         const machineId = c.req.param('id')
-        const machine = requireMachine(c, engine, machineId, userId)
+        const machine = requireMachine(c, engine, machineId)
         if (machine instanceof Response) {
             return machine
         }
@@ -74,13 +65,8 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
         const machineId = c.req.param('id')
-        const machine = requireMachine(c, engine, machineId, userId)
+        const machine = requireMachine(c, engine, machineId)
         if (machine instanceof Response) {
             return machine
         }

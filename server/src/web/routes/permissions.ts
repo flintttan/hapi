@@ -26,14 +26,9 @@ export function createPermissionsRoutes(getSyncEngine: () => SyncEngine | null):
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
         const requestId = c.req.param('requestId')
 
-        const sessionResult = requireSessionFromParam(c, engine, userId, { requireActive: true })
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
         if (sessionResult instanceof Response) {
             return sessionResult
         }
@@ -64,14 +59,9 @@ export function createPermissionsRoutes(getSyncEngine: () => SyncEngine | null):
             return engine
         }
 
-        const userId = c.get('userId') as string
-        if (!userId) {
-            return c.json({ error: 'Unauthorized' }, 401)
-        }
-
         const requestId = c.req.param('requestId')
 
-        const sessionResult = requireSessionFromParam(c, engine, userId, { requireActive: true })
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
         if (sessionResult instanceof Response) {
             return sessionResult
         }
