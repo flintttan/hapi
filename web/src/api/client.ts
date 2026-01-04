@@ -384,10 +384,4 @@ export class ApiClient {
             body: JSON.stringify({ name })
         })
     }
-
-    async deleteSession(sessionId: string): Promise<void> {
-        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
-            method: 'DELETE'
-        })
-    }
 }
