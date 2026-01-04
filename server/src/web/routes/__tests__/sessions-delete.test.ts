@@ -12,26 +12,26 @@ describe('Sessions routes - delete', () => {
             await next()
         })
 
+        const session = {
+            id: 's1',
+            namespace: 'user-1',
+            seq: 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            active: true,
+            activeAt: Date.now(),
+            metadata: { path: '/tmp', host: 'test' },
+            metadataVersion: 1,
+            agentState: null,
+            agentStateVersion: 1,
+            thinking: false,
+            thinkingAt: 0,
+            permissionMode: null,
+            modelMode: null
+        }
         const engine = {
-            getSessionByNamespace: (sessionId: string, namespace: string) => sessionId === 's1' && namespace === 'user-1'
-                ? {
-                    id: 's1',
-                    namespace: 'user-1',
-                    seq: 0,
-                    createdAt: Date.now(),
-                    updatedAt: Date.now(),
-                    active: true,
-                    activeAt: Date.now(),
-                    metadata: { path: '/tmp', host: 'test' },
-                    metadataVersion: 1,
-                    agentState: null,
-                    agentStateVersion: 1,
-                    thinking: false,
-                    thinkingAt: 0,
-                    permissionMode: null,
-                    modelMode: null
-                }
-                : undefined,
+            getSession: (sessionId: string) => (sessionId === 's1' ? session : null),
+            getSessionByNamespace: (sessionId: string, namespace: string) => sessionId === 's1' && namespace === 'user-1' ? session : undefined,
             deleteSession: () => true
         } as any
 
@@ -50,26 +50,26 @@ describe('Sessions routes - delete', () => {
         })
 
         let deletedSessionId = ''
+        const session = {
+            id: 's1',
+            namespace: 'user-1',
+            seq: 0,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            active: false,
+            activeAt: Date.now(),
+            metadata: { path: '/tmp', host: 'test' },
+            metadataVersion: 1,
+            agentState: null,
+            agentStateVersion: 1,
+            thinking: false,
+            thinkingAt: 0,
+            permissionMode: null,
+            modelMode: null
+        }
         const engine = {
-            getSessionByNamespace: (sessionId: string, namespace: string) => sessionId === 's1' && namespace === 'user-1'
-                ? {
-                    id: 's1',
-                    namespace: 'user-1',
-                    seq: 0,
-                    createdAt: Date.now(),
-                    updatedAt: Date.now(),
-                    active: false,
-                    activeAt: Date.now(),
-                    metadata: { path: '/tmp', host: 'test' },
-                    metadataVersion: 1,
-                    agentState: null,
-                    agentStateVersion: 1,
-                    thinking: false,
-                    thinkingAt: 0,
-                    permissionMode: null,
-                    modelMode: null
-                }
-                : undefined,
+            getSession: (sessionId: string) => (sessionId === 's1' ? session : null),
+            getSessionByNamespace: (sessionId: string, namespace: string) => sessionId === 's1' && namespace === 'user-1' ? session : undefined,
             deleteSession: (sessionId: string) => {
                 deletedSessionId = sessionId
                 return true
@@ -79,7 +79,7 @@ describe('Sessions routes - delete', () => {
         app.route('/', createSessionsRoutes(() => engine))
 
         const res = await app.request('/sessions/s1', { method: 'DELETE' })
-        expect(res.status).toBe(204)
+        expect(res.status).toBe(200)
         expect(deletedSessionId).toBe('s1')
     })
 })
