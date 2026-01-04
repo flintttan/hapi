@@ -89,7 +89,10 @@ async function main() {
     const socketServer = createSocketServer({
         store,
         jwtSecret,
-        getSession: (sessionId) => syncEngine?._unsafeGetSession(sessionId) ?? store._unsafeGetSession(sessionId),
+        getSession: (sessionId) => {
+            const session = syncEngine?.getSession(sessionId)
+            return session ? { active: session.active, namespace: session.namespace } : null
+        },
         onWebappEvent: (event: SyncEvent) => syncEngine?.handleRealtimeEvent(event),
         onSessionAlive: (payload) => syncEngine?.handleSessionAlive(payload),
         onSessionEnd: (payload) => syncEngine?.handleSessionEnd(payload),
@@ -121,7 +124,6 @@ async function main() {
         getSyncEngine: () => syncEngine,
         getSseManager: () => sseManager,
         jwtSecret,
-        store,
         vapidPublicKey: vapidKeys.publicKey,
         socketEngine: socketServer.engine
     })

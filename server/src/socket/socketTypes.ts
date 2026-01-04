@@ -2,7 +2,7 @@ import type { DefaultEventsMap, Server, Socket } from 'socket.io'
 
 export type SocketData = {
     namespace?: string
-    userId?: number
+    userId?: string
 }
 
 export type SocketServer = Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>
