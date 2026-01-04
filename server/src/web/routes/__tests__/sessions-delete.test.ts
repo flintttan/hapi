@@ -8,14 +8,15 @@ describe('Sessions routes - delete', () => {
         const app = new Hono<WebAppEnv>()
         app.use('*', async (c, next) => {
             c.set('userId', 'user-1')
+            c.set('namespace', 'user-1')
             await next()
         })
 
         const engine = {
-            getSession: (sessionId: string, userId: string) => sessionId === 's1' && userId === 'user-1'
+            getSessionByNamespace: (sessionId: string, namespace: string) => sessionId === 's1' && namespace === 'user-1'
                 ? {
                     id: 's1',
-                    userId: 'user-1',
+                    namespace: 'user-1',
                     seq: 0,
                     createdAt: Date.now(),
                     updatedAt: Date.now(),
@@ -44,15 +45,16 @@ describe('Sessions routes - delete', () => {
         const app = new Hono<WebAppEnv>()
         app.use('*', async (c, next) => {
             c.set('userId', 'user-1')
+            c.set('namespace', 'user-1')
             await next()
         })
 
         let deletedSessionId = ''
         const engine = {
-            getSession: (sessionId: string, userId: string) => sessionId === 's1' && userId === 'user-1'
+            getSessionByNamespace: (sessionId: string, namespace: string) => sessionId === 's1' && namespace === 'user-1'
                 ? {
                     id: 's1',
-                    userId: 'user-1',
+                    namespace: 'user-1',
                     seq: 0,
                     createdAt: Date.now(),
                     updatedAt: Date.now(),

@@ -5,17 +5,18 @@ import { createMessagesRoutes } from '../messages'
 import { createSessionsRoutes } from '../sessions'
 
 describe('Web routes call SyncEngine with userId', () => {
-    test('GET /sessions uses engine.getSessions(userId)', async () => {
+    test('GET /sessions uses engine.getSessionsByNamespace(namespace)', async () => {
         const app = new Hono<WebAppEnv>()
         app.use('*', async (c, next) => {
             c.set('userId', 'user-1')
+            c.set('namespace', 'user-1')
             await next()
         })
 
-        let capturedUserId = ''
+        let capturedNamespace = ''
         const engine = {
-            getSessions: (userId: string) => {
-                capturedUserId = userId
+            getSessionsByNamespace: (namespace: string) => {
+                capturedNamespace = namespace
                 return []
             }
         } as any
@@ -24,19 +25,20 @@ describe('Web routes call SyncEngine with userId', () => {
 
         const res = await app.request('/sessions', { method: 'GET' })
         expect(res.status).toBe(200)
-        expect(capturedUserId).toBe('user-1')
+        expect(capturedNamespace).toBe('user-1')
     })
 
-    test('GET/POST /sessions/:id/messages uses userId in SyncEngine calls', async () => {
+    test('GET/POST /sessions/:id/messages uses namespace in SyncEngine calls', async () => {
         const app = new Hono<WebAppEnv>()
         app.use('*', async (c, next) => {
             c.set('userId', 'user-1')
+            c.set('namespace', 'user-1')
             await next()
         })
 
         const session = {
             id: 's1',
-            userId: 'user-1',
+            namespace: 'user-1',
             active: true,
             activeAt: Date.now(),
             updatedAt: Date.now(),
@@ -51,18 +53,18 @@ describe('Web routes call SyncEngine with userId', () => {
             modelMode: null
         }
 
-        const calls: Array<{ method: string; userId: string }> = []
+        const calls: Array<{ method: string; namespace: string }> = []
         const engine = {
-            getSession: (sessionId: string, userId: string) => (sessionId === 's1' && userId === 'user-1' ? session : undefined),
-            getMessagesPage: (sessionId: string, userId: string) => {
-                calls.push({ method: 'getMessagesPage', userId })
+            getSessionByNamespace: (sessionId: string, namespace: string) => (sessionId === 's1' && namespace === 'user-1' ? session : undefined),
+            getMessagesPage: (sessionId: string, namespace: string) => {
+                calls.push({ method: 'getMessagesPage', namespace })
                 return {
                     messages: [],
                     page: { limit: 50, beforeSeq: null, nextBeforeSeq: null, hasMore: false }
                 }
             },
-            sendMessage: async (sessionId: string, userId: string) => {
-                calls.push({ method: 'sendMessage', userId })
+            sendMessage: async (sessionId: string, namespace: string) => {
+                calls.push({ method: 'sendMessage', namespace })
             }
         } as any
 
@@ -79,8 +81,8 @@ describe('Web routes call SyncEngine with userId', () => {
         expect(postRes.status).toBe(200)
 
         expect(calls).toEqual([
-            { method: 'getMessagesPage', userId: 'user-1' },
-            { method: 'sendMessage', userId: 'user-1' }
+            { method: 'getMessagesPage', namespace: 'user-1' },
+            { method: 'sendMessage', namespace: 'user-1' }
         ])
     })
 })
