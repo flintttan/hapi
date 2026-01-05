@@ -33,6 +33,7 @@ WORKDIR /app
 COPY --from=builder /app/server/dist ./dist
 COPY --from=builder /app/server/package.json ./
 COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/web/dist ./web/dist
 
 # Set environment
 ENV NODE_ENV=production
