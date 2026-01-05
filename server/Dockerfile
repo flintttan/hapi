@@ -14,8 +14,15 @@ COPY docs ./docs
 # Install dependencies
 RUN bun install --frozen-lockfile
 
-# Build server
+# Build web assets
+WORKDIR /app/web
+RUN bun run build
+
+# Generate embedded web assets
 WORKDIR /app/server
+RUN bun run generate:embedded-web-assets
+
+# Build server
 RUN bun run build
 
 FROM oven/bun:1-slim AS runtime
