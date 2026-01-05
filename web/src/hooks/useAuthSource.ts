@@ -228,6 +228,7 @@ export function useAuthSource(baseUrl: string): {
             storeJwtToken(jwtTokenKey, token)
             if (user) {
                 storeJwtUser(jwtUserKey, user)
+                setStoredUser(user)
             }
             clearStoredAccessToken(accessTokenKey)
         } else {
@@ -235,6 +236,7 @@ export function useAuthSource(baseUrl: string): {
             storeAccessToken(accessTokenKey, token)
             clearStoredJwtToken(jwtTokenKey)
             clearStoredJwtUser(jwtUserKey)
+            setStoredUser(null)
         }
 
         setAuthSource({ type: 'accessToken', token })

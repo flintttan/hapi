@@ -270,9 +270,14 @@ export class SyncEngine {
         agent: 'claude' | 'codex' | 'gemini' = 'claude',
         yolo?: boolean,
         sessionType?: 'simple' | 'worktree',
-        worktreeName?: string
-    ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
-        return await this.rpcGateway.spawnSession(machineId, directory, agent, yolo, sessionType, worktreeName)
+        worktreeName?: string,
+        approvedNewDirectoryCreation?: boolean
+    ): Promise<
+        | { type: 'success'; sessionId: string }
+        | { type: 'requestToApproveDirectoryCreation'; directory: string }
+        | { type: 'error'; message: string }
+    > {
+        return await this.rpcGateway.spawnSession(machineId, directory, agent, yolo, sessionType, worktreeName, approvedNewDirectoryCreation)
     }
 
     async checkPathsExist(machineId: string, paths: string[]): Promise<Record<string, boolean>> {

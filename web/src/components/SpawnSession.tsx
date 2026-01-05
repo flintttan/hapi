@@ -43,11 +43,42 @@ export function SpawnSession(props: {
                 sessionType,
                 worktreeName: sessionType === 'worktree' ? (worktreeName.trim() || undefined) : undefined
             })
+
             if (result.type === 'success') {
                 haptic.notification('success')
                 props.onSuccess(result.sessionId)
                 return
             }
+
+            if (result.type === 'requestToApproveDirectoryCreation') {
+                // Directory doesn't exist, ask user to confirm creation
+                const userConfirmed = confirm(`Directory "${result.directory}" does not exist. Create it?`)
+                if (userConfirmed) {
+                    // Retry with approval
+                    const retryResult = await spawnSession({
+                        machineId: props.machineId,
+                        directory: trimmed,
+                        sessionType,
+                        worktreeName: sessionType === 'worktree' ? (worktreeName.trim() || undefined) : undefined,
+                        approvedNewDirectoryCreation: true
+                    })
+
+                    if (retryResult.type === 'success') {
+                        haptic.notification('success')
+                        props.onSuccess(retryResult.sessionId)
+                        return
+                    }
+
+                    haptic.notification('error')
+                    setError(retryResult.type === 'error' ? retryResult.message : 'Failed to create session')
+                    return
+                }
+
+                // User declined
+                setError('Directory creation cancelled')
+                return
+            }
+
             haptic.notification('error')
             setError(result.message)
         } catch (e) {

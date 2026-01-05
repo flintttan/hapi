@@ -10,6 +10,7 @@ type SpawnInput = {
     yolo?: boolean
     sessionType?: 'simple' | 'worktree'
     worktreeName?: string
+    approvedNewDirectoryCreation?: boolean
 }
 
 export function useSpawnSession(api: ApiClient | null): {
@@ -30,7 +31,8 @@ export function useSpawnSession(api: ApiClient | null): {
                 input.agent,
                 input.yolo,
                 input.sessionType,
-                input.worktreeName
+                input.worktreeName,
+                input.approvedNewDirectoryCreation
             )
         },
         onSuccess: () => {

@@ -206,6 +206,39 @@ export function NewSession(props: {
                 return
             }
 
+            if (result.type === 'requestToApproveDirectoryCreation') {
+                // Directory doesn't exist, ask user to confirm creation
+                const userConfirmed = confirm(`Directory "${result.directory}" does not exist. Create it?`)
+                if (userConfirmed) {
+                    // Retry with approval
+                    const retryResult = await spawnSession({
+                        machineId,
+                        directory: directory.trim(),
+                        agent,
+                        yolo: yoloMode,
+                        sessionType,
+                        worktreeName: sessionType === 'worktree' ? (worktreeName.trim() || undefined) : undefined,
+                        approvedNewDirectoryCreation: true
+                    })
+
+                    if (retryResult.type === 'success') {
+                        haptic.notification('success')
+                        setLastUsedMachineId(machineId)
+                        addRecentPath(machineId, directory.trim())
+                        props.onSuccess(retryResult.sessionId)
+                        return
+                    }
+
+                    haptic.notification('error')
+                    setError(retryResult.type === 'error' ? retryResult.message : 'Failed to create session')
+                    return
+                }
+
+                // User declined
+                setError('Directory creation cancelled')
+                return
+            }
+
             haptic.notification('error')
             setError(result.message)
         } catch (e) {

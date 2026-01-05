@@ -386,11 +386,12 @@ export class ApiClient {
         agent?: 'claude' | 'codex' | 'gemini',
         yolo?: boolean,
         sessionType?: 'simple' | 'worktree',
-        worktreeName?: string
+        worktreeName?: string,
+        approvedNewDirectoryCreation?: boolean
     ): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>(`/api/machines/${encodeURIComponent(machineId)}/spawn`, {
             method: 'POST',
-            body: JSON.stringify({ directory, agent, yolo, sessionType, worktreeName })
+            body: JSON.stringify({ directory, agent, yolo, sessionType, worktreeName, approvedNewDirectoryCreation })
         })
     }
 

@@ -87,6 +87,7 @@ export type MachinePathsExistsResponse = { exists: Record<string, boolean> }
 
 export type SpawnResponse =
     | { type: 'success'; sessionId: string }
+    | { type: 'requestToApproveDirectoryCreation'; directory: string }
     | { type: 'error'; message: string }
 
 export type GitCommandResponse = {

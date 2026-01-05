@@ -85,18 +85,26 @@ export class RpcGateway {
         agent: 'claude' | 'codex' | 'gemini' = 'claude',
         yolo?: boolean,
         sessionType?: 'simple' | 'worktree',
-        worktreeName?: string
-    ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
+        worktreeName?: string,
+        approvedNewDirectoryCreation?: boolean
+    ): Promise<
+        | { type: 'success'; sessionId: string }
+        | { type: 'requestToApproveDirectoryCreation'; directory: string }
+        | { type: 'error'; message: string }
+    > {
         try {
             const result = await this.machineRpc(
                 machineId,
                 'spawn-happy-session',
-                { type: 'spawn-in-directory', directory, agent, yolo, sessionType, worktreeName }
+                { type: 'spawn-in-directory', directory, agent, yolo, sessionType, worktreeName, approvedNewDirectoryCreation }
             )
             if (result && typeof result === 'object') {
                 const obj = result as Record<string, unknown>
                 if (obj.type === 'success' && typeof obj.sessionId === 'string') {
                     return { type: 'success', sessionId: obj.sessionId }
+                }
+                if (obj.type === 'requestToApproveDirectoryCreation' && typeof obj.directory === 'string') {
+                    return { type: 'requestToApproveDirectoryCreation', directory: obj.directory }
                 }
                 if (obj.type === 'error' && typeof obj.errorMessage === 'string') {
                     return { type: 'error', message: obj.errorMessage }
