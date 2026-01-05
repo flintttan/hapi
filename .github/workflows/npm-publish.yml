@@ -71,28 +71,3 @@ jobs:
                   cd npm/main
                   npm publish --access public --provenance
               working-directory: cli
-
-            - name: Create GitHub Release
-              if: github.event_name == 'push'
-              uses: softprops/action-gh-release@v2
-              with:
-                  body: |
-                      ## npm packages published
-
-                      This release includes npm packages for all platforms:
-
-                      - `@flintttan/hapi` (main package)
-                      - `@flintttan/hapi-darwin-arm64`
-                      - `@flintttan/hapi-darwin-x64`
-                      - `@flintttan/hapi-linux-arm64`
-                      - `@flintttan/hapi-linux-x64`
-                      - `@flintttan/hapi-win32-x64`
-
-                      Install with:
-                      ```bash
-                      npm install -g @flintttan/hapi
-                      ```
-                  draft: false
-                  prerelease: false
-              env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
