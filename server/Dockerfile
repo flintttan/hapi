@@ -3,7 +3,7 @@ FROM oven/bun:1 AS builder
 WORKDIR /app
 
 # Copy workspace files
-COPY package.json bun.lock ./
+COPY package.json bun.lock tsconfig.base.json ./
 COPY cli ./cli
 COPY shared ./shared
 COPY server ./server
