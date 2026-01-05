@@ -261,8 +261,17 @@ export function App() {
         )
     }
 
+    // 等待 user 就绪，避免首次登录时触发 error boundary。
+    if (!user) {
+        return (
+            <div className="h-full flex items-center justify-center p-4">
+                <LoadingState label="Authorizing…" className="text-sm" />
+            </div>
+        )
+    }
+
     return (
-        <AppContextProvider value={{ api, token, user: user! }}>
+        <AppContextProvider value={{ api, token, user }}>
             <SyncingBanner isSyncing={isSyncing} />
             <OfflineBanner />
             <div className="h-full flex flex-col">

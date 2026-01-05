@@ -100,31 +100,35 @@ export class ApiMachineClient {
 
     setRPCHandlers({ spawnSession, stopSession, requestShutdown }: MachineRpcHandlers): void {
         this.rpcHandlerManager.registerHandler('spawn-happy-session', async (params: any) => {
-            const { directory, sessionId, machineId, approvedNewDirectoryCreation, agent, yolo, token, sessionType, worktreeName } = params || {}
+            try {
+                const { directory, sessionId, machineId, approvedNewDirectoryCreation, agent, yolo, token, sessionType, worktreeName } = params || {}
 
-            if (!directory) {
-                throw new Error('Directory is required')
-            }
+                if (!directory) {
+                    return { type: 'error', errorMessage: 'Directory is required' }
+                }
 
-            const result = await spawnSession({
-                directory,
-                sessionId,
-                machineId,
-                approvedNewDirectoryCreation,
-                agent,
-                yolo,
-                token,
-                sessionType,
-                worktreeName
-            })
+                const result = await spawnSession({
+                    directory,
+                    sessionId,
+                    machineId,
+                    approvedNewDirectoryCreation,
+                    agent,
+                    yolo,
+                    token,
+                    sessionType,
+                    worktreeName
+                })
 
-            switch (result.type) {
-                case 'success':
-                    return { type: 'success', sessionId: result.sessionId }
-                case 'requestToApproveDirectoryCreation':
-                    return { type: 'requestToApproveDirectoryCreation', directory: result.directory }
-                case 'error':
-                    throw new Error(result.errorMessage)
+                switch (result.type) {
+                    case 'success':
+                        return { type: 'success', sessionId: result.sessionId }
+                    case 'requestToApproveDirectoryCreation':
+                        return { type: 'requestToApproveDirectoryCreation', directory: result.directory }
+                    case 'error':
+                        return { type: 'error', errorMessage: result.errorMessage }
+                }
+            } catch (error) {
+                return { type: 'error', errorMessage: error instanceof Error ? error.message : String(error) }
             }
         })
 
