@@ -47,7 +47,6 @@ jobs:
 
             - name: Build binaries with web assets
               run: bun run build:single-exe:all
-              working-directory: cli
 
             - name: Prepare npm packages
               run: bun run prepare-npm-packages
