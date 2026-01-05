@@ -165,6 +165,28 @@ export class ApiClient {
         return await res.json() as AuthResponse
     }
 
+    async register(data: { username: string; password: string; email?: string }): Promise<AuthResponse> {
+        const res = await fetch(this.buildUrl('/api/register'), {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(data)
+        })
+
+        if (!res.ok) {
+            const body = await res.text().catch(() => '')
+            const code = parseErrorCode(body)
+            const detail = body ? `: ${body}` : ''
+            throw new ApiError(
+                `Registration failed: HTTP ${res.status} ${res.statusText}${detail}`,
+                res.status,
+                code,
+                body || undefined
+            )
+        }
+
+        return await res.json() as AuthResponse
+    }
+
     async getSessions(): Promise<SessionsResponse> {
         return await this.request<SessionsResponse>('/api/sessions')
     }

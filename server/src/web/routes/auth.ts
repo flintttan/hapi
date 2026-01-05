@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { SignJWT } from 'jose'
 import { z } from 'zod'
+import * as bcrypt from 'bcryptjs'
 import { configuration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
@@ -17,7 +18,12 @@ const accessTokenAuthSchema = z.object({
     accessToken: z.string()
 })
 
-const authBodySchema = z.union([telegramAuthSchema, accessTokenAuthSchema])
+const usernamePasswordAuthSchema = z.object({
+    username: z.string(),
+    password: z.string()
+})
+
+const authBodySchema = z.union([telegramAuthSchema, accessTokenAuthSchema, usernamePasswordAuthSchema])
 
 export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
@@ -44,7 +50,23 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
             userId = await getOrCreateOwnerId()
             firstName = 'Web User'
             namespace = parsedToken.namespace
-        } else {
+        } else if ('username' in parsed.data && 'password' in parsed.data) {
+            // Username/password authentication
+            const user = store.getUserByUsername(parsed.data.username)
+            if (!user || !user.password_hash) {
+                return c.json({ error: 'Invalid username or password' }, 401)
+            }
+
+            const isValid = await bcrypt.compare(parsed.data.password, user.password_hash)
+            if (!isValid) {
+                return c.json({ error: 'Invalid username or password' }, 401)
+            }
+
+            userId = await getOrCreateOwnerId()
+            username = user.username
+            firstName = user.username
+            namespace = 'default'
+        } else if ('initData' in parsed.data) {
             if (!configuration.telegramEnabled || !configuration.telegramBotToken) {
                 return c.json({ error: 'Telegram authentication is disabled. Configure TELEGRAM_BOT_TOKEN.' }, 503)
             }
@@ -66,6 +88,8 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
             firstName = result.user.first_name
             lastName = result.user.last_name
             namespace = storedUser.namespace
+        } else {
+            return c.json({ error: 'Invalid authentication method' }, 400)
         }
 
         const token = await new SignJWT({ uid: userId, ns: namespace })

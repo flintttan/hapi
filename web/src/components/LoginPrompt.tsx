@@ -5,6 +5,9 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import type { ServerUrlResult } from '@/hooks/useServerUrl'
 
+type ViewMode = 'login' | 'register'
+type AuthMethod = 'password' | 'telegram' | 'token'
+
 type LoginPromptProps = {
     mode?: 'login' | 'bind'
     onLogin?: (token: string) => void
@@ -18,6 +21,12 @@ type LoginPromptProps = {
 
 export function LoginPrompt(props: LoginPromptProps) {
     const isBindMode = props.mode === 'bind'
+    const [viewMode, setViewMode] = useState<ViewMode>('login')
+    const [authMethod, setAuthMethod] = useState<AuthMethod>('password')
+    const [username, setUsername] = useState('')
+    const [password, setPassword] = useState('')
+    const [email, setEmail] = useState('')
+    const [confirmPassword, setConfirmPassword] = useState('')
     const [accessToken, setAccessToken] = useState('')
     const [isLoading, setIsLoading] = useState(false)
     const [error, setError] = useState<string | null>(null)
@@ -25,43 +34,124 @@ export function LoginPrompt(props: LoginPromptProps) {
     const [serverInput, setServerInput] = useState(props.serverUrl ?? '')
     const [serverError, setServerError] = useState<string | null>(null)
 
+    // Form validation functions
+    const validateUsername = (username: string): string | null => {
+        if (username.length < 3) return 'Username must be at least 3 characters'
+        if (username.length > 50) return 'Username must be at most 50 characters'
+        if (!/^[a-zA-Z0-9_-]+$/.test(username)) {
+            return 'Username can only contain letters, numbers, underscores, and hyphens'
+        }
+        return null
+    }
+
+    const validatePassword = (password: string): string | null => {
+        if (password.length < 6) return 'Password must be at least 6 characters'
+        return null
+    }
+
+    const validateEmail = (email: string): string | null => {
+        if (!email) return null
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+            return 'Invalid email format'
+        }
+        return null
+    }
+
     const handleSubmit = useCallback(async (e: React.FormEvent) => {
         e.preventDefault()
-
-        const trimmedToken = accessToken.trim()
-        if (!trimmedToken) {
-            setError('Please enter an access token')
-            return
-        }
-
         setIsLoading(true)
         setError(null)
 
         try {
             if (isBindMode) {
+                const trimmedToken = accessToken.trim()
+                if (!trimmedToken) {
+                    setError('Please enter an access token')
+                    return
+                }
                 if (!props.onBind) {
                     setError('Binding is unavailable.')
                     return
                 }
                 await props.onBind(trimmedToken)
-            } else {
-                // Validate the token by attempting to authenticate
+            } else if (viewMode === 'register') {
+                // Registration flow
+                if (password !== confirmPassword) {
+                    setError('Passwords do not match')
+                    return
+                }
+
+                const usernameError = validateUsername(username)
+                const passwordError = validatePassword(password)
+                const emailError = validateEmail(email)
+
+                if (usernameError || passwordError || emailError) {
+                    setError(usernameError || passwordError || emailError)
+                    return
+                }
+
                 const client = new ApiClient('', { baseUrl: props.baseUrl })
-                await client.authenticate({ accessToken: trimmedToken })
-                // If successful, pass the token to parent
+                const response = await client.register({
+                    username,
+                    email: email || undefined,
+                    password
+                })
                 if (!props.onLogin) {
                     setError('Login is unavailable.')
                     return
                 }
-                props.onLogin(trimmedToken)
+                props.onLogin(response.token)
+            } else {
+                // Login flow
+                const client = new ApiClient('', { baseUrl: props.baseUrl })
+
+                switch (authMethod) {
+                    case 'password': {
+                        const usernameError = validateUsername(username)
+                        const passwordError = validatePassword(password)
+                        if (usernameError || passwordError) {
+                            setError(usernameError || passwordError)
+                            return
+                        }
+                        await client.authenticate({ username, password })
+                        break
+                    }
+                    case 'telegram': {
+                        if (!window.Telegram?.WebApp?.initData) {
+                            setError('Telegram WebApp not available')
+                            return
+                        }
+                        await client.authenticate({ initData: window.Telegram.WebApp.initData })
+                        break
+                    }
+                    case 'token': {
+                        const trimmedToken = accessToken.trim()
+                        if (!trimmedToken) {
+                            setError('Please enter an access token')
+                            return
+                        }
+                        await client.authenticate({ accessToken: trimmedToken })
+                        break
+                    }
+                }
+
+                if (!props.onLogin) {
+                    setError('Login is unavailable.')
+                    return
+                }
+                // Pass appropriate value based on auth method
+                const loginValue = authMethod === 'token' ? accessToken : username
+                props.onLogin(loginValue)
             }
         } catch (e) {
-            const fallbackMessage = isBindMode ? 'Binding failed' : 'Authentication failed'
+            let fallbackMessage = 'Authentication failed'
+            if (isBindMode) fallbackMessage = 'Binding failed'
+            else if (viewMode === 'register') fallbackMessage = 'Registration failed'
             setError(e instanceof Error ? e.message : fallbackMessage)
         } finally {
             setIsLoading(false)
         }
-    }, [accessToken, props])
+    }, [accessToken, username, password, email, confirmPassword, viewMode, authMethod, isBindMode, props, validateUsername, validatePassword, validateEmail])
 
     useEffect(() => {
         if (!isServerDialogOpen) {
@@ -95,9 +185,11 @@ export function LoginPrompt(props: LoginPromptProps) {
     const title = isBindMode ? 'Bind Telegram' : 'HAPI'
     const subtitle = isBindMode
         ? 'Enter your access token to bind this Telegram account'
-        : 'Enter your access token to continue'
-    const submitLabel = isBindMode ? 'Bind' : 'Sign In'
-    const helpText = 'Use CLI_API_TOKEN:<namespace> from your server configuration (omit :<namespace> for default)'
+        : viewMode === 'register'
+        ? 'Create your account'
+        : 'Sign in to your account'
+    const submitLabel = isBindMode ? 'Bind' : viewMode === 'register' ? 'Sign Up' : 'Sign In'
+    const telegramAvailable = typeof window !== 'undefined' && !!window.Telegram?.WebApp
 
     return (
         <div className="relative h-full flex items-center justify-center p-4">
@@ -172,17 +264,109 @@ export function LoginPrompt(props: LoginPromptProps) {
 
                 {/* Form */}
                 <form onSubmit={handleSubmit} className="space-y-4">
-                    <div>
-                        <input
-                            type="password"
-                            value={accessToken}
-                            onChange={(e) => setAccessToken(e.target.value)}
-                            placeholder={isBindMode ? 'CLI_API_TOKEN:<namespace>' : 'CLI_API_TOKEN[:namespace]'}
-                            autoComplete="current-password"
-                            disabled={isLoading}
-                            className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
-                        />
-                    </div>
+
+                    {/* Form Fields */}
+                    {isBindMode ? (
+                        <div>
+                            <input
+                                type="password"
+                                value={accessToken}
+                                onChange={(e) => setAccessToken(e.target.value)}
+                                placeholder="CLI_API_TOKEN:<namespace>"
+                                autoComplete="current-password"
+                                disabled={isLoading}
+                                className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                            />
+                        </div>
+                    ) : viewMode === 'register' ? (
+                        <>
+                            <div>
+                                <input
+                                    type="text"
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    placeholder="Username"
+                                    autoComplete="username"
+                                    disabled={isLoading}
+                                    className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                                />
+                            </div>
+                            <div>
+                                <input
+                                    type="email"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    placeholder="Email (optional)"
+                                    autoComplete="email"
+                                    disabled={isLoading}
+                                    className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                                />
+                            </div>
+                            <div>
+                                <input
+                                    type="password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="Password"
+                                    autoComplete="new-password"
+                                    disabled={isLoading}
+                                    className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                                />
+                            </div>
+                            <div>
+                                <input
+                                    type="password"
+                                    value={confirmPassword}
+                                    onChange={(e) => setConfirmPassword(e.target.value)}
+                                    placeholder="Confirm Password"
+                                    autoComplete="new-password"
+                                    disabled={isLoading}
+                                    className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                                />
+                            </div>
+                        </>
+                    ) : authMethod === 'password' ? (
+                        <>
+                            <div>
+                                <input
+                                    type="text"
+                                    value={username}
+                                    onChange={(e) => setUsername(e.target.value)}
+                                    placeholder="Username"
+                                    autoComplete="username"
+                                    disabled={isLoading}
+                                    className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                                />
+                            </div>
+                            <div>
+                                <input
+                                    type="password"
+                                    value={password}
+                                    onChange={(e) => setPassword(e.target.value)}
+                                    placeholder="Password"
+                                    autoComplete="current-password"
+                                    disabled={isLoading}
+                                    className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                                />
+                            </div>
+                        </>
+                    ) : authMethod === 'telegram' ? (
+                        <div className="text-sm text-[var(--app-hint)] text-center py-4">
+                            Telegram authentication will be performed automatically
+                        </div>
+                    ) : (
+                        <div>
+                            <input
+                                type="password"
+                                value={accessToken}
+                                onChange={(e) => setAccessToken(e.target.value)}
+                                placeholder="CLI_API_TOKEN[:namespace]"
+                                autoComplete="current-password"
+                                disabled={isLoading}
+                                className="w-full px-3 py-2.5 rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-button)] focus:border-transparent disabled:opacity-50"
+                            />
+                        </div>
+                    )}
 
                     {displayError && (
                         <div className="text-sm text-red-500 text-center">
@@ -192,14 +376,14 @@ export function LoginPrompt(props: LoginPromptProps) {
 
                     <button
                         type="submit"
-                        disabled={isLoading || !accessToken.trim()}
+                        disabled={isLoading}
                         aria-busy={isLoading}
                         className="w-full py-2.5 rounded-lg bg-[var(--app-button)] text-[var(--app-button-text)] font-medium disabled:opacity-50 hover:opacity-90 transition-opacity inline-flex items-center justify-center gap-2"
                     >
                         {isLoading ? (
                             <>
                                 <Spinner size="sm" label={null} className="text-[var(--app-button-text)]" />
-                                {isBindMode ? 'Binding...' : 'Signing in...'}
+                                {isBindMode ? 'Binding...' : viewMode === 'register' ? 'Signing up...' : 'Signing in...'}
                             </>
                         ) : (
                             submitLabel
@@ -207,9 +391,63 @@ export function LoginPrompt(props: LoginPromptProps) {
                     </button>
                 </form>
 
-                {/* Help text */}
-                <div className="text-xs text-[var(--app-hint)] text-center">
-                    {helpText}
+                {/* View Toggle and Help Text */}
+                <div className="text-xs text-[var(--app-hint)] text-center space-y-2">
+                    {!isBindMode && (
+                        <>
+                            {viewMode === 'login' && authMethod === 'password' && (
+                                <div>
+                                    Don't have an account?{' '}
+                                    <button
+                                        type="button"
+                                        onClick={() => setViewMode('register')}
+                                        className="text-[var(--app-button)] hover:underline"
+                                    >
+                                        Sign up
+                                    </button>
+                                </div>
+                            )}
+                            {viewMode === 'register' && (
+                                <div>
+                                    Already have an account?{' '}
+                                    <button
+                                        type="button"
+                                        onClick={() => setViewMode('login')}
+                                        className="text-[var(--app-button)] hover:underline"
+                                    >
+                                        Sign in
+                                    </button>
+                                </div>
+                            )}
+                            {viewMode === 'login' && authMethod === 'password' && (
+                                <div>
+                                    Or use{' '}
+                                    <button
+                                        type="button"
+                                        onClick={() => setAuthMethod('token')}
+                                        className="text-[var(--app-button)] hover:underline"
+                                    >
+                                        CLI_API_TOKEN
+                                    </button>
+                                    {' '}to sign in
+                                </div>
+                            )}
+                            {viewMode === 'login' && authMethod === 'token' && (
+                                <div>
+                                    <button
+                                        type="button"
+                                        onClick={() => setAuthMethod('password')}
+                                        className="text-[var(--app-button)] hover:underline"
+                                    >
+                                        ← Back to password login
+                                    </button>
+                                    <div className="mt-2">
+                                        Use CLI_API_TOKEN[:namespace] from your server configuration
+                                    </div>
+                                </div>
+                            )}
+                        </>
+                    )}
                 </div>
             </div>
         </div>
