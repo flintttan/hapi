@@ -15,6 +15,13 @@ jobs:
             - uses: actions/checkout@v4
             - uses: oven-sh/setup-bun@v2
             - run: bun install
+            - name: Read version
+              id: version
+              run: |
+                  VERSION=$(cat version.json | grep '"version"' | cut -d'"' -f4)
+                  echo "version=${VERSION}" >> $GITHUB_OUTPUT
+            - name: Sync version from version.json
+              run: bun run sync-version
             - run: bun run build:single-exe:all
             - name: Package release artifacts
               run: |
@@ -40,8 +47,8 @@ jobs:
               env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
-                  gh release create "${GITHUB_REF#refs/tags/}" \
-                      --title "Release ${GITHUB_REF#refs/tags/}" \
+                  gh release create "v${{ steps.version.outputs.version }}" \
+                      --title "Release v${{ steps.version.outputs.version }}" \
                       --generate-notes \
                       cli/release-artifacts/*
             - name: Update Homebrew formula
@@ -49,5 +56,4 @@ jobs:
               env:
                   GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
               run: |
-                  VERSION="${GITHUB_REF#refs/tags/v}"
-                  cd cli && bun run update-homebrew-formula --version "$VERSION" --push
+                  cd cli && bun run update-homebrew-formula --version "${{ steps.version.outputs.version }}" --push

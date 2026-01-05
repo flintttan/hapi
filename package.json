@@ -21,7 +21,9 @@
         "test:cli": "cd cli && bun run test",
         "test:server": "cd server && bun run test",
         "clean-session": "bun run server/scripts/cleanup-sessions.ts",
-        "release-all": "cd cli && bun run release-all"
+        "release-all": "cd cli && bun run release-all",
+        "sync-version": "bun scripts/sync-version.ts",
+        "bump-version": "bun scripts/bump-version.ts"
     },
     "devDependencies": {
         "concurrently": "^9.2.1",

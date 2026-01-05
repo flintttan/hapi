@@ -20,6 +20,12 @@ jobs:
         steps:
             - uses: actions/checkout@v4
 
+            - name: Read version
+              id: version
+              run: |
+                  VERSION=$(cat version.json | grep '"version"' | cut -d'"' -f4)
+                  echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
             - uses: docker/setup-qemu-action@v3
             - uses: docker/setup-buildx-action@v3
 
@@ -37,10 +43,8 @@ jobs:
               with:
                   images: ghcr.io/flintttan/hapi-server
                   tags: |
-                      type=ref,event=branch
-                      type=ref,event=tag
-                      type=semver,pattern={{version}}
-                      type=semver,pattern={{major}}.{{minor}}
+                      type=raw,value=${{ steps.version.outputs.version }}
+                      type=raw,value=latest
                       type=sha
 
             - name: Build and (optionally) push
