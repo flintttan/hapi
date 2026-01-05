@@ -20,7 +20,7 @@ const jwtPayloadSchema = z.object({
 export function createAuthMiddleware(jwtSecret: Uint8Array, store: Store): MiddlewareHandler<WebAppEnv> {
     return async (c, next) => {
         const path = c.req.path
-        if (path === '/api/auth' || path === '/api/bind' || path.startsWith('/api/cli')) {
+        if (path === '/api/auth' || path === '/api/bind' || path === '/api/register' || path.startsWith('/api/cli/')) {
             await next()
             return
         }
@@ -43,7 +43,14 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, store: Store): Middl
                 return
             }
 
-            if (constantTimeEquals(token, configuration.cliApiToken)) {
+            let cliApiToken: string | null = null
+            try {
+                cliApiToken = configuration.cliApiToken
+            } catch {
+                cliApiToken = typeof process.env.CLI_API_TOKEN === 'string' ? process.env.CLI_API_TOKEN : null
+            }
+
+            if (constantTimeEquals(token, cliApiToken)) {
                 const defaultCliUserId = store.getDefaultCliUserId()
                 const cliUser = store.getUserById(defaultCliUserId)
                 if (cliUser) {
@@ -60,8 +67,13 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, store: Store): Middl
                 return c.json({ error: 'Invalid token payload' }, 401)
             }
 
-            const userId = String(parsed.data.uid)
-            const namespace = parsed.data.ns ?? userId
+            const tokenUserId = String(parsed.data.uid)
+            const namespace = parsed.data.ns ?? tokenUserId
+            const userId = store.getUserById(namespace)
+                ? namespace
+                : store.getUserById(tokenUserId)
+                    ? tokenUserId
+                    : store.getDefaultCliUserId()
 
             c.set('userId', userId)
             c.set('namespace', namespace)

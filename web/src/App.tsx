@@ -89,7 +89,8 @@ export function App() {
     }, [goBack, pathname])
     const queryClient = useQueryClient()
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId' })
-    const selectedSessionId = sessionMatch ? sessionMatch.sessionId : null
+    const isNewSessionPage = Boolean(matchRoute({ to: '/sessions/new' }))
+    const selectedSessionId = sessionMatch && !isNewSessionPage ? sessionMatch.sessionId : null
     const { isSyncing, startSync, endSync } = useSyncingState()
     const syncTokenRef = useRef(0)
     const isFirstConnectRef = useRef(true)

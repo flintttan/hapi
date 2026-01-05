@@ -94,7 +94,7 @@ export function UserMenu({ user, onLogout }: UserMenuProps) {
                             className="fixed inset-0 z-40"
                             onClick={() => setIsOpen(false)}
                         />
-                        <div className="absolute left-0 sm:left-auto sm:right-0 top-full mt-2 w-64 bg-[var(--app-bg)] border border-[var(--app-border)] rounded-lg shadow-lg z-50 overflow-hidden">
+                        <div className="absolute left-0 top-full mt-2 w-64 max-w-[calc(100vw-1.5rem)] bg-[var(--app-bg)] border border-[var(--app-border)] rounded-lg shadow-lg z-50 overflow-hidden">
                             <div className="p-4 border-b border-[var(--app-border)]">
                                 <div className="font-medium">{user.username || user.firstName || 'User'}</div>
                                 <div className="text-xs text-[var(--app-hint)] mt-1">ID: {user.id}</div>
