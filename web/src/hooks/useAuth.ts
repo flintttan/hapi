@@ -41,7 +41,7 @@ function isNotBoundError(error: unknown): boolean {
     return error instanceof ApiError && error.status === 401 && error.code === 'not_bound'
 }
 
-export function useAuth(authSource: AuthSource | null, baseUrl: string): {
+export function useAuth(authSource: AuthSource | null, baseUrl: string, storedUser?: { id: number; username?: string; firstName?: string; lastName?: string } | null): {
     token: string | null
     user: AuthResponse['user'] | null
     api: ApiClient | null
@@ -181,6 +181,35 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
                 return
             }
 
+            // Check if this is a JWT token (from password/register login)
+            // JWT tokens are already authenticated - don't re-authenticate
+            if (authSource.type === 'accessToken') {
+                const parts = authSource.token.split('.')
+                const isJwt = parts.length === 3
+
+                if (isJwt) {
+                    // This is a JWT token - validate expiry and use directly
+                    const expMs = decodeJwtExpMs(authSource.token)
+                    if (expMs && expMs > Date.now()) {
+                        // Valid JWT token - use it directly without re-authentication
+                        setToken(authSource.token)
+                        // Use stored user info if available
+                        setUser(storedUser || null)
+                        setError(null)
+                        setNeedsBinding(false)
+                        setIsLoading(false)
+                        return
+                    }
+                    // JWT expired - clear it and show login
+                    setToken(null)
+                    setUser(null)
+                    setError('Session expired. Please login again.')
+                    setNeedsBinding(false)
+                    setIsLoading(false)
+                    return
+                }
+            }
+
             setIsLoading(true)
             setError(null)
             setNeedsBinding(false)
@@ -214,7 +243,7 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string): {
         return () => {
             isCancelled = true
         }
-    }, [authSource, baseUrl])
+    }, [authSource, baseUrl, storedUser])
 
     useEffect(() => {
         tokenRef.current = null

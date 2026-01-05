@@ -20,8 +20,8 @@ import { LoadingState } from '@/components/LoadingState'
 
 export function App() {
     const { serverUrl, baseUrl, setServerUrl, clearServerUrl } = useServerUrl()
-    const { authSource, isLoading: isAuthSourceLoading, setAccessToken } = useAuthSource(baseUrl)
-    const { token, api, user, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl)
+    const { authSource, storedUser, isLoading: isAuthSourceLoading, setAccessToken } = useAuthSource(baseUrl)
+    const { token, api, user, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl, storedUser)
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
     const matchRoute = useMatchRoute()

@@ -40,6 +40,7 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
         let firstName: string | undefined
         let lastName: string | undefined
         let namespace: string
+        let userIdString: string | undefined  // For storing TEXT user IDs
 
         // Access Token authentication (CLI_API_TOKEN)
         if ('accessToken' in parsed.data) {
@@ -62,10 +63,12 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
                 return c.json({ error: 'Invalid username or password' }, 401)
             }
 
-            userId = await getOrCreateOwnerId()
+            // Use the actual user's ID from the database for proper multi-user support
+            userIdString = user.id
+            userId = await getOrCreateOwnerId()  // Keep numeric userId for backward compatibility
             username = user.username
             firstName = user.username
-            namespace = 'default'
+            namespace = user.id  // Use user's ID as namespace for data isolation
         } else if ('initData' in parsed.data) {
             if (!configuration.telegramEnabled || !configuration.telegramBotToken) {
                 return c.json({ error: 'Telegram authentication is disabled. Configure TELEGRAM_BOT_TOKEN.' }, 503)

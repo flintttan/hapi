@@ -10,7 +10,7 @@ type AuthMethod = 'password' | 'telegram' | 'token'
 
 type LoginPromptProps = {
     mode?: 'login' | 'bind'
-    onLogin?: (token: string) => void
+    onLogin?: (token: string, user?: { id: number; username?: string; firstName?: string; lastName?: string }) => void
     onBind?: (token: string) => Promise<void>
     baseUrl: string
     serverUrl: string | null
@@ -100,11 +100,12 @@ export function LoginPrompt(props: LoginPromptProps) {
                     setError('Login is unavailable.')
                     return
                 }
-                props.onLogin(response.token)
+                props.onLogin(response.token, response.user)
             } else {
                 // Login flow
                 const client = new ApiClient('', { baseUrl: props.baseUrl })
 
+                let authResponse: { token: string; user: { id: number; username?: string; firstName?: string; lastName?: string } }
                 switch (authMethod) {
                     case 'password': {
                         const usernameError = validateUsername(username)
@@ -113,7 +114,7 @@ export function LoginPrompt(props: LoginPromptProps) {
                             setError(usernameError || passwordError)
                             return
                         }
-                        await client.authenticate({ username, password })
+                        authResponse = await client.authenticate({ username, password })
                         break
                     }
                     case 'telegram': {
@@ -121,7 +122,7 @@ export function LoginPrompt(props: LoginPromptProps) {
                             setError('Telegram WebApp not available')
                             return
                         }
-                        await client.authenticate({ initData: window.Telegram.WebApp.initData })
+                        authResponse = await client.authenticate({ initData: window.Telegram.WebApp.initData })
                         break
                     }
                     case 'token': {
@@ -130,7 +131,7 @@ export function LoginPrompt(props: LoginPromptProps) {
                             setError('Please enter an access token')
                             return
                         }
-                        await client.authenticate({ accessToken: trimmedToken })
+                        authResponse = await client.authenticate({ accessToken: trimmedToken })
                         break
                     }
                 }
@@ -139,9 +140,8 @@ export function LoginPrompt(props: LoginPromptProps) {
                     setError('Login is unavailable.')
                     return
                 }
-                // Pass appropriate value based on auth method
-                const loginValue = authMethod === 'token' ? accessToken : username
-                props.onLogin(loginValue)
+                // Pass JWT token and user info from authentication response
+                props.onLogin(authResponse.token, authResponse.user)
             }
         } catch (e) {
             let fallbackMessage = 'Authentication failed'

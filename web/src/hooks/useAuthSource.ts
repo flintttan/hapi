@@ -4,6 +4,7 @@ import type { AuthSource } from './useAuth'
 
 const ACCESS_TOKEN_PREFIX = 'hapi_access_token::'
 const JWT_TOKEN_PREFIX = 'hapi_jwt_token::'
+const JWT_USER_PREFIX = 'hapi_jwt_user::'
 
 function getTelegramInitData(): string | null {
     const tg = getTelegramWebApp()
@@ -30,6 +31,10 @@ function getJwtTokenKey(baseUrl: string): string {
     return `${JWT_TOKEN_PREFIX}${baseUrl}`
 }
 
+function getJwtUserKey(baseUrl: string): string {
+    return `${JWT_USER_PREFIX}${baseUrl}`
+}
+
 function getStoredAccessToken(key: string): string | null {
     try {
         return localStorage.getItem(key)
@@ -43,6 +48,48 @@ function getStoredJwtToken(key: string): string | null {
         return localStorage.getItem(key)
     } catch {
         return null
+    }
+}
+
+function storeJwtToken(key: string, token: string): void {
+    try {
+        localStorage.setItem(key, token)
+    } catch {
+        // Ignore storage errors
+    }
+}
+
+function storeJwtUser(key: string, user: { id: number; username?: string; firstName?: string; lastName?: string }): void {
+    try {
+        localStorage.setItem(key, JSON.stringify(user))
+    } catch {
+        // Ignore storage errors
+    }
+}
+
+function getStoredJwtUser(key: string): { id: number; username?: string; firstName?: string; lastName?: string } | null {
+    try {
+        const stored = localStorage.getItem(key)
+        if (!stored) return null
+        return JSON.parse(stored)
+    } catch {
+        return null
+    }
+}
+
+function clearStoredJwtToken(key: string): void {
+    try {
+        localStorage.removeItem(key)
+    } catch {
+        // Ignore storage errors
+    }
+}
+
+function clearStoredJwtUser(key: string): void {
+    try {
+        localStorage.removeItem(key)
+    } catch {
+        // Ignore storage errors
     }
 }
 
@@ -87,18 +134,21 @@ function isJwtTokenValid(token: string): boolean {
 
 export function useAuthSource(baseUrl: string): {
     authSource: AuthSource | null
+    storedUser: { id: number; username?: string; firstName?: string; lastName?: string } | null
     isLoading: boolean
     isTelegram: boolean
-    setAccessToken: (token: string) => void
+    setAccessToken: (token: string, user?: { id: number; username?: string; firstName?: string; lastName?: string }) => void
     setPasswordAuth: (username: string, password: string) => void
     clearAuth: () => void
 } {
     const [authSource, setAuthSource] = useState<AuthSource | null>(null)
+    const [storedUser, setStoredUser] = useState<{ id: number; username?: string; firstName?: string; lastName?: string } | null>(null)
     const [isLoading, setIsLoading] = useState(true)
     const [isTelegram, setIsTelegram] = useState(false)
     const retryCountRef = useRef(0)
     const accessTokenKey = useMemo(() => getAccessTokenKey(baseUrl), [baseUrl])
     const jwtTokenKey = useMemo(() => getJwtTokenKey(baseUrl), [baseUrl])
+    const jwtUserKey = useMemo(() => getJwtUserKey(baseUrl), [baseUrl])
 
     // Initialize auth source on mount, with retry for delayed Telegram initData
     useEffect(() => {
@@ -120,8 +170,9 @@ export function useAuthSource(baseUrl: string): {
         // Check for stored JWT token first (from previous password login)
         const storedJwt = getStoredJwtToken(jwtTokenKey)
         if (storedJwt && isJwtTokenValid(storedJwt)) {
-            // Valid JWT token found - create a synthetic auth source
-            // This will trigger useAuth to validate and potentially refresh the token
+            // Valid JWT token found - create auth source to trigger useAuth
+            const user = getStoredJwtUser(jwtUserKey)
+            setStoredUser(user)
             setAuthSource({ type: 'accessToken', token: storedJwt })
             setIsLoading(false)
             return
@@ -168,10 +219,26 @@ export function useAuthSource(baseUrl: string): {
         }
     }, [accessTokenKey, jwtTokenKey])
 
-    const setAccessToken = useCallback((token: string) => {
-        storeAccessToken(accessTokenKey, token)
+    const setAccessToken = useCallback((token: string, user?: { id: number; username?: string; firstName?: string; lastName?: string }) => {
+        // Determine if this is a JWT token (from password auth) or CLI_API_TOKEN
+        const isJwt = token.split('.').length === 3
+
+        if (isJwt) {
+            // Store as JWT token and clear any old access token
+            storeJwtToken(jwtTokenKey, token)
+            if (user) {
+                storeJwtUser(jwtUserKey, user)
+            }
+            clearStoredAccessToken(accessTokenKey)
+        } else {
+            // Store as access token and clear any old JWT token
+            storeAccessToken(accessTokenKey, token)
+            clearStoredJwtToken(jwtTokenKey)
+            clearStoredJwtUser(jwtUserKey)
+        }
+
         setAuthSource({ type: 'accessToken', token })
-    }, [accessTokenKey])
+    }, [accessTokenKey, jwtTokenKey, jwtUserKey])
 
     const setPasswordAuth = useCallback((username: string, password: string) => {
         // Store username for potential reuse, password is never stored
@@ -180,11 +247,14 @@ export function useAuthSource(baseUrl: string): {
 
     const clearAuth = useCallback(() => {
         clearStoredAccessToken(accessTokenKey)
+        clearStoredJwtToken(jwtTokenKey)
+        clearStoredJwtUser(jwtUserKey)
         setAuthSource(null)
-    }, [accessTokenKey])
+    }, [accessTokenKey, jwtTokenKey, jwtUserKey])
 
     return {
         authSource,
+        storedUser,
         isLoading,
         isTelegram,
         setAccessToken,
