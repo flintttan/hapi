@@ -4,8 +4,12 @@ WORKDIR /app
 
 # Copy workspace files
 COPY package.json bun.lock ./
+COPY cli ./cli
 COPY shared ./shared
 COPY server ./server
+COPY web ./web
+COPY website ./website
+COPY docs ./docs
 
 # Install dependencies
 RUN bun install --frozen-lockfile
