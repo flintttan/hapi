@@ -10,7 +10,7 @@ To update the version:
 
 ```bash
 # Method 1: Use the bump-version script (recommended)
-bun bump-version 0.5.12
+bun bump-version 0.5.13
 
 # Method 2: Manual update
 # 1. Edit version.json
@@ -87,6 +87,6 @@ When you push a tag (e.g., `v0.5.11`), GitHub Actions will automatically:
 Available in root `package.json`:
 
 ```bash
-bun run bump-version 0.5.12  # Bump version and sync all files
+bun run bump-version 0.5.13  # Bump version and sync all files
 bun run sync-version         # Sync version from version.json to package.json files
 ```
