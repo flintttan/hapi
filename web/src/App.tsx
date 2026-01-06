@@ -20,7 +20,7 @@ import { LoadingState } from '@/components/LoadingState'
 
 export function App() {
     const { serverUrl, baseUrl, setServerUrl, clearServerUrl } = useServerUrl()
-    const { authSource, storedUser, isLoading: isAuthSourceLoading, setAccessToken } = useAuthSource(baseUrl)
+    const { authSource, storedUser, isLoading: isAuthSourceLoading, setAccessToken, clearAuth } = useAuthSource(baseUrl)
     const { token, api, user, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl, storedUser)
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
@@ -91,6 +91,10 @@ export function App() {
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId' })
     const isNewSessionPage = Boolean(matchRoute({ to: '/sessions/new' }))
     const selectedSessionId = sessionMatch && !isNewSessionPage ? sessionMatch.sessionId : null
+    const handleLogout = useCallback(() => {
+        clearAuth()
+        queryClient.clear()
+    }, [clearAuth, queryClient])
     const { isSyncing, startSync, endSync } = useSyncingState()
     const syncTokenRef = useRef(0)
     const isFirstConnectRef = useRef(true)
@@ -179,7 +183,7 @@ export function App() {
     }, [selectedSessionId])
 
     useSSE({
-        enabled: Boolean(api && token),
+        enabled: Boolean(api && token && authSource),
         token: token ?? '',
         baseUrl,
         subscription: eventSubscription,
@@ -272,7 +276,7 @@ export function App() {
     }
 
     return (
-        <AppContextProvider value={{ api, token, user }}>
+        <AppContextProvider value={{ api, token, user, onLogout: handleLogout }}>
             <SyncingBanner isSyncing={isSyncing} />
             <OfflineBanner />
             <div className="h-full flex flex-col">

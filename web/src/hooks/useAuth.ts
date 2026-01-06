@@ -177,7 +177,14 @@ export function useAuth(authSource: AuthSource | null, baseUrl: string, storedUs
         async function run() {
             if (!authSource) {
                 // No auth source - waiting for login
+                tokenRef.current = null
+                refreshPromiseRef.current = null
+                lastRefreshAttemptRef.current = 0
+                setToken(null)
+                setUser(null)
+                setError(null)
                 setNeedsBinding(false)
+                setIsLoading(false)
                 return
             }
 

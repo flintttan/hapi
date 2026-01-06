@@ -4,6 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa'
 import { resolve } from 'node:path'
 
 const base = process.env.VITE_BASE_URL || '/'
+const apiTarget = process.env.VITE_API_TARGET || `http://127.0.0.1:${process.env.WEBAPP_PORT || '3006'}`
 
 export default defineConfig({
     server: {
@@ -11,11 +12,11 @@ export default defineConfig({
         allowedHosts: ['hapidev.weishu.me'],
         proxy: {
             '/api': {
-                target: 'http://127.0.0.1:3006',
+                target: apiTarget,
                 changeOrigin: true
             },
             '/socket.io': {
-                target: 'http://127.0.0.1:3006',
+                target: apiTarget,
                 ws: true
             }
         }

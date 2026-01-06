@@ -99,39 +99,58 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
 
     return (
         <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent className="max-w-sm">
-                <DialogHeader>
-                    <DialogTitle>Session Actions</DialogTitle>
+            <DialogContent
+                className="left-0 right-0 bottom-0 top-auto w-full max-w-none translate-x-0 translate-y-0 rounded-t-2xl rounded-b-none bg-transparent p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-none sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:w-[calc(100vw-24px)] sm:max-w-sm sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:bg-[var(--app-secondary-bg)] sm:p-4 sm:shadow-2xl"
+            >
+                <DialogHeader className="px-1 pb-2 sm:px-0 sm:pb-0">
+                    <div
+                        className="mx-auto mb-2 h-1.5 w-10 rounded-full bg-[var(--app-divider)] sm:hidden"
+                        aria-hidden="true"
+                    />
+                    <DialogTitle className="text-sm sm:text-base">Session Actions</DialogTitle>
                 </DialogHeader>
-                <div className="mt-4 flex flex-col gap-2">
-                    <Button
-                        variant="secondary"
-                        className="justify-start gap-3 h-12"
-                        onClick={handleRename}
-                    >
-                        <EditIcon className="text-[var(--app-hint)]" />
-                        Rename
-                    </Button>
 
-                    {sessionActive ? (
-                        <Button
-                            variant="secondary"
-                            className="justify-start gap-3 h-12 text-red-500"
-                            onClick={handleArchive}
+                <div className="mt-3 flex flex-col gap-2 sm:mt-4">
+                    <div className="overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)]">
+                        <button
+                            type="button"
+                            onClick={handleRename}
+                            className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] active:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
                         >
-                            <ArchiveIcon className="text-red-500" />
-                            Archive
-                        </Button>
-                    ) : (
-                        <Button
-                            variant="secondary"
-                            className="justify-start gap-3 h-12 text-red-500"
-                            onClick={handleDelete}
-                        >
-                            <TrashIcon className="text-red-500" />
-                            Delete
-                        </Button>
-                    )}
+                            <EditIcon className="text-[var(--app-hint)]" />
+                            Rename
+                        </button>
+                        <div className="h-px bg-[var(--app-divider)]" aria-hidden="true" />
+
+                        {sessionActive ? (
+                            <button
+                                type="button"
+                                onClick={handleArchive}
+                                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-red-600 transition-colors hover:bg-[var(--app-subtle-bg)] active:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                            >
+                                <ArchiveIcon className="text-red-600" />
+                                Archive
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={handleDelete}
+                                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-red-600 transition-colors hover:bg-[var(--app-subtle-bg)] active:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
+                            >
+                                <TrashIcon className="text-red-600" />
+                                Delete
+                            </button>
+                        )}
+                    </div>
+
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        className="h-12 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
+                        onClick={onClose}
+                    >
+                        Cancel
+                    </Button>
                 </div>
             </DialogContent>
         </Dialog>
