@@ -6,7 +6,7 @@ import { parseAccessToken } from '../../utils/accessToken'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
 import type { Store } from '../../store'
 
-const bearerSchema = z.string().regex(/^Bearer\\s+(.+)$/i)
+const bearerSchema = z.string().regex(/^Bearer\s+(.+)$/i)
 
 const createOrLoadSessionSchema = z.object({
     tag: z.string().min(1),
@@ -75,7 +75,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store: S
             return c.json({ error: 'Invalid Authorization header' }, 401)
         }
 
-        const token = parsed.data.replace(/^Bearer\\s+/i, '')
+        const token = parsed.data.replace(/^Bearer\s+/i, '')
 
         const perUserTokenResult = store.validateCliToken(token)
         if (perUserTokenResult) {
