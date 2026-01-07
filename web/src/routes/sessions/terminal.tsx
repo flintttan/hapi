@@ -5,6 +5,7 @@ import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useSession } from '@/hooks/queries/useSession'
 import { useTerminalSocket } from '@/hooks/useTerminalSocket'
+import { useVisualViewportHeight } from '@/hooks/useVisualViewportHeight'
 import { TerminalView } from '@/components/Terminal/TerminalView'
 import { LoadingState } from '@/components/LoadingState'
 function BackIcon() {
@@ -70,6 +71,7 @@ export default function TerminalPage() {
     const { api, token } = useAppContext()
     const goBack = useAppGoBack()
     const { session } = useSession(api, sessionId)
+    const visualViewportHeight = useVisualViewportHeight()
     const terminalId = useMemo(() => {
         if (typeof crypto?.randomUUID === 'function') {
             return crypto.randomUUID()
@@ -211,7 +213,11 @@ export default function TerminalPage() {
     const errorMessage = terminalState.status === 'error' ? terminalState.error : null
 
     return (
-        <div className="flex h-full flex-col">
+        <div
+            className="flex h-full flex-col"
+            // Prefer VisualViewport height so the bottom quick keys stay above mobile keyboards.
+            style={{ height: visualViewportHeight ? `${visualViewportHeight}px` : 'var(--tg-viewport-height, 100dvh)' }}
+        >
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
                 <div className="mx-auto w-full max-w-content flex items-center gap-2 p-3 border-b border-[var(--app-border)]">
                     <button
