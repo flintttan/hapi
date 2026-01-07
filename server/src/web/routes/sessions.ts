@@ -321,11 +321,11 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                     const name = rawName.startsWith('/') ? rawName.slice(1) : rawName
                     return {
                         name,
-                        source: (builtinNames.has(name) ? 'builtin' : 'user') as const
+                        source: builtinNames.has(name) ? 'builtin' : 'user'
                     }
                 })
 
-            return { success: true as const, commands }
+            return { success: true, commands }
         }
 
         try {

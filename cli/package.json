@@ -1,6 +1,6 @@
 {
   "name": "@flintttan/hapi",
-  "version": "0.5.17",
+  "version": "0.5.18",
   "description": "App for agentic coding - access coding agent anywhere",
   "author": "Kirill Dubovitskiy & weishu",
   "license": "AGPL-3.0-only",
@@ -26,11 +26,11 @@
     }
   },
   "optionalDependencies": {
-    "@flintttan/hapi-darwin-arm64": "0.5.17",
-    "@flintttan/hapi-darwin-x64": "0.5.17",
-    "@flintttan/hapi-linux-arm64": "0.5.17",
-    "@flintttan/hapi-linux-x64": "0.5.17",
-    "@flintttan/hapi-win32-x64": "0.5.17"
+    "@flintttan/hapi-darwin-arm64": "0.5.18",
+    "@flintttan/hapi-darwin-x64": "0.5.18",
+    "@flintttan/hapi-linux-arm64": "0.5.18",
+    "@flintttan/hapi-linux-x64": "0.5.18",
+    "@flintttan/hapi-win32-x64": "0.5.18"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
