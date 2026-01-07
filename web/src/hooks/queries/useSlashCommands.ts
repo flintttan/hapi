@@ -83,16 +83,36 @@ export function useSlashCommands(
             ? queryText.slice(1).toLowerCase()
             : queryText.toLowerCase()
 
-        return commands
-            .filter(cmd => cmd.name.toLowerCase().startsWith(searchTerm))
-            .map(cmd => ({
-                key: `/${cmd.name}`,
-                text: `/${cmd.name}`,
-                label: `/${cmd.name}`,
-                description: cmd.description ?? (cmd.source === 'user' ? 'Custom command' : undefined),
-                content: cmd.content,
-                source: cmd.source
-            }))
+        const normalize = (value?: string): string => (value ?? '').toLowerCase()
+
+        const scored = commands
+            .map((cmd) => {
+                const name = normalize(cmd.name)
+                const description = normalize(cmd.description)
+
+                // Show everything if query is empty (e.g. just "/")
+                if (searchTerm.length === 0) {
+                    return { cmd, score: 100 }
+                }
+
+                // Prioritize prefix matches, then substring, then description matches
+                if (name === searchTerm) return { cmd, score: 0 }
+                if (name.startsWith(searchTerm)) return { cmd, score: 1 }
+                if (name.includes(searchTerm)) return { cmd, score: 2 }
+                if (description.includes(searchTerm)) return { cmd, score: 3 }
+                return null
+            })
+            .filter((item): item is { cmd: SlashCommand; score: number } => item !== null)
+            .sort((a, b) => a.score - b.score || a.cmd.name.localeCompare(b.cmd.name))
+
+        return scored.map(({ cmd }) => ({
+            key: `/${cmd.name}`,
+            text: `/${cmd.name}`,
+            label: `/${cmd.name}`,
+            description: cmd.description ?? (cmd.source === 'user' ? 'Custom command' : undefined),
+            content: cmd.content,
+            source: cmd.source
+        }))
     }, [commands])
 
     return {

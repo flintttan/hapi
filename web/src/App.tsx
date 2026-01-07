@@ -238,8 +238,8 @@ export function App() {
 
     // Auth error
     if (authError || !token || !api) {
-        // If using access token and auth failed, show login again
-        if (authSource.type === 'accessToken') {
+        // Browser auth failed (refresh token / access token / password)
+        if (authSource.type === 'accessToken' || authSource.type === 'refreshToken' || authSource.type === 'password') {
             return (
                 <LoginPrompt
                     onLogin={setAccessToken}

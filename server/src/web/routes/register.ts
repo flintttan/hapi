@@ -55,14 +55,26 @@ export function createRegisterRoutes(jwtSecret: Uint8Array, store: Store): Hono<
         })
 
         // Generate JWT token
-        const token = await new SignJWT({ uid: user.id })
+        const token = await new SignJWT({ uid: user.id, tokenType: 'access' })
             .setProtectedHeader({ alg: 'HS256' })
             .setIssuedAt()
             .setExpirationTime('7d')
             .sign(jwtSecret)
 
+        const refreshToken = await new SignJWT({
+            uid: user.id,
+            tokenType: 'refresh',
+            username: user.username,
+            firstName: user.username
+        })
+            .setProtectedHeader({ alg: 'HS256' })
+            .setIssuedAt()
+            .setExpirationTime('30d')
+            .sign(jwtSecret)
+
         return c.json({
             token,
+            refreshToken,
             user: {
                 id: user.id,
                 username: user.username,

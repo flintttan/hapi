@@ -5,6 +5,7 @@ import type { AuthResponse } from '@/types/api'
 export type AuthSource =
     | { type: 'telegram'; initData: string }
     | { type: 'accessToken'; token: string }
+    | { type: 'refreshToken'; token: string }
     | { type: 'password'; username: string; password: string }
 
 function decodeJwtExpMs(token: string): number | null {
@@ -27,12 +28,17 @@ function decodeJwtExpMs(token: string): number | null {
     }
 }
 
-function getAuthPayload(source: AuthSource): { initData: string } | { accessToken: string } | { username: string; password: string } {
+function getAuthPayload(
+    source: AuthSource
+): { initData: string } | { accessToken: string } | { refreshToken: string } | { username: string; password: string } {
     if (source.type === 'telegram') {
         return { initData: source.initData }
     }
     if (source.type === 'password') {
         return { username: source.username, password: source.password }
+    }
+    if (source.type === 'refreshToken') {
+        return { refreshToken: source.token }
     }
     return { accessToken: source.token }
 }
@@ -41,7 +47,11 @@ function isNotBoundError(error: unknown): boolean {
     return error instanceof ApiError && error.status === 401 && error.code === 'not_bound'
 }
 
-export function useAuth(authSource: AuthSource | null, baseUrl: string, storedUser?: { id: number; username?: string; firstName?: string; lastName?: string } | null): {
+export function useAuth(
+    authSource: AuthSource | null,
+    baseUrl: string,
+    storedUser?: { id: number | string; username?: string; firstName?: string; lastName?: string } | null
+): {
     token: string | null
     user: AuthResponse['user'] | null
     api: ApiClient | null

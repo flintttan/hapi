@@ -62,8 +62,9 @@ export type Machine = {
 
 export type AuthResponse = {
     token: string
+    refreshToken?: string
     user: {
-        id: number
+        id: number | string
         username?: string
         firstName?: string
         lastName?: string

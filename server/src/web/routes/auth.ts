@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { SignJWT } from 'jose'
+import { jwtVerify, SignJWT } from 'jose'
 import { z } from 'zod'
 import * as bcrypt from 'bcryptjs'
 import { configuration } from '../../configuration'
@@ -23,7 +23,20 @@ const usernamePasswordAuthSchema = z.object({
     password: z.string()
 })
 
-const authBodySchema = z.union([telegramAuthSchema, accessTokenAuthSchema, usernamePasswordAuthSchema])
+const refreshTokenAuthSchema = z.object({
+    refreshToken: z.string()
+})
+
+const authBodySchema = z.union([telegramAuthSchema, accessTokenAuthSchema, usernamePasswordAuthSchema, refreshTokenAuthSchema])
+
+const refreshTokenPayloadSchema = z.object({
+    uid: z.union([z.string(), z.number()]),
+    ns: z.string().optional(),
+    tokenType: z.literal('refresh'),
+    username: z.string().optional(),
+    firstName: z.string().optional(),
+    lastName: z.string().optional()
+})
 
 export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
@@ -35,12 +48,58 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
             return c.json({ error: 'Invalid body' }, 400)
         }
 
-        let userId: number
+        let userId: number | string
         let username: string | undefined
         let firstName: string | undefined
         let lastName: string | undefined
-        let namespace: string
+        let namespace: string | undefined
         let userIdString: string | undefined  // For storing TEXT user IDs
+
+        if ('refreshToken' in parsed.data) {
+            try {
+                const verified = await jwtVerify(parsed.data.refreshToken, jwtSecret, { algorithms: ['HS256'] })
+                const tokenPayload = refreshTokenPayloadSchema.safeParse(verified.payload)
+                if (!tokenPayload.success) {
+                    return c.json({ error: 'Invalid refresh token' }, 401)
+                }
+
+                userId = tokenPayload.data.uid
+                namespace = tokenPayload.data.ns
+                username = tokenPayload.data.username
+                firstName = tokenPayload.data.firstName
+                lastName = tokenPayload.data.lastName
+
+                // Fallback to database user info when available (e.g. password auth)
+                const tokenUserId = String(userId)
+                const resolvedNamespace = namespace ?? tokenUserId
+                const storedUser = store.getUserById(resolvedNamespace) ?? store.getUserById(tokenUserId)
+                if (storedUser) {
+                    username ??= storedUser.username
+                    firstName ??= storedUser.username
+                } else if (!firstName && !username) {
+                    firstName = 'Web User'
+                }
+
+                const token = await new SignJWT({ uid: userId, ns: resolvedNamespace, tokenType: 'access' })
+                    .setProtectedHeader({ alg: 'HS256' })
+                    .setIssuedAt()
+                    .setExpirationTime('15m')
+                    .sign(jwtSecret)
+
+                return c.json({
+                    token,
+                    refreshToken: parsed.data.refreshToken,
+                    user: {
+                        id: userId,
+                        username,
+                        firstName,
+                        lastName
+                    }
+                })
+            } catch {
+                return c.json({ error: 'Invalid refresh token' }, 401)
+            }
+        }
 
         // Access Token authentication (CLI_API_TOKEN)
         if ('accessToken' in parsed.data) {
@@ -95,14 +154,28 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
             return c.json({ error: 'Invalid authentication method' }, 400)
         }
 
-        const token = await new SignJWT({ uid: userId, ns: namespace })
+        const token = await new SignJWT({ uid: userId, ns: namespace, tokenType: 'access' })
             .setProtectedHeader({ alg: 'HS256' })
             .setIssuedAt()
             .setExpirationTime('15m')
             .sign(jwtSecret)
 
+        const refreshToken = await new SignJWT({
+            uid: userId,
+            ns: namespace,
+            tokenType: 'refresh',
+            username,
+            firstName,
+            lastName
+        })
+            .setProtectedHeader({ alg: 'HS256' })
+            .setIssuedAt()
+            .setExpirationTime('30d')
+            .sign(jwtSecret)
+
         return c.json({
             token,
+            refreshToken,
             user: {
                 id: userId,
                 username,

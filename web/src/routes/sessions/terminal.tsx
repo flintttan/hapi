@@ -42,11 +42,27 @@ function ConnectionIndicator(props: { status: 'idle' | 'connecting' | 'connected
     )
 }
 
-const QUICK_INPUTS = [
+type QuickInput = {
+    label: string
+    sequence: string
+    description: string
+}
+
+const QUICK_INPUTS_PRIMARY: QuickInput[] = [
     { label: 'Esc', sequence: '\u001b', description: 'Escape' },
     { label: 'Tab', sequence: '\t', description: 'Tab' },
+    { label: '↑', sequence: '\u001b[A', description: 'Arrow Up' },
+    { label: '↓', sequence: '\u001b[B', description: 'Arrow Down' },
+    { label: 'Ctrl+C', sequence: '\u0003', description: 'Interrupt (SIGINT)' },
+]
+
+const QUICK_INPUTS_SECONDARY: QuickInput[] = [
+    { label: '←', sequence: '\u001b[D', description: 'Arrow Left' },
+    { label: '→', sequence: '\u001b[C', description: 'Arrow Right' },
     { label: 'Home', sequence: '\u001b[H', description: 'Home' },
-    { label: 'End', sequence: '\u001b[F', description: 'End' }
+    { label: 'End', sequence: '\u001b[F', description: 'End' },
+    { label: 'Ctrl+L', sequence: '\u000c', description: 'Clear screen' },
+    { label: 'Ctrl+D', sequence: '\u0004', description: 'EOF' },
 ]
 
 export default function TerminalPage() {
@@ -65,6 +81,7 @@ export default function TerminalPage() {
     const connectOnceRef = useRef(false)
     const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
     const [exitInfo, setExitInfo] = useState<{ code: number | null; signal: string | null } | null>(null)
+    const [showAllQuickInputs, setShowAllQuickInputs] = useState(false)
 
     const {
         state: terminalState,
@@ -259,20 +276,53 @@ export default function TerminalPage() {
 
             <div className="bg-[var(--app-bg)] border-t border-[var(--app-border)] pb-[env(safe-area-inset-bottom)]">
                 <div className="mx-auto w-full max-w-content px-3">
-                    <div className="flex items-stretch overflow-hidden rounded-md bg-[var(--app-secondary-bg)]">
-                        {QUICK_INPUTS.map((input) => (
-                            <button
-                                key={input.label}
-                                type="button"
-                                onClick={() => handleQuickInput(input.sequence)}
-                                disabled={quickInputDisabled}
-                                className="flex-1 border-l border-[var(--app-border)] px-3 py-1.5 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent first:border-l-0"
-                                aria-label={input.description}
-                                title={input.description}
-                            >
-                                {input.label}
-                            </button>
-                        ))}
+                    <div className="py-3">
+                        <div className="rounded-md bg-[var(--app-border)] p-px">
+                            <div className="grid grid-cols-6 gap-px">
+                                {QUICK_INPUTS_PRIMARY.map((input) => (
+                                    <button
+                                        key={input.label}
+                                        type="button"
+                                        onClick={() => handleQuickInput(input.sequence)}
+                                        disabled={quickInputDisabled}
+                                        className="flex items-center justify-center bg-[var(--app-secondary-bg)] px-2 py-1.5 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[var(--app-secondary-bg)]"
+                                        aria-label={input.description}
+                                        title={input.description}
+                                    >
+                                        {input.label}
+                                    </button>
+                                ))}
+                                <button
+                                    type="button"
+                                    onClick={() => setShowAllQuickInputs((prev) => !prev)}
+                                    className="flex items-center justify-center bg-[var(--app-secondary-bg)] px-2 py-1.5 text-sm font-medium text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] focus-visible:ring-inset"
+                                    aria-label={showAllQuickInputs ? 'Hide more keys' : 'Show more keys'}
+                                    title={showAllQuickInputs ? 'Hide more keys' : 'Show more keys'}
+                                >
+                                    {showAllQuickInputs ? 'Less' : 'More'}
+                                </button>
+                            </div>
+                        </div>
+
+                        {showAllQuickInputs ? (
+                            <div className="mt-2 rounded-md bg-[var(--app-border)] p-px">
+                                <div className="grid grid-cols-6 gap-px">
+                                    {QUICK_INPUTS_SECONDARY.map((input) => (
+                                        <button
+                                            key={input.label}
+                                            type="button"
+                                            onClick={() => handleQuickInput(input.sequence)}
+                                            disabled={quickInputDisabled}
+                                            className="flex items-center justify-center bg-[var(--app-secondary-bg)] px-2 py-1.5 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[var(--app-secondary-bg)]"
+                                            aria-label={input.description}
+                                            title={input.description}
+                                        >
+                                            {input.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                        ) : null}
                     </div>
                 </div>
             </div>

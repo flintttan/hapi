@@ -14,7 +14,8 @@ export type WebAppEnv = {
 
 const jwtPayloadSchema = z.object({
     uid: z.union([z.string(), z.number()]),
-    ns: z.string().optional()
+    ns: z.string().optional(),
+    tokenType: z.enum(['access', 'refresh']).optional()
 })
 
 export function createAuthMiddleware(jwtSecret: Uint8Array, store: Store): MiddlewareHandler<WebAppEnv> {
@@ -65,6 +66,9 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, store: Store): Middl
             const parsed = jwtPayloadSchema.safeParse(verified.payload)
             if (!parsed.success) {
                 return c.json({ error: 'Invalid token payload' }, 401)
+            }
+            if (parsed.data.tokenType === 'refresh') {
+                return c.json({ error: 'Invalid token' }, 401)
             }
 
             const tokenUserId = String(parsed.data.uid)

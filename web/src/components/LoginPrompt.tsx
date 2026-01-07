@@ -10,7 +10,7 @@ type AuthMethod = 'password' | 'telegram' | 'token'
 
 type LoginPromptProps = {
     mode?: 'login' | 'bind'
-    onLogin?: (token: string, user?: { id: number; username?: string; firstName?: string; lastName?: string }) => void
+    onLogin?: (token: string, user?: { id: number | string; username?: string; firstName?: string; lastName?: string }, refreshToken?: string) => void
     onBind?: (token: string) => Promise<void>
     baseUrl: string
     serverUrl: string | null
@@ -100,12 +100,12 @@ export function LoginPrompt(props: LoginPromptProps) {
                     setError('Login is unavailable.')
                     return
                 }
-                props.onLogin(response.token, response.user)
+                props.onLogin(response.token, response.user, response.refreshToken)
             } else {
                 // Login flow
                 const client = new ApiClient('', { baseUrl: props.baseUrl })
 
-                let authResponse: { token: string; user: { id: number; username?: string; firstName?: string; lastName?: string } }
+                let authResponse: { token: string; refreshToken?: string; user: { id: number | string; username?: string; firstName?: string; lastName?: string } }
                 switch (authMethod) {
                     case 'password': {
                         const usernameError = validateUsername(username)
@@ -141,7 +141,7 @@ export function LoginPrompt(props: LoginPromptProps) {
                     return
                 }
                 // Pass JWT token and user info from authentication response
-                props.onLogin(authResponse.token, authResponse.user)
+                props.onLogin(authResponse.token, authResponse.user, authResponse.refreshToken)
             }
         } catch (e) {
             let fallbackMessage = 'Authentication failed'

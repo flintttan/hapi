@@ -15,7 +15,8 @@ import type { SocketData, SocketServer } from './socketTypes'
 
 const jwtPayloadSchema = z.object({
     uid: z.union([z.string(), z.number()]),
-    ns: z.string().optional()
+    ns: z.string().optional(),
+    tokenType: z.enum(['access', 'refresh']).optional()
 })
 
 const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60_000
@@ -140,6 +141,9 @@ export function createSocketServer(deps: SocketServerDeps): {
             const parsed = jwtPayloadSchema.safeParse(verified.payload)
             if (!parsed.success) {
                 return next(new Error('Invalid token payload'))
+            }
+            if (parsed.data.tokenType === 'refresh') {
+                return next(new Error('Invalid token'))
             }
             const userId = String(parsed.data.uid)
             const namespace = parsed.data.ns ?? userId

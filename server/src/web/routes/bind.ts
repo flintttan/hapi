@@ -48,14 +48,28 @@ export function createBindRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
 
         const userId = await getOrCreateOwnerId()
 
-        const token = await new SignJWT({ uid: userId, ns: namespace })
+        const token = await new SignJWT({ uid: userId, ns: namespace, tokenType: 'access' })
             .setProtectedHeader({ alg: 'HS256' })
             .setIssuedAt()
             .setExpirationTime('15m')
             .sign(jwtSecret)
 
+        const refreshToken = await new SignJWT({
+            uid: userId,
+            ns: namespace,
+            tokenType: 'refresh',
+            username: result.user.username,
+            firstName: result.user.first_name,
+            lastName: result.user.last_name
+        })
+            .setProtectedHeader({ alg: 'HS256' })
+            .setIssuedAt()
+            .setExpirationTime('30d')
+            .sign(jwtSecret)
+
         return c.json({
             token,
+            refreshToken,
             user: {
                 id: userId,
                 username: result.user.username,
