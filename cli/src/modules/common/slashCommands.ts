@@ -1,5 +1,6 @@
 import { readdir, readFile } from 'fs/promises';
-import { join } from 'path';
+import type { Dirent } from 'fs';
+import { join, relative } from 'path';
 import { homedir } from 'os';
 import { parse as parseYaml } from 'yaml';
 
@@ -89,8 +90,10 @@ function getUserCommandsDir(agent: string): string | null {
 
 /**
  * Scan a directory for user-defined commands (*.md files).
- * For Codex, reads file content and parses frontmatter.
- * Returns the command names (filename without extension).
+ * For Claude + Codex, reads frontmatter (YAML) for `description`.
+ * For Codex, also returns the expanded prompt `content`.
+ *
+ * Claude supports nested command namespaces: `workflow/plan.md` -> `workflow:plan`.
  */
 async function scanUserCommands(agent: string): Promise<SlashCommand[]> {
     const dir = getUserCommandsDir(agent);
@@ -99,15 +102,62 @@ async function scanUserCommands(agent: string): Promise<SlashCommand[]> {
     }
 
     const shouldReadContent = agent === 'codex';
+    const shouldReadDescription = agent === 'codex' || agent === 'claude';
+
+    const listCommandFiles = async (): Promise<string[]> => {
+        try {
+            const entries = await readdir(dir, { withFileTypes: true });
+            const mdFiles = entries.filter(e => e.isFile() && e.name.endsWith('.md'));
+            return mdFiles.map((entry) => join(dir, entry.name));
+        } catch {
+            return [];
+        }
+    };
+
+    const listCommandFilesRecursive = async (): Promise<string[]> => {
+        const files: string[] = [];
+        const stack: string[] = [dir];
+
+        while (stack.length > 0) {
+            const currentDir = stack.pop();
+            if (!currentDir) continue;
+
+            let entries: Dirent[];
+            try {
+                entries = await readdir(currentDir, { withFileTypes: true });
+            } catch {
+                continue;
+            }
+
+            for (const entry of entries) {
+                const entryPath = join(currentDir, entry.name);
+                if (entry.isDirectory()) {
+                    stack.push(entryPath);
+                    continue;
+                }
+                if (entry.isFile() && entry.name.endsWith('.md')) {
+                    files.push(entryPath);
+                }
+            }
+        }
+
+        return files;
+    };
 
     try {
-        const entries = await readdir(dir, { withFileTypes: true });
-        const mdFiles = entries.filter(e => e.isFile() && e.name.endsWith('.md'));
+        const commandFiles = agent === 'claude'
+            ? await listCommandFilesRecursive()
+            : await listCommandFiles();
 
         // Read all files in parallel
         const commands = await Promise.all(
-            mdFiles.map(async (entry): Promise<SlashCommand | null> => {
-                const name = entry.name.slice(0, -3);
+            commandFiles.map(async (filePath): Promise<SlashCommand | null> => {
+                const relPath = relative(dir, filePath);
+                const withoutExt = relPath.endsWith('.md') ? relPath.slice(0, -3) : relPath;
+                const normalized = withoutExt.replace(/\\/g, '/');
+                const name = agent === 'claude'
+                    ? normalized.split('/').filter(Boolean).join(':')
+                    : normalized;
                 if (!name) return null;
 
                 const command: SlashCommand = {
@@ -116,15 +166,16 @@ async function scanUserCommands(agent: string): Promise<SlashCommand[]> {
                     source: 'user',
                 };
 
-                if (shouldReadContent) {
+                if (shouldReadContent || shouldReadDescription) {
                     try {
-                        const filePath = join(dir, entry.name);
                         const fileContent = await readFile(filePath, 'utf-8');
                         const parsed = parseFrontmatter(fileContent);
-                        if (parsed.description) {
+                        if (shouldReadDescription && parsed.description) {
                             command.description = parsed.description;
                         }
-                        command.content = parsed.content;
+                        if (shouldReadContent) {
+                            command.content = parsed.content;
+                        }
                     } catch {
                         // Failed to read file, keep default description
                     }

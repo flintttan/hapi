@@ -301,20 +301,47 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const cached = sessionResult.session.metadata?.slashCommands
-        if (cached && Array.isArray(cached)) {
-            const commands = cached.map((name) => ({
-                name,
-                source: 'user' as const
-            }))
-            return c.json({ success: true, commands })
+        const agent = sessionResult.session.metadata?.flavor ?? 'claude'
+
+        const builtinNamesByAgent: Record<string, Set<string>> = {
+            claude: new Set(['clear', 'compact', 'context', 'cost', 'doctor', 'plan', 'stats', 'status']),
+            codex: new Set(['review', 'new', 'compat', 'undo', 'diff', 'status']),
+            gemini: new Set(['about', 'clear', 'compress', 'stats'])
         }
 
-        const agent = sessionResult.session.metadata?.flavor ?? 'claude'
+        const cachedFallback = () => {
+            if (!cached || !Array.isArray(cached)) {
+                return null
+            }
+
+            const builtinNames = builtinNamesByAgent[agent] ?? new Set<string>()
+            const commands = cached
+                .filter((name): name is string => typeof name === 'string' && name.length > 0)
+                .map((rawName) => {
+                    const name = rawName.startsWith('/') ? rawName.slice(1) : rawName
+                    return {
+                        name,
+                        source: (builtinNames.has(name) ? 'builtin' : 'user') as const
+                    }
+                })
+
+            return { success: true as const, commands }
+        }
 
         try {
             const result = await engine.listSlashCommands(sessionResult.sessionId, agent)
+            if (!result.success) {
+                const fallback = cachedFallback()
+                if (fallback) {
+                    return c.json(fallback)
+                }
+            }
             return c.json(result)
         } catch (error) {
+            const fallback = cachedFallback()
+            if (fallback) {
+                return c.json(fallback)
+            }
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to list slash commands'
