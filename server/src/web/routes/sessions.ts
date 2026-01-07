@@ -309,38 +309,90 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             gemini: new Set(['about', 'clear', 'compress', 'stats'])
         }
 
-        const cachedFallback = () => {
+        const builtinNames = builtinNamesByAgent[agent] ?? new Set<string>()
+        const normalizeName = (rawName: string): string => {
+            const trimmed = rawName.trim()
+            return trimmed.startsWith('/') ? trimmed.slice(1) : trimmed
+        }
+
+        type SlashCommandSource = 'builtin' | 'user'
+        const cachedCommands: Array<{ name: string; source: SlashCommandSource }> | null = (() => {
             if (!cached || !Array.isArray(cached)) {
                 return null
             }
 
-            const builtinNames = builtinNamesByAgent[agent] ?? new Set<string>()
-            const commands = cached
-                .filter((name): name is string => typeof name === 'string' && name.length > 0)
-                .map((rawName) => {
-                    const name = rawName.startsWith('/') ? rawName.slice(1) : rawName
-                    return {
-                        name,
-                        source: builtinNames.has(name) ? 'builtin' : 'user'
-                    }
-                })
+            return cached
+                .filter((name): name is string => typeof name === 'string')
+                .map(normalizeName)
+                .filter((name) => name.length > 0)
+                .map((name): { name: string; source: SlashCommandSource } => ({
+                    name,
+                    source: builtinNames.has(name) ? 'builtin' : 'user'
+                }))
+        })()
 
-            return { success: true, commands }
+        const mergeCommands = (
+            primary?: Array<Record<string, unknown>>,
+            secondary?: Array<{ name: string; source: SlashCommandSource }> | null
+        ): Array<Record<string, unknown>> => {
+            const merged: Array<Record<string, unknown>> = []
+            const seen = new Set<string>()
+
+            const add = (cmd: Record<string, unknown>) => {
+                const rawName = typeof cmd.name === 'string' ? cmd.name : null
+                if (!rawName) {
+                    return
+                }
+
+                const name = normalizeName(rawName)
+                if (!name || seen.has(name)) {
+                    return
+                }
+
+                seen.add(name)
+
+                const entry: Record<string, unknown> = rawName === name
+                    ? { ...cmd }
+                    : { ...cmd, name }
+
+                if (typeof entry.source !== 'string') {
+                    entry.source = builtinNames.has(name) ? 'builtin' : 'user'
+                }
+
+                merged.push(entry)
+            }
+
+            if (Array.isArray(primary)) {
+                for (const cmd of primary) {
+                    add(cmd)
+                }
+            }
+
+            if (secondary) {
+                for (const cmd of secondary) {
+                    add(cmd as unknown as Record<string, unknown>)
+                }
+            }
+
+            return merged
         }
 
         try {
             const result = await engine.listSlashCommands(sessionResult.sessionId, agent)
-            if (!result.success) {
-                const fallback = cachedFallback()
-                if (fallback) {
-                    return c.json(fallback)
-                }
+            const merged = mergeCommands(result.commands as unknown as Array<Record<string, unknown>> | undefined, cachedCommands)
+
+            if (merged.length > 0) {
+                return c.json({ success: true, commands: merged })
             }
+
+            if (!result.success && cachedCommands && cachedCommands.length > 0) {
+                return c.json({ success: true, commands: cachedCommands })
+            }
+
             return c.json(result)
         } catch (error) {
-            const fallback = cachedFallback()
-            if (fallback) {
-                return c.json(fallback)
+            if (cachedCommands && cachedCommands.length > 0) {
+                return c.json({ success: true, commands: cachedCommands })
             }
             return c.json({
                 success: false,

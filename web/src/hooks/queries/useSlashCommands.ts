@@ -55,12 +55,17 @@ export function useSlashCommands(
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
-            return await api.getSlashCommands(sessionId)
+            const result = await api.getSlashCommands(sessionId)
+            if (!result.success) {
+                throw new Error(result.error || 'Failed to list slash commands')
+            }
+            return result
         },
         enabled: Boolean(api && sessionId),
         staleTime: Infinity,
         gcTime: 30 * 60 * 1000,
-        retry: false, // Don't retry RPC failures
+        retry: 5,
+        retryDelay: (attemptIndex) => Math.min(250 * 2 ** attemptIndex, 2000),
     })
 
     // Merge built-in commands with user-defined commands from API
@@ -68,7 +73,7 @@ export function useSlashCommands(
         const builtin = BUILTIN_COMMANDS[agentType] ?? BUILTIN_COMMANDS['claude'] ?? []
 
         // If API succeeded, add user-defined commands
-        if (query.data?.success && query.data.commands) {
+        if (query.data?.commands) {
             const userCommands = query.data.commands.filter(cmd => cmd.source === 'user')
             return [...builtin, ...userCommands]
         }

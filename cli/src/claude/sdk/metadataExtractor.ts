@@ -18,6 +18,7 @@ export interface SDKMetadata {
  */
 export async function extractSDKMetadata(): Promise<SDKMetadata> {
     const abortController = new AbortController()
+    let captured: SDKMetadata | null = null
     
     try {
         logger.debug('[metadataExtractor] Starting SDK metadata extraction')
@@ -37,31 +38,40 @@ export async function extractSDKMetadata(): Promise<SDKMetadata> {
             if (message.type === 'system' && message.subtype === 'init') {
                 const systemMessage = message as SDKSystemMessage
                 
-                const metadata: SDKMetadata = {
+                captured = {
                     tools: systemMessage.tools,
                     slashCommands: systemMessage.slash_commands
                 }
                 
-                logger.debug('[metadataExtractor] Captured SDK metadata:', metadata)
+                logger.debug('[metadataExtractor] Captured SDK metadata:', captured)
                 
                 // Abort the query since we got what we need
                 abortController.abort()
                 
-                return metadata
+                break
             }
         }
         
-        logger.debug('[metadataExtractor] No init message received from SDK')
-        return {}
+        if (!captured) {
+            logger.debug('[metadataExtractor] No init message received from SDK')
+            return {}
+        }
+
+        return captured
         
     } catch (error) {
         // Check if it's an abort error (expected)
         if (error instanceof Error && error.name === 'AbortError') {
-            logger.debug('[metadataExtractor] SDK query aborted after capturing metadata')
-            return {}
+            logger.debug('[metadataExtractor] SDK query aborted')
+            return captured ?? {}
         }
         logger.debug('[metadataExtractor] Error extracting SDK metadata:', error)
-        return {}
+        return captured ?? {}
+    } finally {
+        // Ensure we always terminate the SDK process quickly.
+        if (!abortController.signal.aborted) {
+            abortController.abort()
+        }
     }
 }
 
