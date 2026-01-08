@@ -1,8 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
+import { CanvasAddon } from '@xterm/addon-canvas'
 import '@xterm/xterm/css/xterm.css'
+import { createFontProvider, type ITerminalFontProvider } from '@/lib/terminalFont'
 
 function resolveThemeColors(): { background: string; foreground: string; selectionBackground: string } {
     const styles = getComputedStyle(document.documentElement)
@@ -20,6 +22,11 @@ export function TerminalView(props: {
     const containerRef = useRef<HTMLDivElement | null>(null)
     const onMountRef = useRef(props.onMount)
     const onResizeRef = useRef(props.onResize)
+    const [fontProvider, setFontProvider] = useState<ITerminalFontProvider | null>(null)
+
+    useEffect(() => {
+        createFontProvider('default').then(setFontProvider)
+    }, [])
 
     useEffect(() => {
         onMountRef.current = props.onMount
@@ -31,32 +38,31 @@ export function TerminalView(props: {
 
     useEffect(() => {
         const container = containerRef.current
-        if (!container) {
+        if (!container || !fontProvider) {
             return
         }
 
         const { background, foreground, selectionBackground } = resolveThemeColors()
         const terminal = new Terminal({
             cursorBlink: true,
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+            fontFamily: fontProvider.getFontFamily(),
             fontSize: 13,
-            scrollback: 10_000,
-            scrollSensitivity: 1.2,
-            smoothScrollDuration: 0,
-            screenReaderMode: false,
             theme: {
                 background,
                 foreground,
                 cursor: foreground,
                 selectionBackground
             },
-            convertEol: true
+            convertEol: true,
+            customGlyphs: true
         })
 
         const fitAddon = new FitAddon()
         const webLinksAddon = new WebLinksAddon()
+        const canvasAddon = new CanvasAddon()
         terminal.loadAddon(fitAddon)
         terminal.loadAddon(webLinksAddon)
+        terminal.loadAddon(canvasAddon)
         terminal.open(container)
 
         const resizeTerminal = () => {
@@ -76,7 +82,7 @@ export function TerminalView(props: {
             observer.disconnect()
             terminal.dispose()
         }
-    }, [])
+    }, [fontProvider])
 
     return (
         <div

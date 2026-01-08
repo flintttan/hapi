@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import type { Terminal } from '@xterm/xterm'
 import { useAppContext } from '@/lib/app-context'
@@ -66,44 +66,6 @@ const QUICK_INPUTS_SECONDARY: QuickInput[] = [
     { label: 'Ctrl+D', sequence: '\u0004', description: 'EOF' },
 ]
 
-function fallbackCopyToClipboard(text: string): boolean {
-    try {
-        const textarea = document.createElement('textarea')
-        textarea.value = text
-        textarea.setAttribute('readonly', 'true')
-        textarea.style.position = 'fixed'
-        textarea.style.top = '0'
-        textarea.style.left = '-9999px'
-        textarea.style.opacity = '0'
-        document.body.appendChild(textarea)
-        textarea.focus()
-        textarea.select()
-        const ok = document.execCommand('copy')
-        textarea.remove()
-        return ok
-    } catch {
-        return false
-    }
-}
-
-async function writeClipboardText(text: string): Promise<boolean> {
-    try {
-        await navigator.clipboard.writeText(text)
-        return true
-    } catch {
-        return fallbackCopyToClipboard(text)
-    }
-}
-
-async function readClipboardText(): Promise<string | null> {
-    try {
-        return await navigator.clipboard.readText()
-    } catch {
-        const manual = window.prompt('Paste text')
-        return manual === null ? null : manual
-    }
-}
-
 export default function TerminalPage() {
     const { sessionId } = useParams({ from: '/sessions/$sessionId/terminal' })
     const { api, token } = useAppContext()
@@ -122,24 +84,12 @@ export default function TerminalPage() {
     const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
     const [exitInfo, setExitInfo] = useState<{ code: number | null; signal: string | null } | null>(null)
     const [showAllQuickInputs, setShowAllQuickInputs] = useState(false)
-    const [copyMode, setCopyMode] = useState(false)
-    const longPressTimeoutRef = useRef<number | null>(null)
-    const touchGestureRef = useRef<{
-        startX: number
-        startY: number
-        didMove: boolean
-    } | null>(null)
-    const viewportScrollCleanupRef = useRef<(() => void) | null>(null)
-    const outputBufferRef = useRef<string[]>([])
-    const outputFlushRafRef = useRef<number | null>(null)
-    const outputFlushScheduledRef = useRef(false)
 
     const {
         state: terminalState,
         connect,
         write,
         resize,
-        close,
         disconnect,
         onOutput,
         onExit
@@ -149,62 +99,19 @@ export default function TerminalPage() {
         terminalId
     })
 
-    const flushBufferedOutput = useCallback(() => {
-        outputFlushScheduledRef.current = false
-        outputFlushRafRef.current = null
-
-        const terminal = terminalRef.current
-        if (!terminal) {
-            return
-        }
-
-        if (outputBufferRef.current.length === 0) {
-            return
-        }
-
-        const chunk = outputBufferRef.current.join('')
-        outputBufferRef.current.length = 0
-        terminal.write(chunk)
-    }, [])
-
     useEffect(() => {
         onOutput((data) => {
-            outputBufferRef.current.push(data)
-            if (outputFlushScheduledRef.current) {
-                return
-            }
-            outputFlushScheduledRef.current = true
-            outputFlushRafRef.current = window.requestAnimationFrame(flushBufferedOutput)
+            terminalRef.current?.write(data)
         })
-    }, [onOutput, flushBufferedOutput])
-
-    useEffect(() => {
-        return () => {
-            if (outputFlushRafRef.current !== null) {
-                window.cancelAnimationFrame(outputFlushRafRef.current)
-                outputFlushRafRef.current = null
-            }
-            outputFlushScheduledRef.current = false
-            outputBufferRef.current.length = 0
-        }
-    }, [])
+    }, [onOutput])
 
     useEffect(() => {
         onExit((code, signal) => {
             setExitInfo({ code, signal })
             terminalRef.current?.write(`\r\n[process exited${code !== null ? ` with code ${code}` : ''}]`)
+            connectOnceRef.current = false
         })
     }, [onExit])
-
-    const handleRetry = useCallback(() => {
-        const size = lastSizeRef.current
-        if (!size) {
-            return
-        }
-        setExitInfo(null)
-        connectOnceRef.current = true
-        connect(size.cols, size.rows)
-    }, [connect])
 
     const handleTerminalMount = useCallback((terminal: Terminal) => {
         terminalRef.current = terminal
@@ -212,41 +119,7 @@ export default function TerminalPage() {
         inputDisposableRef.current = terminal.onData((data) => {
             write(data)
         })
-        flushBufferedOutput()
-
-        viewportScrollCleanupRef.current?.()
-        const viewport = terminal.element?.querySelector('.xterm-viewport')
-        if (viewport) {
-            const onScroll = () => {
-                const gesture = touchGestureRef.current
-                if (gesture) {
-                    gesture.didMove = true
-                }
-                if (longPressTimeoutRef.current !== null) {
-                    window.clearTimeout(longPressTimeoutRef.current)
-                    longPressTimeoutRef.current = null
-                }
-            }
-            viewport.addEventListener('scroll', onScroll, { passive: true })
-            viewportScrollCleanupRef.current = () => {
-                viewport.removeEventListener('scroll', onScroll)
-            }
-        } else {
-            viewportScrollCleanupRef.current = null
-        }
-    }, [write, flushBufferedOutput])
-
-    useEffect(() => {
-        const terminal = terminalRef.current
-        if (!terminal) {
-            return
-        }
-        terminal.options.screenReaderMode = copyMode
-        if (copyMode) {
-            terminal.blur()
-            terminal.clearSelection()
-        }
-    }, [copyMode])
+    }, [write])
 
     const handleResize = useCallback((cols: number, rows: number) => {
         lastSizeRef.current = { cols, rows }
@@ -279,21 +152,16 @@ export default function TerminalPage() {
     useEffect(() => {
         connectOnceRef.current = false
         setExitInfo(null)
-        setCopyMode(false)
-        close()
         disconnect()
-    }, [sessionId, close, disconnect])
+    }, [sessionId, disconnect])
 
     useEffect(() => {
         return () => {
             inputDisposableRef.current?.dispose()
-            viewportScrollCleanupRef.current?.()
-            viewportScrollCleanupRef.current = null
             connectOnceRef.current = false
-            close()
             disconnect()
         }
-    }, [close, disconnect])
+    }, [disconnect])
 
     useEffect(() => {
         if (session?.active === false) {
@@ -304,6 +172,7 @@ export default function TerminalPage() {
 
     useEffect(() => {
         if (terminalState.status === 'error') {
+            connectOnceRef.current = false
             return
         }
         if (terminalState.status === 'connecting' || terminalState.status === 'connected') {
@@ -319,118 +188,6 @@ export default function TerminalPage() {
         write(sequence)
         terminalRef.current?.focus()
     }, [quickInputDisabled, write])
-
-    const clearLongPress = useCallback(() => {
-        if (longPressTimeoutRef.current !== null) {
-            window.clearTimeout(longPressTimeoutRef.current)
-            longPressTimeoutRef.current = null
-        }
-        touchGestureRef.current = null
-    }, [])
-
-    const handleTerminalTouchStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
-        if (copyMode) {
-            return
-        }
-        if (event.touches.length !== 1) {
-            return
-        }
-        const touch = event.touches[0]
-        if (!touch) {
-            return
-        }
-
-        touchGestureRef.current = {
-            startX: touch.clientX,
-            startY: touch.clientY,
-            didMove: false
-        }
-        if (longPressTimeoutRef.current !== null) {
-            window.clearTimeout(longPressTimeoutRef.current)
-        }
-
-        longPressTimeoutRef.current = window.setTimeout(() => {
-            longPressTimeoutRef.current = null
-            setCopyMode(true)
-        }, 550)
-    }, [copyMode])
-
-    const handleTerminalTouchEnd = useCallback(() => {
-        const gesture = touchGestureRef.current
-        const shouldFocus =
-            !copyMode &&
-            !!gesture &&
-            !gesture.didMove &&
-            longPressTimeoutRef.current !== null
-
-        clearLongPress()
-
-        if (shouldFocus) {
-            terminalRef.current?.focus()
-        }
-    }, [clearLongPress, copyMode])
-
-    const handleCopy = useCallback(async () => {
-        const terminal = terminalRef.current
-        if (!terminal) return
-
-        const selection = window.getSelection()
-        const domText = selection?.toString() ?? ''
-        const selectionInTerminal =
-            !!selection &&
-            !!terminal.element &&
-            ((selection.anchorNode && terminal.element.contains(selection.anchorNode)) ||
-                (selection.focusNode && terminal.element.contains(selection.focusNode)))
-
-        let text = selectionInTerminal ? domText : terminal.getSelection()
-        if (!text) {
-            terminal.selectAll()
-            text = terminal.getSelection()
-        }
-        if (!text) return
-
-        await writeClipboardText(text)
-        setCopyMode(false)
-    }, [])
-
-    const handlePaste = useCallback(async () => {
-        if (quickInputDisabled) return
-        const text = await readClipboardText()
-        if (!text) return
-
-        write(text)
-        terminalRef.current?.focus()
-        setCopyMode(false)
-    }, [quickInputDisabled, write])
-
-    const handleSelectAll = useCallback(() => {
-        const terminal = terminalRef.current
-        const selection = window.getSelection()
-        const accessibilityTree = terminal?.element?.querySelector('.xterm-accessibility-tree')
-
-        if (selection && accessibilityTree) {
-            selection.removeAllRanges()
-            const range = document.createRange()
-            range.selectNodeContents(accessibilityTree)
-            selection.addRange(range)
-            return
-        }
-
-        terminal?.selectAll()
-    }, [])
-
-    const handleClearSelection = useCallback(() => {
-        try {
-            window.getSelection()?.removeAllRanges()
-        } catch {
-            // ignore
-        }
-        terminalRef.current?.clearSelection()
-    }, [])
-
-    const handleCloseCopyMode = useCallback(() => {
-        setCopyMode(false)
-    }, [])
 
     if (!session) {
         return (
@@ -486,17 +243,6 @@ export default function TerminalPage() {
                     <div className="rounded-md border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-3 text-xs text-[var(--app-badge-error-text)]">
                         {errorMessage}
                     </div>
-                    {session.active ? (
-                        <div className="mt-2 flex justify-end">
-                            <button
-                                type="button"
-                                onClick={handleRetry}
-                                className="rounded-md bg-[var(--app-link)] px-3 py-1.5 text-xs font-semibold text-white"
-                            >
-                                Retry
-                            </button>
-                        </div>
-                    ) : null}
                 </div>
             ) : null}
 
@@ -509,73 +255,12 @@ export default function TerminalPage() {
             ) : null}
 
             <div className="flex-1 overflow-hidden bg-[var(--app-bg)]">
-                <div
-                    className={`mx-auto h-full w-full max-w-content p-3 relative ${copyMode ? 'terminal-copy-mode' : ''}`}
-                    onContextMenu={(event) => {
-                        // Keep desktop right-click behavior; avoid iOS long-press callout.
-                        if (!copyMode && navigator.maxTouchPoints > 0) {
-                            event.preventDefault()
-                        }
-                    }}
-                >
-                    <div
+                <div className="mx-auto h-full w-full max-w-content p-3">
+                    <TerminalView
+                        onMount={handleTerminalMount}
+                        onResize={handleResize}
                         className="h-full w-full"
-                        onTouchStartCapture={handleTerminalTouchStart}
-                        onTouchEndCapture={handleTerminalTouchEnd}
-                        onTouchCancelCapture={handleTerminalTouchEnd}
-                    >
-                        <TerminalView
-                            onMount={handleTerminalMount}
-                            onResize={handleResize}
-                            className="h-full w-full"
-                        />
-                    </div>
-
-                    {copyMode ? (
-                        <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
-                            <div className="pointer-events-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg">
-                                <div className="flex items-center gap-1 p-1">
-                                    <button
-                                        type="button"
-                                        onClick={handleCloseCopyMode}
-                                        className="rounded px-3 py-1.5 text-sm font-medium text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
-                                    >
-                                        Close
-                                    </button>
-                                    <div className="h-6 w-px bg-[var(--app-border)]" aria-hidden="true" />
-                                    <button
-                                        type="button"
-                                        onClick={handleCopy}
-                                        className="rounded px-3 py-1.5 text-sm font-medium text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
-                                    >
-                                        Copy
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={handlePaste}
-                                        disabled={quickInputDisabled}
-                                        className="rounded px-3 py-1.5 text-sm font-medium text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                        Paste
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={handleSelectAll}
-                                        className="rounded px-3 py-1.5 text-sm font-medium text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
-                                    >
-                                        Select all
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={handleClearSelection}
-                                        className="rounded px-3 py-1.5 text-sm font-medium text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
-                                    >
-                                        Clear
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                    ) : null}
+                    />
                 </div>
             </div>
 
