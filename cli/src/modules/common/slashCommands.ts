@@ -47,9 +47,9 @@ const BUILTIN_COMMANDS: Record<string, SlashCommand[]> = {
 
 /**
  * Parse frontmatter from a markdown file content.
- * Returns the description (from frontmatter) and the body content.
+ * Returns the name/description (from frontmatter) and the body content.
  */
-function parseFrontmatter(fileContent: string): { description?: string; content: string } {
+function parseFrontmatter(fileContent: string): { name?: string; description?: string; content: string } {
     // Match frontmatter: starts with ---, ends with ---
     const match = fileContent.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/);
     if (match) {
@@ -57,8 +57,9 @@ function parseFrontmatter(fileContent: string): { description?: string; content:
         const body = match[2].trim();
         try {
             const parsed = parseYaml(yamlContent) as Record<string, unknown> | null;
+            const name = typeof parsed?.name === 'string' ? parsed.name : undefined;
             const description = typeof parsed?.description === 'string' ? parsed.description : undefined;
-            return { description, content: body };
+            return { name, description, content: body };
         } catch {
             // Invalid YAML - the --- block is not valid frontmatter, return entire file
             return { content: fileContent.trim() };
@@ -66,6 +67,18 @@ function parseFrontmatter(fileContent: string): { description?: string; content:
     }
     // No frontmatter, entire file is content
     return { content: fileContent.trim() };
+}
+
+function sanitizeClaudeCommandName(rawName: string): string | null {
+    const trimmed = rawName.trim().replace(/^\/+/, '');
+    if (!trimmed) {
+        return null;
+    }
+    // Claude command namespaces come from directory structure; the frontmatter `name` should be a leaf segment.
+    if (trimmed.includes(':') || trimmed.includes('/') || trimmed.includes('\\')) {
+        return null;
+    }
+    return trimmed;
 }
 
 /**
@@ -152,16 +165,16 @@ async function scanUserCommands(agent: string): Promise<SlashCommand[]> {
         // Read all files in parallel
         const commands = await Promise.all(
             commandFiles.map(async (filePath): Promise<SlashCommand | null> => {
-                const relPath = relative(dir, filePath);
+                const relPath = relative(dir, filePath).replace(/\\/g, '/');
                 const withoutExt = relPath.endsWith('.md') ? relPath.slice(0, -3) : relPath;
-                const normalized = withoutExt.replace(/\\/g, '/');
-                const name = agent === 'claude'
-                    ? normalized.split('/').filter(Boolean).join(':')
-                    : normalized;
-                if (!name) return null;
+                const segments = withoutExt.split('/').filter(Boolean);
+                if (segments.length === 0) {
+                    return null;
+                }
 
+                let claudeNameOverride: string | null = null;
                 const command: SlashCommand = {
-                    name,
+                    name: agent === 'claude' ? segments.join(':') : withoutExt,
                     description: 'Custom command',
                     source: 'user',
                 };
@@ -176,9 +189,21 @@ async function scanUserCommands(agent: string): Promise<SlashCommand[]> {
                         if (shouldReadContent) {
                             command.content = parsed.content;
                         }
+                        if (agent === 'claude' && parsed.name) {
+                            claudeNameOverride = sanitizeClaudeCommandName(parsed.name);
+                        }
                     } catch {
                         // Failed to read file, keep default description
                     }
+                }
+
+                if (agent === 'claude') {
+                    const namespace = segments.slice(0, -1);
+                    const leaf = claudeNameOverride ?? segments[segments.length - 1] ?? '';
+                    if (!leaf) {
+                        return null;
+                    }
+                    command.name = [...namespace, leaf].join(':');
                 }
 
                 return command;

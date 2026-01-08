@@ -40,6 +40,9 @@ export function TerminalView(props: {
             cursorBlink: true,
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
             fontSize: 13,
+            scrollback: 10_000,
+            scrollSensitivity: 1.2,
+            smoothScrollDuration: 0,
             theme: {
                 background,
                 foreground,

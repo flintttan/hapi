@@ -32,6 +32,10 @@ describe('listSlashCommands', () => {
             `---\ndescription: Workflow plan\n---\nBody\n`
         );
         await writeFile(
+            join(commandsDir, 'workflow', 'do-it.md'),
+            `---\nname: execute\ndescription: Workflow execute\n---\nBody\n`
+        );
+        await writeFile(
             join(commandsDir, 'lite-plan.md'),
             `---\ndescription: Lite plan\n---\nBody\n`
         );
@@ -45,6 +49,7 @@ describe('listSlashCommands', () => {
 
         expect(userCommands).toEqual(expect.arrayContaining([
             expect.objectContaining({ name: 'workflow:plan', description: 'Workflow plan', source: 'user' }),
+            expect.objectContaining({ name: 'workflow:execute', description: 'Workflow execute', source: 'user' }),
             expect.objectContaining({ name: 'lite-plan', description: 'Lite plan', source: 'user' }),
             expect.objectContaining({ name: 'no-desc', description: 'Custom command', source: 'user' }),
         ]));
@@ -71,4 +76,3 @@ describe('listSlashCommands', () => {
         expect(user?.content).toBe('Hello world\n\nMore');
     });
 });
-

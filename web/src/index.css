@@ -107,6 +107,17 @@ body {
     height: 100%;
 }
 
+/* xterm.js: enable touch scrolling inside the terminal viewport on mobile */
+.xterm {
+    -webkit-touch-callout: none;
+}
+
+.xterm .xterm-viewport {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+}
+
 @media (hover: hover) and (pointer: fine) {
     .session-list-item:hover,
     .session-list-new-button:hover {

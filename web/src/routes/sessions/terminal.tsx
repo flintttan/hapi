@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type TouchEvent } from 'react'
 import { useParams } from '@tanstack/react-router'
 import type { Terminal } from '@xterm/xterm'
 import { useAppContext } from '@/lib/app-context'
@@ -66,6 +66,44 @@ const QUICK_INPUTS_SECONDARY: QuickInput[] = [
     { label: 'Ctrl+D', sequence: '\u0004', description: 'EOF' },
 ]
 
+function fallbackCopyToClipboard(text: string): boolean {
+    try {
+        const textarea = document.createElement('textarea')
+        textarea.value = text
+        textarea.setAttribute('readonly', 'true')
+        textarea.style.position = 'fixed'
+        textarea.style.top = '0'
+        textarea.style.left = '-9999px'
+        textarea.style.opacity = '0'
+        document.body.appendChild(textarea)
+        textarea.focus()
+        textarea.select()
+        const ok = document.execCommand('copy')
+        textarea.remove()
+        return ok
+    } catch {
+        return false
+    }
+}
+
+async function writeClipboardText(text: string): Promise<boolean> {
+    try {
+        await navigator.clipboard.writeText(text)
+        return true
+    } catch {
+        return fallbackCopyToClipboard(text)
+    }
+}
+
+async function readClipboardText(): Promise<string | null> {
+    try {
+        return await navigator.clipboard.readText()
+    } catch {
+        const manual = window.prompt('Paste text')
+        return manual === null ? null : manual
+    }
+}
+
 export default function TerminalPage() {
     const { sessionId } = useParams({ from: '/sessions/$sessionId/terminal' })
     const { api, token } = useAppContext()
@@ -84,6 +122,9 @@ export default function TerminalPage() {
     const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
     const [exitInfo, setExitInfo] = useState<{ code: number | null; signal: string | null } | null>(null)
     const [showAllQuickInputs, setShowAllQuickInputs] = useState(false)
+    const [showTouchActions, setShowTouchActions] = useState(false)
+    const longPressTimeoutRef = useRef<number | null>(null)
+    const touchStartRef = useRef<{ x: number; y: number } | null>(null)
 
     const {
         state: terminalState,
@@ -200,6 +241,80 @@ export default function TerminalPage() {
         terminalRef.current?.focus()
     }, [quickInputDisabled, write])
 
+    const clearLongPress = useCallback(() => {
+        if (longPressTimeoutRef.current !== null) {
+            window.clearTimeout(longPressTimeoutRef.current)
+            longPressTimeoutRef.current = null
+        }
+        touchStartRef.current = null
+    }, [])
+
+    const handleTerminalTouchStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
+        if (showTouchActions) return
+        const touch = event.touches[0]
+        if (!touch) return
+
+        touchStartRef.current = { x: touch.clientX, y: touch.clientY }
+        if (longPressTimeoutRef.current !== null) {
+            window.clearTimeout(longPressTimeoutRef.current)
+        }
+
+        longPressTimeoutRef.current = window.setTimeout(() => {
+            longPressTimeoutRef.current = null
+            setShowTouchActions(true)
+            terminalRef.current?.focus()
+        }, 550)
+    }, [showTouchActions])
+
+    const handleTerminalTouchMove = useCallback((event: TouchEvent<HTMLDivElement>) => {
+        const start = touchStartRef.current
+        const touch = event.touches[0]
+        if (!start || !touch) return
+
+        const dx = touch.clientX - start.x
+        const dy = touch.clientY - start.y
+        if (Math.abs(dx) > 12 || Math.abs(dy) > 12) {
+            clearLongPress()
+        }
+    }, [clearLongPress])
+
+    const handleTerminalTouchEnd = useCallback(() => {
+        clearLongPress()
+    }, [clearLongPress])
+
+    const handleCopy = useCallback(async () => {
+        const terminal = terminalRef.current
+        if (!terminal) return
+
+        let text = terminal.getSelection()
+        if (!text) {
+            terminal.selectAll()
+            text = terminal.getSelection()
+        }
+        if (!text) return
+
+        await writeClipboardText(text)
+        setShowTouchActions(false)
+    }, [])
+
+    const handlePaste = useCallback(async () => {
+        if (quickInputDisabled) return
+        const text = await readClipboardText()
+        if (!text) return
+
+        write(text)
+        terminalRef.current?.focus()
+        setShowTouchActions(false)
+    }, [quickInputDisabled, write])
+
+    const handleSelectAll = useCallback(() => {
+        terminalRef.current?.selectAll()
+    }, [])
+
+    const handleClearSelection = useCallback(() => {
+        terminalRef.current?.clearSelection()
+    }, [])
+
     if (!session) {
         return (
             <div className="flex h-full items-center justify-center">
@@ -271,12 +386,72 @@ export default function TerminalPage() {
             ) : null}
 
             <div className="flex-1 overflow-hidden bg-[var(--app-bg)]">
-                <div className="mx-auto h-full w-full max-w-content p-3">
-                    <TerminalView
-                        onMount={handleTerminalMount}
-                        onResize={handleResize}
+                <div
+                    className="mx-auto h-full w-full max-w-content p-3 relative"
+                    onContextMenu={(event) => {
+                        // Keep desktop right-click behavior; avoid iOS long-press callout.
+                        if (navigator.maxTouchPoints > 0) {
+                            event.preventDefault()
+                        }
+                    }}
+                >
+                    <div
                         className="h-full w-full"
-                    />
+                        onTouchStart={handleTerminalTouchStart}
+                        onTouchMove={handleTerminalTouchMove}
+                        onTouchEnd={handleTerminalTouchEnd}
+                        onTouchCancel={handleTerminalTouchEnd}
+                    >
+                        <TerminalView
+                            onMount={handleTerminalMount}
+                            onResize={handleResize}
+                            className="h-full w-full"
+                        />
+                    </div>
+
+                    {showTouchActions ? (
+                        <div className="absolute inset-0 z-10">
+                            <button
+                                type="button"
+                                className="absolute inset-0 h-full w-full bg-black/20"
+                                onClick={() => setShowTouchActions(false)}
+                                aria-label="Close"
+                            />
+                            <div className="absolute left-1/2 top-4 -translate-x-1/2 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg">
+                                <div className="flex items-center gap-1 p-1">
+                                    <button
+                                        type="button"
+                                        onClick={handleCopy}
+                                        className="rounded px-3 py-1.5 text-sm font-medium text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
+                                    >
+                                        Copy
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handlePaste}
+                                        disabled={quickInputDisabled}
+                                        className="rounded px-3 py-1.5 text-sm font-medium text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                        Paste
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleSelectAll}
+                                        className="rounded px-3 py-1.5 text-sm font-medium text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
+                                    >
+                                        Select all
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={handleClearSelection}
+                                        className="rounded px-3 py-1.5 text-sm font-medium text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
+                                    >
+                                        Clear
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    ) : null}
                 </div>
             </div>
 
