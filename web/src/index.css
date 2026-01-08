@@ -118,6 +118,21 @@ body {
     touch-action: pan-y;
 }
 
+.terminal-copy-mode .xterm .xterm-accessibility:not(.debug) {
+    pointer-events: auto;
+    color: var(--app-fg);
+    background-color: var(--app-bg);
+}
+
+.terminal-copy-mode .xterm .xterm-accessibility-tree:not(.debug) *::selection {
+    color: var(--app-fg);
+    background: var(--app-subtle-bg);
+}
+
+.terminal-copy-mode .xterm-screen {
+    opacity: 0;
+}
+
 @media (hover: hover) and (pointer: fine) {
     .session-list-item:hover,
     .session-list-new-button:hover {

@@ -5,7 +5,7 @@ import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useSession } from '@/hooks/queries/useSession'
 import { useTerminalSocket } from '@/hooks/useTerminalSocket'
-import { useVisualViewportHeight } from '@/hooks/useVisualViewportHeight'
+import { useVisualViewportMetrics } from '@/hooks/useVisualViewportHeight'
 import { TerminalView } from '@/components/Terminal/TerminalView'
 import { LoadingState } from '@/components/LoadingState'
 function BackIcon() {
@@ -109,7 +109,7 @@ export default function TerminalPage() {
     const { api, token } = useAppContext()
     const goBack = useAppGoBack()
     const { session } = useSession(api, sessionId)
-    const visualViewportHeight = useVisualViewportHeight()
+    const visualViewportMetrics = useVisualViewportMetrics()
     const terminalId = useMemo(() => {
         if (typeof crypto?.randomUUID === 'function') {
             return crypto.randomUUID()
@@ -122,9 +122,15 @@ export default function TerminalPage() {
     const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
     const [exitInfo, setExitInfo] = useState<{ code: number | null; signal: string | null } | null>(null)
     const [showAllQuickInputs, setShowAllQuickInputs] = useState(false)
-    const [showTouchActions, setShowTouchActions] = useState(false)
+    const [copyMode, setCopyMode] = useState(false)
     const longPressTimeoutRef = useRef<number | null>(null)
-    const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+    const touchGestureRef = useRef<{
+        startX: number
+        startY: number
+        lastY: number
+        accumulatedY: number
+        isScrolling: boolean
+    } | null>(null)
 
     const {
         state: terminalState,
@@ -203,6 +209,7 @@ export default function TerminalPage() {
     useEffect(() => {
         connectOnceRef.current = false
         setExitInfo(null)
+        setCopyMode(false)
         close()
         disconnect()
     }, [sessionId, close, disconnect])
@@ -246,37 +253,90 @@ export default function TerminalPage() {
             window.clearTimeout(longPressTimeoutRef.current)
             longPressTimeoutRef.current = null
         }
-        touchStartRef.current = null
+        touchGestureRef.current = null
     }, [])
 
     const handleTerminalTouchStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
-        if (showTouchActions) return
+        if (copyMode) {
+            return
+        }
+        if (event.touches.length !== 1) {
+            return
+        }
         const touch = event.touches[0]
-        if (!touch) return
+        if (!touch) {
+            return
+        }
 
-        touchStartRef.current = { x: touch.clientX, y: touch.clientY }
+        touchGestureRef.current = {
+            startX: touch.clientX,
+            startY: touch.clientY,
+            lastY: touch.clientY,
+            accumulatedY: 0,
+            isScrolling: false
+        }
         if (longPressTimeoutRef.current !== null) {
             window.clearTimeout(longPressTimeoutRef.current)
         }
 
         longPressTimeoutRef.current = window.setTimeout(() => {
             longPressTimeoutRef.current = null
-            setShowTouchActions(true)
-            terminalRef.current?.focus()
+            setCopyMode(true)
         }, 550)
-    }, [showTouchActions])
+    }, [copyMode])
 
     const handleTerminalTouchMove = useCallback((event: TouchEvent<HTMLDivElement>) => {
-        const start = touchStartRef.current
-        const touch = event.touches[0]
-        if (!start || !touch) return
-
-        const dx = touch.clientX - start.x
-        const dy = touch.clientY - start.y
-        if (Math.abs(dx) > 12 || Math.abs(dy) > 12) {
-            clearLongPress()
+        if (copyMode) {
+            return
         }
-    }, [clearLongPress])
+        const gesture = touchGestureRef.current
+        const touch = event.touches[0]
+        if (!gesture || !touch) {
+            return
+        }
+
+        const totalDx = touch.clientX - gesture.startX
+        const totalDy = touch.clientY - gesture.startY
+        const movedEnoughToCancelLongPress = Math.abs(totalDx) > 12 || Math.abs(totalDy) > 12
+
+        if (movedEnoughToCancelLongPress) {
+            if (longPressTimeoutRef.current !== null) {
+                window.clearTimeout(longPressTimeoutRef.current)
+                longPressTimeoutRef.current = null
+            }
+        }
+
+        if (!gesture.isScrolling) {
+            if (Math.abs(totalDy) <= 12) {
+                return
+            }
+            if (Math.abs(totalDy) <= Math.abs(totalDx)) {
+                return
+            }
+            gesture.isScrolling = true
+        }
+
+        const terminal = terminalRef.current
+        if (!terminal) {
+            return
+        }
+
+        const dy = touch.clientY - gesture.lastY
+        gesture.lastY = touch.clientY
+        gesture.accumulatedY += dy
+
+        const elementHeight = terminal.element?.getBoundingClientRect().height ?? 0
+        const estimatedLineHeight = terminal.rows > 0 && elementHeight > 0 ? elementHeight / terminal.rows : 0
+        const lineHeight = estimatedLineHeight > 4 ? estimatedLineHeight : 16
+
+        const lines = Math.trunc(gesture.accumulatedY / lineHeight)
+        if (lines !== 0) {
+            terminal.scrollLines(-lines)
+            gesture.accumulatedY -= lines * lineHeight
+        }
+
+        event.preventDefault()
+    }, [copyMode])
 
     const handleTerminalTouchEnd = useCallback(() => {
         clearLongPress()
@@ -286,7 +346,15 @@ export default function TerminalPage() {
         const terminal = terminalRef.current
         if (!terminal) return
 
-        let text = terminal.getSelection()
+        const selection = window.getSelection()
+        const domText = selection?.toString() ?? ''
+        const selectionInTerminal =
+            !!selection &&
+            !!terminal.element &&
+            ((selection.anchorNode && terminal.element.contains(selection.anchorNode)) ||
+                (selection.focusNode && terminal.element.contains(selection.focusNode)))
+
+        let text = selectionInTerminal ? domText : terminal.getSelection()
         if (!text) {
             terminal.selectAll()
             text = terminal.getSelection()
@@ -294,7 +362,7 @@ export default function TerminalPage() {
         if (!text) return
 
         await writeClipboardText(text)
-        setShowTouchActions(false)
+        setCopyMode(false)
     }, [])
 
     const handlePaste = useCallback(async () => {
@@ -304,15 +372,36 @@ export default function TerminalPage() {
 
         write(text)
         terminalRef.current?.focus()
-        setShowTouchActions(false)
+        setCopyMode(false)
     }, [quickInputDisabled, write])
 
     const handleSelectAll = useCallback(() => {
-        terminalRef.current?.selectAll()
+        const terminal = terminalRef.current
+        const selection = window.getSelection()
+        const accessibilityTree = terminal?.element?.querySelector('.xterm-accessibility-tree')
+
+        if (selection && accessibilityTree) {
+            selection.removeAllRanges()
+            const range = document.createRange()
+            range.selectNodeContents(accessibilityTree)
+            selection.addRange(range)
+            return
+        }
+
+        terminal?.selectAll()
     }, [])
 
     const handleClearSelection = useCallback(() => {
+        try {
+            window.getSelection()?.removeAllRanges()
+        } catch {
+            // ignore
+        }
         terminalRef.current?.clearSelection()
+    }, [])
+
+    const handleCloseCopyMode = useCallback(() => {
+        setCopyMode(false)
     }, [])
 
     if (!session) {
@@ -326,12 +415,18 @@ export default function TerminalPage() {
     const subtitle = session.metadata?.path ?? sessionId
     const status = terminalState.status
     const errorMessage = terminalState.status === 'error' ? terminalState.error : null
+    const viewportHeight = visualViewportMetrics?.height
+    const viewportOffsetTop = visualViewportMetrics?.offsetTop ?? 0
 
     return (
         <div
             className="flex h-full flex-col"
             // Prefer VisualViewport height so the bottom quick keys stay above mobile keyboards.
-            style={{ height: visualViewportHeight ? `${visualViewportHeight}px` : 'var(--tg-viewport-height, 100dvh)' }}
+            // Also compensate `offsetTop` (iOS/WebViews can pan the visual viewport when the keyboard is open).
+            style={{
+                height: viewportHeight ? `${viewportHeight}px` : 'var(--tg-viewport-height, 100dvh)',
+                transform: viewportOffsetTop ? `translateY(${viewportOffsetTop}px)` : undefined,
+            }}
         >
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
                 <div className="mx-auto w-full max-w-content flex items-center gap-2 p-3 border-b border-[var(--app-border)]">
@@ -387,20 +482,20 @@ export default function TerminalPage() {
 
             <div className="flex-1 overflow-hidden bg-[var(--app-bg)]">
                 <div
-                    className="mx-auto h-full w-full max-w-content p-3 relative"
+                    className={`mx-auto h-full w-full max-w-content p-3 relative ${copyMode ? 'terminal-copy-mode' : ''}`}
                     onContextMenu={(event) => {
                         // Keep desktop right-click behavior; avoid iOS long-press callout.
-                        if (navigator.maxTouchPoints > 0) {
+                        if (!copyMode && navigator.maxTouchPoints > 0) {
                             event.preventDefault()
                         }
                     }}
                 >
                     <div
                         className="h-full w-full"
-                        onTouchStart={handleTerminalTouchStart}
-                        onTouchMove={handleTerminalTouchMove}
-                        onTouchEnd={handleTerminalTouchEnd}
-                        onTouchCancel={handleTerminalTouchEnd}
+                        onTouchStartCapture={handleTerminalTouchStart}
+                        onTouchMoveCapture={handleTerminalTouchMove}
+                        onTouchEndCapture={handleTerminalTouchEnd}
+                        onTouchCancelCapture={handleTerminalTouchEnd}
                     >
                         <TerminalView
                             onMount={handleTerminalMount}
@@ -409,16 +504,18 @@ export default function TerminalPage() {
                         />
                     </div>
 
-                    {showTouchActions ? (
-                        <div className="absolute inset-0 z-10">
-                            <button
-                                type="button"
-                                className="absolute inset-0 h-full w-full bg-black/20"
-                                onClick={() => setShowTouchActions(false)}
-                                aria-label="Close"
-                            />
-                            <div className="absolute left-1/2 top-4 -translate-x-1/2 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg">
+                    {copyMode ? (
+                        <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex justify-center">
+                            <div className="pointer-events-auto rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg">
                                 <div className="flex items-center gap-1 p-1">
+                                    <button
+                                        type="button"
+                                        onClick={handleCloseCopyMode}
+                                        className="rounded px-3 py-1.5 text-sm font-medium text-[var(--app-hint)] hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
+                                    >
+                                        Close
+                                    </button>
+                                    <div className="h-6 w-px bg-[var(--app-border)]" aria-hidden="true" />
                                     <button
                                         type="button"
                                         onClick={handleCopy}

@@ -34,3 +34,49 @@ export function useVisualViewportHeight(): number | null {
     return height
 }
 
+export type VisualViewportMetrics = {
+    height: number
+    offsetTop: number
+}
+
+/**
+ * Returns VisualViewport metrics (height + offsetTop) when available.
+ * `offsetTop` is important on iOS/WebViews where the visual viewport can be panned
+ * (e.g. when an input is focused and the user drags), otherwise bottom UI may "float"
+ * and show a blank gap above the keyboard.
+ */
+export function useVisualViewportMetrics(): VisualViewportMetrics | null {
+    const [metrics, setMetrics] = useState<VisualViewportMetrics | null>(null)
+
+    useEffect(() => {
+        const viewport = window.visualViewport
+        if (!viewport) {
+            setMetrics(null)
+            return
+        }
+
+        const update = () => {
+            const nextHeight = Math.max(0, Math.round(viewport.height))
+            const nextOffsetTop = Math.max(0, Math.round(viewport.offsetTop))
+            setMetrics((prev) => {
+                if (prev && prev.height === nextHeight && prev.offsetTop === nextOffsetTop) {
+                    return prev
+                }
+                return { height: nextHeight, offsetTop: nextOffsetTop }
+            })
+        }
+
+        update()
+        viewport.addEventListener('resize', update)
+        viewport.addEventListener('scroll', update)
+        window.addEventListener('resize', update)
+
+        return () => {
+            viewport.removeEventListener('resize', update)
+            viewport.removeEventListener('scroll', update)
+            window.removeEventListener('resize', update)
+        }
+    }, [])
+
+    return metrics
+}

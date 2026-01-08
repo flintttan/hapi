@@ -43,6 +43,7 @@ export function TerminalView(props: {
             scrollback: 10_000,
             scrollSensitivity: 1.2,
             smoothScrollDuration: 0,
+            screenReaderMode: true,
             theme: {
                 background,
                 foreground,
