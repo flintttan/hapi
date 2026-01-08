@@ -107,6 +107,23 @@ body {
     height: 100%;
 }
 
+/* Terminal: improve touch scrolling and avoid scroll chaining on mobile */
+.terminal-xterm {
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+}
+
+.terminal-xterm .xterm,
+.terminal-xterm .xterm * {
+    user-select: text;
+    -webkit-user-select: text;
+}
+
+.terminal-xterm .xterm-viewport {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+}
+
 @media (hover: hover) and (pointer: fine) {
     .session-list-item:hover,
     .session-list-new-button:hover {

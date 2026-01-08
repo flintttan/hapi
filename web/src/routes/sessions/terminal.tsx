@@ -85,6 +85,14 @@ export default function TerminalPage() {
     const [exitInfo, setExitInfo] = useState<{ code: number | null; signal: string | null } | null>(null)
     const [showAllQuickInputs, setShowAllQuickInputs] = useState(false)
 
+    const handleQuickKeyPointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
+        event.preventDefault()
+    }, [])
+
+    const handleQuickKeyMouseDown = useCallback((event: React.MouseEvent<HTMLButtonElement>) => {
+        event.preventDefault()
+    }, [])
+
     const {
         state: terminalState,
         connect,
@@ -189,6 +197,11 @@ export default function TerminalPage() {
         terminalRef.current?.focus()
     }, [quickInputDisabled, write])
 
+    const handleToggleQuickInputs = useCallback(() => {
+        setShowAllQuickInputs((prev) => !prev)
+        requestAnimationFrame(() => terminalRef.current?.focus())
+    }, [])
+
     if (!session) {
         return (
             <div className="flex h-full items-center justify-center">
@@ -273,6 +286,8 @@ export default function TerminalPage() {
                                     <button
                                         key={input.label}
                                         type="button"
+                                        onPointerDown={handleQuickKeyPointerDown}
+                                        onMouseDown={handleQuickKeyMouseDown}
                                         onClick={() => handleQuickInput(input.sequence)}
                                         disabled={quickInputDisabled}
                                         className="flex items-center justify-center bg-[var(--app-secondary-bg)] px-2 py-1.5 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[var(--app-secondary-bg)]"
@@ -284,7 +299,9 @@ export default function TerminalPage() {
                                 ))}
                                 <button
                                     type="button"
-                                    onClick={() => setShowAllQuickInputs((prev) => !prev)}
+                                    onPointerDown={handleQuickKeyPointerDown}
+                                    onMouseDown={handleQuickKeyMouseDown}
+                                    onClick={handleToggleQuickInputs}
                                     className="flex items-center justify-center bg-[var(--app-secondary-bg)] px-2 py-1.5 text-sm font-medium text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] focus-visible:ring-inset"
                                     aria-label={showAllQuickInputs ? 'Hide more keys' : 'Show more keys'}
                                     title={showAllQuickInputs ? 'Hide more keys' : 'Show more keys'}
@@ -301,6 +318,8 @@ export default function TerminalPage() {
                                         <button
                                             key={input.label}
                                             type="button"
+                                            onPointerDown={handleQuickKeyPointerDown}
+                                            onMouseDown={handleQuickKeyMouseDown}
                                             onClick={() => handleQuickInput(input.sequence)}
                                             disabled={quickInputDisabled}
                                             className="flex items-center justify-center bg-[var(--app-secondary-bg)] px-2 py-1.5 text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-button)] focus-visible:ring-inset disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-[var(--app-secondary-bg)]"
