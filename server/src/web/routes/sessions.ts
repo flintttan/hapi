@@ -382,7 +382,9 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             const merged = mergeCommands(result.commands as unknown as Array<Record<string, unknown>> | undefined, cachedCommands)
 
             if (merged.length > 0) {
-                return c.json({ success: true, commands: merged })
+                // Keep custom command templates private; clients should only need name/description/source.
+                const commands = merged.map(({ content: _content, ...rest }) => rest)
+                return c.json({ success: true, commands })
             }
 
             if (!result.success && cachedCommands && cachedCommands.length > 0) {

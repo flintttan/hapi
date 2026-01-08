@@ -118,10 +118,30 @@ body {
     touch-action: pan-y;
 }
 
+@media (hover: none) and (pointer: coarse) {
+    /* Prefer native (momentum) scrolling on mobile by letting the scrollable viewport receive touches. */
+    .xterm .xterm-viewport {
+        z-index: 5;
+    }
+
+    .xterm .xterm-screen {
+        pointer-events: none;
+    }
+}
+
 .terminal-copy-mode .xterm .xterm-accessibility:not(.debug) {
     pointer-events: auto;
     color: var(--app-fg);
     background-color: var(--app-bg);
+}
+
+.terminal-copy-mode .xterm {
+    -webkit-touch-callout: default;
+}
+
+.terminal-copy-mode .xterm .xterm-accessibility-tree {
+    -webkit-user-select: text;
+    user-select: text;
 }
 
 .terminal-copy-mode .xterm .xterm-accessibility-tree:not(.debug) *::selection {
@@ -131,6 +151,7 @@ body {
 
 .terminal-copy-mode .xterm-screen {
     opacity: 0;
+    pointer-events: none;
 }
 
 @media (hover: hover) and (pointer: fine) {

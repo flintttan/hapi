@@ -127,10 +127,12 @@ export default function TerminalPage() {
     const touchGestureRef = useRef<{
         startX: number
         startY: number
-        lastY: number
-        accumulatedY: number
-        isScrolling: boolean
+        didMove: boolean
     } | null>(null)
+    const viewportScrollCleanupRef = useRef<(() => void) | null>(null)
+    const outputBufferRef = useRef<string[]>([])
+    const outputFlushRafRef = useRef<number | null>(null)
+    const outputFlushScheduledRef = useRef(false)
 
     const {
         state: terminalState,
@@ -147,11 +149,45 @@ export default function TerminalPage() {
         terminalId
     })
 
+    const flushBufferedOutput = useCallback(() => {
+        outputFlushScheduledRef.current = false
+        outputFlushRafRef.current = null
+
+        const terminal = terminalRef.current
+        if (!terminal) {
+            return
+        }
+
+        if (outputBufferRef.current.length === 0) {
+            return
+        }
+
+        const chunk = outputBufferRef.current.join('')
+        outputBufferRef.current.length = 0
+        terminal.write(chunk)
+    }, [])
+
     useEffect(() => {
         onOutput((data) => {
-            terminalRef.current?.write(data)
+            outputBufferRef.current.push(data)
+            if (outputFlushScheduledRef.current) {
+                return
+            }
+            outputFlushScheduledRef.current = true
+            outputFlushRafRef.current = window.requestAnimationFrame(flushBufferedOutput)
         })
-    }, [onOutput])
+    }, [onOutput, flushBufferedOutput])
+
+    useEffect(() => {
+        return () => {
+            if (outputFlushRafRef.current !== null) {
+                window.cancelAnimationFrame(outputFlushRafRef.current)
+                outputFlushRafRef.current = null
+            }
+            outputFlushScheduledRef.current = false
+            outputBufferRef.current.length = 0
+        }
+    }, [])
 
     useEffect(() => {
         onExit((code, signal) => {
@@ -176,7 +212,41 @@ export default function TerminalPage() {
         inputDisposableRef.current = terminal.onData((data) => {
             write(data)
         })
-    }, [write])
+        flushBufferedOutput()
+
+        viewportScrollCleanupRef.current?.()
+        const viewport = terminal.element?.querySelector('.xterm-viewport')
+        if (viewport) {
+            const onScroll = () => {
+                const gesture = touchGestureRef.current
+                if (gesture) {
+                    gesture.didMove = true
+                }
+                if (longPressTimeoutRef.current !== null) {
+                    window.clearTimeout(longPressTimeoutRef.current)
+                    longPressTimeoutRef.current = null
+                }
+            }
+            viewport.addEventListener('scroll', onScroll, { passive: true })
+            viewportScrollCleanupRef.current = () => {
+                viewport.removeEventListener('scroll', onScroll)
+            }
+        } else {
+            viewportScrollCleanupRef.current = null
+        }
+    }, [write, flushBufferedOutput])
+
+    useEffect(() => {
+        const terminal = terminalRef.current
+        if (!terminal) {
+            return
+        }
+        terminal.options.screenReaderMode = copyMode
+        if (copyMode) {
+            terminal.blur()
+            terminal.clearSelection()
+        }
+    }, [copyMode])
 
     const handleResize = useCallback((cols: number, rows: number) => {
         lastSizeRef.current = { cols, rows }
@@ -217,6 +287,8 @@ export default function TerminalPage() {
     useEffect(() => {
         return () => {
             inputDisposableRef.current?.dispose()
+            viewportScrollCleanupRef.current?.()
+            viewportScrollCleanupRef.current = null
             connectOnceRef.current = false
             close()
             disconnect()
@@ -271,9 +343,7 @@ export default function TerminalPage() {
         touchGestureRef.current = {
             startX: touch.clientX,
             startY: touch.clientY,
-            lastY: touch.clientY,
-            accumulatedY: 0,
-            isScrolling: false
+            didMove: false
         }
         if (longPressTimeoutRef.current !== null) {
             window.clearTimeout(longPressTimeoutRef.current)
@@ -285,62 +355,20 @@ export default function TerminalPage() {
         }, 550)
     }, [copyMode])
 
-    const handleTerminalTouchMove = useCallback((event: TouchEvent<HTMLDivElement>) => {
-        if (copyMode) {
-            return
-        }
-        const gesture = touchGestureRef.current
-        const touch = event.touches[0]
-        if (!gesture || !touch) {
-            return
-        }
-
-        const totalDx = touch.clientX - gesture.startX
-        const totalDy = touch.clientY - gesture.startY
-        const movedEnoughToCancelLongPress = Math.abs(totalDx) > 12 || Math.abs(totalDy) > 12
-
-        if (movedEnoughToCancelLongPress) {
-            if (longPressTimeoutRef.current !== null) {
-                window.clearTimeout(longPressTimeoutRef.current)
-                longPressTimeoutRef.current = null
-            }
-        }
-
-        if (!gesture.isScrolling) {
-            if (Math.abs(totalDy) <= 12) {
-                return
-            }
-            if (Math.abs(totalDy) <= Math.abs(totalDx)) {
-                return
-            }
-            gesture.isScrolling = true
-        }
-
-        const terminal = terminalRef.current
-        if (!terminal) {
-            return
-        }
-
-        const dy = touch.clientY - gesture.lastY
-        gesture.lastY = touch.clientY
-        gesture.accumulatedY += dy
-
-        const elementHeight = terminal.element?.getBoundingClientRect().height ?? 0
-        const estimatedLineHeight = terminal.rows > 0 && elementHeight > 0 ? elementHeight / terminal.rows : 0
-        const lineHeight = estimatedLineHeight > 4 ? estimatedLineHeight : 16
-
-        const lines = Math.trunc(gesture.accumulatedY / lineHeight)
-        if (lines !== 0) {
-            terminal.scrollLines(-lines)
-            gesture.accumulatedY -= lines * lineHeight
-        }
-
-        event.preventDefault()
-    }, [copyMode])
-
     const handleTerminalTouchEnd = useCallback(() => {
+        const gesture = touchGestureRef.current
+        const shouldFocus =
+            !copyMode &&
+            !!gesture &&
+            !gesture.didMove &&
+            longPressTimeoutRef.current !== null
+
         clearLongPress()
-    }, [clearLongPress])
+
+        if (shouldFocus) {
+            terminalRef.current?.focus()
+        }
+    }, [clearLongPress, copyMode])
 
     const handleCopy = useCallback(async () => {
         const terminal = terminalRef.current
@@ -493,7 +521,6 @@ export default function TerminalPage() {
                     <div
                         className="h-full w-full"
                         onTouchStartCapture={handleTerminalTouchStart}
-                        onTouchMoveCapture={handleTerminalTouchMove}
                         onTouchEndCapture={handleTerminalTouchEnd}
                         onTouchCancelCapture={handleTerminalTouchEnd}
                     >

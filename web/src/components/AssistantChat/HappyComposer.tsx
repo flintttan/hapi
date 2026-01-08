@@ -138,13 +138,10 @@ export function HappyComposer(props: {
         const suggestion = suggestions[index]
         if (!suggestion || !textareaRef.current) return
 
-        // For Codex user prompts with content, expand the content instead of command name
-        let textToInsert = suggestion.text
-        let addSpace = true
-        if (agentFlavor === 'codex' && suggestion.source === 'user' && suggestion.content) {
-            textToInsert = suggestion.content
-            addSpace = false
-        }
+        // Slash commands should insert only the command itself.
+        // Custom command Markdown content is treated as a hidden prompt template and must not be pasted into the input box.
+        const textToInsert = suggestion.text
+        const addSpace = true
 
         const result = applySuggestion(
             inputState.text,
