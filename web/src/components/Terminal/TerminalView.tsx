@@ -4,7 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { createFontProvider, type ITerminalFontProvider } from '@/lib/terminalFont'
-import { getTerminalCopyMode } from '@/lib/terminalFlags'
+import { getTerminalContextMenuMode, getTerminalCopyMode } from '@/lib/terminalFlags'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { CheckIcon, CopyIcon } from '@/components/icons'
 
@@ -47,52 +47,84 @@ export function TerminalView(props: {
             return
         }
 
-	        if (selectionTextRef.current) {
-	            selectionTextRef.current = ''
-	            setSelectionText('')
-	        }
+        if (selectionTextRef.current) {
+            selectionTextRef.current = ''
+            setSelectionText('')
+        }
 
-	        const prefersTouch = window.matchMedia?.('(pointer: coarse)')?.matches ?? false
-	        const { background, foreground, selectionBackground } = resolveThemeColors()
-	        const terminal = new Terminal({
-	            cursorBlink: true,
-	            fontFamily: fontProvider.getFontFamily(),
-	            fontSize: 13,
+        const prefersTouch = window.matchMedia?.('(pointer: coarse)')?.matches ?? false
+        const contextMenuMode = getTerminalContextMenuMode()
+
+        const { background, foreground, selectionBackground } = resolveThemeColors()
+        const terminal = new Terminal({
+            cursorBlink: true,
+            fontFamily: fontProvider.getFontFamily(),
+            fontSize: 13,
             theme: {
                 background,
                 foreground,
                 cursor: foreground,
-	                selectionBackground
-	            },
-	            convertEol: true,
-	            customGlyphs: true,
-	            rightClickSelectsWord: prefersTouch
-	        })
+                selectionBackground
+            },
+            convertEol: true,
+            customGlyphs: true
+        })
 
         const fitAddon = new FitAddon()
         const webLinksAddon = new WebLinksAddon()
-	        terminal.loadAddon(fitAddon)
-	        terminal.loadAddon(webLinksAddon)
-	        terminal.open(container)
+        terminal.loadAddon(fitAddon)
+        terminal.loadAddon(webLinksAddon)
+        terminal.open(container)
 
-	        let disposeTouchScroll: (() => void) | undefined
-	        if (prefersTouch && terminal.element) {
-	            const touchTarget = terminal.element
-	            const scrollThresholdPx = 8
-	            const decayPerMs = 0.004
-            const minVelocityLinesPerMs = 0.005
+        let disposeTouchFeatures: (() => void) | undefined
+        if (prefersTouch && terminal.element) {
+            const touchTarget = terminal.element
+            const scrollThresholdPx = 8
+            const decayPerMs = 0.004
+            const minVelocityPxPerMs = 0.08
 
             let startTouchX = 0
             let startTouchY = 0
             let lastTouchY = 0
             let lastTouchTime = 0
-	            let isTouchScrolling = false
-	            let remainderLines = 0
-	            let lastVelocityLinesPerMs = 0
-	            let inertiaAnimationFrame: number | null = null
-	            let pendingDeltaLines = 0
-	            let pendingScrollAnimationFrame: number | null = null
-	            let rowHeightPx = 0
+            let isTouchScrolling = false
+
+            let rowHeightPx = 0
+            let scrollOffsetPx = 0
+            let pendingOffsetPx = 0
+            let lastVelocityPxPerMs = 0
+            let inertiaAnimationFrame: number | null = null
+            let pendingScrollAnimationFrame: number | null = null
+            let translateTargets: HTMLElement[] | null = null
+
+            const resolveTranslateTargets = () => {
+                if (translateTargets) {
+                    return translateTargets
+                }
+                const targets: HTMLElement[] = []
+                const rows = touchTarget.querySelector<HTMLElement>('.xterm-rows')
+                if (rows) {
+                    targets.push(rows)
+                }
+                const selection = touchTarget.querySelector<HTMLElement>('.xterm-selection')
+                if (selection) {
+                    targets.push(selection)
+                }
+                translateTargets = targets
+                return targets
+            }
+
+            const setTranslatePx = (offsetPx: number) => {
+                const targets = resolveTranslateTargets()
+                const transform = offsetPx ? `translate3d(0, ${offsetPx}px, 0)` : ''
+                for (const target of targets) {
+                    if (transform) {
+                        target.style.transform = transform
+                    } else {
+                        target.style.removeProperty('transform')
+                    }
+                }
+            }
 
             const getRowHeightPx = () => {
                 const rowElement = touchTarget.querySelector<HTMLElement>('.xterm-rows > div')
@@ -124,41 +156,68 @@ export function TerminalView(props: {
                 }
             }
 
-	            const applyScrollDeltaLines = (deltaLines: number) => {
-	                remainderLines += deltaLines
-	                const lines = Math.trunc(remainderLines)
-	                if (lines !== 0) {
-	                    terminal.scrollLines(lines)
-	                    remainderLines -= lines
-	                }
-	            }
+            const cancelPendingScrollFlush = () => {
+                if (pendingScrollAnimationFrame !== null) {
+                    cancelAnimationFrame(pendingScrollAnimationFrame)
+                    pendingScrollAnimationFrame = null
+                }
+            }
 
-	            const flushPendingScroll = () => {
-	                if (pendingScrollAnimationFrame !== null) {
-	                    cancelAnimationFrame(pendingScrollAnimationFrame)
-	                    pendingScrollAnimationFrame = null
-	                }
-	                if (pendingDeltaLines !== 0) {
-	                    applyScrollDeltaLines(pendingDeltaLines)
-	                    pendingDeltaLines = 0
-	                }
-	            }
+            const flushScroll = (snapToNearestLine: boolean) => {
+                cancelPendingScrollFlush()
+                if (pendingOffsetPx !== 0) {
+                    scrollOffsetPx += pendingOffsetPx
+                    pendingOffsetPx = 0
+                }
 
-	            const startInertia = (initialVelocityLinesPerMs: number) => {
-	                cancelInertia()
-	                let velocityLinesPerMs = initialVelocityLinesPerMs
-	                let lastFrameTime = Date.now()
+                const height = rowHeightPx || getRowHeightPx()
+                rowHeightPx = height
+
+                if (height > 0) {
+                    const ratio = scrollOffsetPx / height
+                    const lineDelta = snapToNearestLine ? Math.round(ratio) : Math.trunc(ratio)
+                    const linesToScroll = -lineDelta
+                    if (linesToScroll !== 0) {
+                        terminal.scrollLines(linesToScroll)
+                    }
+                }
+
+                if (snapToNearestLine) {
+                    scrollOffsetPx = 0
+                } else if (height > 0) {
+                    scrollOffsetPx += -Math.trunc(scrollOffsetPx / height) * height
+                }
+
+                setTranslatePx(scrollOffsetPx)
+            }
+
+            const scheduleFlushScroll = () => {
+                if (pendingScrollAnimationFrame !== null) {
+                    return
+                }
+                pendingScrollAnimationFrame = requestAnimationFrame(() => {
+                    pendingScrollAnimationFrame = null
+                    flushScroll(false)
+                })
+            }
+
+            const startInertia = (initialVelocityPxPerMs: number) => {
+                cancelInertia()
+                let velocityPxPerMs = initialVelocityPxPerMs
+                let lastFrameTime = Date.now()
 
                 const tick = () => {
                     const now = Date.now()
                     const dt = Math.max(now - lastFrameTime, 1)
                     lastFrameTime = now
 
-                    velocityLinesPerMs *= Math.exp(-decayPerMs * dt)
-                    applyScrollDeltaLines(velocityLinesPerMs * dt)
+                    velocityPxPerMs *= Math.exp(-decayPerMs * dt)
+                    pendingOffsetPx += velocityPxPerMs * dt
+                    flushScroll(false)
 
-                    if (Math.abs(velocityLinesPerMs) < minVelocityLinesPerMs && Math.abs(remainderLines) < 0.1) {
+                    if (Math.abs(velocityPxPerMs) < minVelocityPxPerMs) {
                         inertiaAnimationFrame = null
+                        flushScroll(true)
                         return
                     }
 
@@ -168,27 +227,27 @@ export function TerminalView(props: {
                 inertiaAnimationFrame = requestAnimationFrame(tick)
             }
 
-	            const onTouchStart = (event: TouchEvent) => {
-	                if (event.touches.length !== 1) {
-	                    return
-	                }
-	                cancelInertia()
-	                flushPendingScroll()
+            const onTouchStart = (event: TouchEvent) => {
+                if (event.touches.length !== 1) {
+                    return
+                }
+                cancelInertia()
+                flushScroll(true)
 
-	                const touch = event.touches[0]
-	                startTouchX = touch.clientX
-	                startTouchY = touch.clientY
+                const touch = event.touches[0]
+                startTouchX = touch.clientX
+                startTouchY = touch.clientY
                 lastTouchY = touch.clientY
-	                lastTouchTime = Date.now()
-	                isTouchScrolling = false
-	                remainderLines = 0
-	                lastVelocityLinesPerMs = 0
-	                rowHeightPx = getRowHeightPx()
-	            }
+                lastTouchTime = Date.now()
+                isTouchScrolling = false
+                pendingOffsetPx = 0
+                lastVelocityPxPerMs = 0
+                rowHeightPx = getRowHeightPx()
+            }
 
-	            const onTouchMove = (event: TouchEvent) => {
-	                if (event.touches.length !== 1) {
-	                    return
+            const onTouchMove = (event: TouchEvent) => {
+                if (event.touches.length !== 1) {
+                    return
                 }
                 if (isDomSelectionActiveInsideTerminal()) {
                     return
@@ -202,57 +261,67 @@ export function TerminalView(props: {
                     if (Math.abs(dyTotal) < scrollThresholdPx || Math.abs(dyTotal) < Math.abs(dxTotal)) {
                         return
                     }
-	                    isTouchScrolling = true
-	                }
+                    isTouchScrolling = true
+                }
 
-	                if (event.cancelable) {
-	                    event.preventDefault()
-	                }
+                if (event.cancelable) {
+                    event.preventDefault()
+                }
 
-	                const now = Date.now()
-	                const dt = Math.max(now - lastTouchTime, 1)
-	                const dy = touch.clientY - lastTouchY
-	                const rowHeight = rowHeightPx || getRowHeightPx()
-	                rowHeightPx = rowHeight
-	                const deltaLines = -(dy / rowHeight)
+                const now = Date.now()
+                const dt = Math.max(now - lastTouchTime, 1)
+                const dy = touch.clientY - lastTouchY
 
-	                pendingDeltaLines += deltaLines
-	                if (pendingScrollAnimationFrame === null) {
-	                    pendingScrollAnimationFrame = requestAnimationFrame(() => {
-	                        pendingScrollAnimationFrame = null
-	                        flushPendingScroll()
-	                    })
-	                }
-	                lastVelocityLinesPerMs = deltaLines / dt
-	                lastTouchY = touch.clientY
-	                lastTouchTime = now
-	            }
+                pendingOffsetPx += dy
+                scheduleFlushScroll()
 
-	            const onTouchEnd = () => {
-	                if (!isTouchScrolling) {
-	                    return
-	                }
-	                isTouchScrolling = false
-	                flushPendingScroll()
-	                if (Math.abs(lastVelocityLinesPerMs) >= minVelocityLinesPerMs) {
-	                    startInertia(lastVelocityLinesPerMs)
-	                }
-	            }
+                lastVelocityPxPerMs = dy / dt
+                lastTouchY = touch.clientY
+                lastTouchTime = now
+            }
+
+            const onTouchEnd = () => {
+                if (!isTouchScrolling) {
+                    return
+                }
+                isTouchScrolling = false
+                cancelPendingScrollFlush()
+                flushScroll(false)
+                if (Math.abs(lastVelocityPxPerMs) >= minVelocityPxPerMs) {
+                    startInertia(lastVelocityPxPerMs)
+                } else {
+                    flushScroll(true)
+                }
+            }
+
+            const onContextMenuCapture = (event: MouseEvent) => {
+                event.stopImmediatePropagation()
+            }
+
+            if (contextMenuMode === 'native') {
+                touchTarget.addEventListener('contextmenu', onContextMenuCapture, true)
+            }
 
             touchTarget.addEventListener('touchstart', onTouchStart, { passive: true })
             touchTarget.addEventListener('touchmove', onTouchMove, { passive: false })
             touchTarget.addEventListener('touchend', onTouchEnd, { passive: true })
             touchTarget.addEventListener('touchcancel', onTouchEnd, { passive: true })
 
-	            disposeTouchScroll = () => {
-	                cancelInertia()
-	                flushPendingScroll()
-	                touchTarget.removeEventListener('touchstart', onTouchStart)
-	                touchTarget.removeEventListener('touchmove', onTouchMove)
-	                touchTarget.removeEventListener('touchend', onTouchEnd)
-	                touchTarget.removeEventListener('touchcancel', onTouchEnd)
-	            }
-	        }
+            disposeTouchFeatures = () => {
+                cancelInertia()
+                cancelPendingScrollFlush()
+                scrollOffsetPx = 0
+                pendingOffsetPx = 0
+                setTranslatePx(0)
+                touchTarget.removeEventListener('touchstart', onTouchStart)
+                touchTarget.removeEventListener('touchmove', onTouchMove)
+                touchTarget.removeEventListener('touchend', onTouchEnd)
+                touchTarget.removeEventListener('touchcancel', onTouchEnd)
+                if (contextMenuMode === 'native') {
+                    touchTarget.removeEventListener('contextmenu', onContextMenuCapture, true)
+                }
+            }
+        }
 
         const copyMode = getTerminalCopyMode()
         let disposeSelection: (() => void) | undefined
@@ -328,7 +397,7 @@ export function TerminalView(props: {
 
         return () => {
             disposeSelection?.()
-            disposeTouchScroll?.()
+            disposeTouchFeatures?.()
             observer.disconnect()
             terminal.dispose()
         }

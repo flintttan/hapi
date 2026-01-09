@@ -28,6 +28,17 @@ title: Mobile Terminal Copy/Scroll Feature Flags
 - Query param：`terminal_offset=top|transform`
 - LocalStorage：`hapi:terminal.viewportOffsetMode = top|transform`
 
+### 1.3 长按菜单策略（contextmenu 处理）
+
+- 默认：
+  - 触控设备：`native`（不让 xterm 接管 `contextmenu`，优先走浏览器原生文本选择：蓝色选择柄/工具栏）
+  - 桌面端：`xterm`（保留 xterm 默认右键复制/粘贴体验）
+- 可切换：`native` / `xterm`
+
+配置入口：
+- Query param：`terminal_contextmenu=native|xterm`
+- LocalStorage：`hapi:terminal.contextMenuMode = native|xterm`
+
 ## 2) 使用方式
 
 ### 2.1 用 query param 临时切换（推荐排障）
@@ -35,7 +46,8 @@ title: Mobile Terminal Copy/Scroll Feature Flags
 示例：
 - 强制回退复制策略：`?terminal_copy=document`
 - 强制回退键盘补偿：`?terminal_offset=transform`
-- 同时设置：`?terminal_copy=document&terminal_offset=transform`
+- 强制切换长按菜单策略：`?terminal_contextmenu=xterm`
+- 同时设置：`?terminal_copy=document&terminal_offset=transform&terminal_contextmenu=xterm`
 
 ### 2.2 用 LocalStorage 持久化（用于灰度/定向机型）
 
@@ -64,9 +76,10 @@ localStorage.removeItem('hapi:terminal.viewportOffsetMode')
 
 - `terminal_copy=document` 依赖浏览器原生 selection，可能在某些 WebView/布局下不稳定；但它可作为 xterm selection 路径异常时的回退。
 - `terminal_offset=transform` 可能在 iOS/WebView 场景影响 `-webkit-overflow-scrolling: touch` 的惯性表现；但可作为 `top` 补偿导致布局异常时的回退。
+- `terminal_contextmenu=native` 会绕开 xterm 的右键/长按粘贴菜单，优先确保原生文本可选；若需要恢复 xterm 的粘贴菜单，可切到 `terminal_contextmenu=xterm`。
 
 ## 5) Android PWA：长按只出现“粘贴”的说明
 
-在 Android（尤其是 PWA）里，长按通常会触发 `contextmenu`。xterm 默认会把 `contextmenu` 绑定到隐藏 textarea 的复制/粘贴逻辑，若当前没有可复制的选中内容，系统菜单可能只剩“粘贴”。
+在 Android（尤其是 PWA）里，长按通常会触发 `contextmenu`。xterm 默认会在 `contextmenu` 中把隐藏 textarea 移到事件位置并 `select()`，这会让系统把长按当成“输入框菜单”，在无选区时往往只剩“粘贴”，从而阻断原生文本选择（蓝色选择柄/工具栏）。
 
-当前策略：在触控设备上启用 `rightClickSelectsWord`，让长按时先选中一个单词，从而让系统菜单出现 Copy/Select all 等选项；同时不影响桌面端右键行为。
+当前策略：触控设备默认 `terminal_contextmenu=native`，在捕获阶段拦截 `contextmenu` 并阻止其继续被 xterm 处理，从而让浏览器按普通文本处理长按（进入原生选择模式）。若需要恢复 xterm 的粘贴菜单，可切到 `terminal_contextmenu=xterm`。
