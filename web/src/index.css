@@ -125,6 +125,13 @@ body {
     touch-action: pan-y;
 }
 
+@media (pointer: coarse) {
+    /* Allow native long-press text selection (xterm DOM renderer sets pointer-events: none). */
+    .terminal-xterm .xterm-rows {
+        pointer-events: auto !important;
+    }
+}
+
 @media (hover: hover) and (pointer: fine) {
     .session-list-item:hover,
     .session-list-new-button:hover {

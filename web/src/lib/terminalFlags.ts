@@ -35,6 +35,14 @@ export function getTerminalCopyMode(): TerminalCopyMode {
     if (mode === 'document') {
         return 'document'
     }
+    if (mode === 'xterm') {
+        return 'xterm'
+    }
+
+    const prefersTouch = typeof window !== 'undefined' ? (window.matchMedia?.('(pointer: coarse)')?.matches ?? false) : false
+    if (prefersTouch) {
+        return 'document'
+    }
     return 'xterm'
 }
 

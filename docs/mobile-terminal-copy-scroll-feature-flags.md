@@ -10,8 +10,10 @@ title: Mobile Terminal Copy/Scroll Feature Flags
 
 ### 1.1 复制策略（Copy UI 的选中文本来源）
 
-- 默认：`xterm`（使用 xterm selection API 驱动 Copy UI）
-- 回退：`document`（使用 `document.getSelection()` 驱动 Copy UI）
+- 默认：
+  - 触控设备：`document`（优先使用原生 selection，更符合长按选择/系统工具栏习惯）
+  - 桌面端：`xterm`（使用 xterm selection API 驱动 Copy UI）
+- 可切换：`xterm` / `document`
 
 配置入口（二选一，优先 query param 便于临时排障）：
 - Query param：`terminal_copy=xterm|document`
