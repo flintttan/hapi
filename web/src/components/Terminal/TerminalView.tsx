@@ -25,13 +25,6 @@ export function TerminalView(props: {
     const onResizeRef = useRef(props.onResize)
     const [fontProvider, setFontProvider] = useState<ITerminalFontProvider | null>(null)
     const { copied, copy } = useCopyToClipboard()
-    const viewportRef = useRef<HTMLElement | null>(null)
-    const touchScrollRef = useRef<{
-        startY: number
-        startScrollTop: number
-        startTime: number
-        isScrolling: boolean
-    } | null>(null)
     const selectionTextRef = useRef('')
     const [selectionText, setSelectionText] = useState('')
 
@@ -74,69 +67,6 @@ export function TerminalView(props: {
         terminal.loadAddon(webLinksAddon)
         terminal.open(container)
 
-        viewportRef.current = container.querySelector<HTMLElement>('.xterm-viewport')
-
-        const handleTouchStart = (event: TouchEvent) => {
-            if (event.touches.length !== 1) {
-                touchScrollRef.current = null
-                return
-            }
-            const viewport = viewportRef.current
-            if (!viewport || viewport.scrollHeight <= viewport.clientHeight) {
-                touchScrollRef.current = null
-                return
-            }
-            const touch = event.touches[0]
-            touchScrollRef.current = {
-                startY: touch.clientY,
-                startScrollTop: viewport.scrollTop,
-                startTime: performance.now(),
-                isScrolling: false,
-            }
-        }
-
-        const handleTouchMove = (event: TouchEvent) => {
-            const state = touchScrollRef.current
-            const viewport = viewportRef.current
-            if (!state || !viewport || viewport.scrollHeight <= viewport.clientHeight) {
-                return
-            }
-            if (event.touches.length !== 1) {
-                return
-            }
-            const selection = document.getSelection()
-            if (selection && !selection.isCollapsed) {
-                return
-            }
-
-            const touch = event.touches[0]
-            const deltaY = touch.clientY - state.startY
-            if (!state.isScrolling) {
-                if (performance.now() - state.startTime > 220) {
-                    return
-                }
-                if (Math.abs(deltaY) < 4) {
-                    return
-                }
-                state.isScrolling = true
-            }
-
-            event.preventDefault()
-            viewport.scrollTop = state.startScrollTop - deltaY
-        }
-
-        const handleTouchEnd = () => {
-            touchScrollRef.current = null
-        }
-
-        const isTouchDevice = typeof window !== 'undefined' && window.matchMedia('(pointer: coarse)').matches
-        if (isTouchDevice) {
-            container.addEventListener('touchstart', handleTouchStart, { passive: true })
-            container.addEventListener('touchmove', handleTouchMove, { passive: false })
-            container.addEventListener('touchend', handleTouchEnd, { passive: true })
-            container.addEventListener('touchcancel', handleTouchEnd, { passive: true })
-        }
-
         const resizeTerminal = () => {
             fitAddon.fit()
             onResizeRef.current?.(terminal.cols, terminal.rows)
@@ -152,12 +82,6 @@ export function TerminalView(props: {
 
         return () => {
             observer.disconnect()
-            container.removeEventListener('touchstart', handleTouchStart)
-            container.removeEventListener('touchmove', handleTouchMove)
-            container.removeEventListener('touchend', handleTouchEnd)
-            container.removeEventListener('touchcancel', handleTouchEnd)
-            viewportRef.current = null
-            touchScrollRef.current = null
             terminal.dispose()
         }
     }, [fontProvider])
