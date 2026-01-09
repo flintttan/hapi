@@ -118,3 +118,21 @@ Pass：
 
 - 录屏/截图（至少 1 个）：`docs/public/assets/mobile-terminal-copy-scroll/placeholder.svg`（请替换为真实证据文件）
 - 记录人/签字：`<name>` / 日期：`YYYY-MM-DD`
+
+## 5) 回归记录（MTERM-050）
+
+高风险项（建议在回归记录里重点关注并附证据）：
+- **焦点/输入**：点击输入区域是否稳定聚焦、是否会因滚动/选择导致异常丢焦
+- **键盘遮挡**：键盘弹出时内容区高度/布局是否正确、快速键是否被遮挡
+- **滚动穿透**：滚到边界继续滑动是否把页面整体拖动（scroll chaining）
+
+本轮相关改动（用于回归对照）：
+- Copy UI 由 xterm selection 驱动：`6b7711e`
+- VisualViewport offsetTop 补偿避免 transform：`b2e9aa8`
+
+| 环境 | 键盘状态 | 复制 | 滚动（含惯性） | **输入/焦点** | 快速键 | 结果 | 证据 |
+|---|---|---|---|---|---|---|---|
+| iOS Safari | 收起 | TBD | TBD | TBD | TBD | TBD | `<link>` |
+| iOS Safari | 弹出 | TBD | TBD | TBD | TBD | TBD | `<link>` |
+| Android Chrome | 收起 | TBD | TBD | TBD | TBD | TBD | `<link>` |
+| Android Chrome | 弹出 | TBD | TBD | TBD | TBD | TBD | `<link>` |
