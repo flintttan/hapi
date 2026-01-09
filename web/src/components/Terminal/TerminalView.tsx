@@ -46,6 +46,11 @@ export function TerminalView(props: {
             return
         }
 
+        if (selectionTextRef.current) {
+            selectionTextRef.current = ''
+            setSelectionText('')
+        }
+
         const { background, foreground, selectionBackground } = resolveThemeColors()
         const terminal = new Terminal({
             cursorBlink: true,
@@ -67,6 +72,22 @@ export function TerminalView(props: {
         terminal.loadAddon(webLinksAddon)
         terminal.open(container)
 
+        const selectionDisposable = terminal.onSelectionChange(() => {
+            const text = terminal.getSelection()
+            if (!text) {
+                if (selectionTextRef.current) {
+                    selectionTextRef.current = ''
+                    setSelectionText('')
+                }
+                return
+            }
+
+            if (selectionTextRef.current !== text) {
+                selectionTextRef.current = text
+                setSelectionText(text)
+            }
+        })
+
         const resizeTerminal = () => {
             fitAddon.fit()
             onResizeRef.current?.(terminal.cols, terminal.rows)
@@ -81,57 +102,11 @@ export function TerminalView(props: {
         onMountRef.current?.(terminal)
 
         return () => {
+            selectionDisposable.dispose()
             observer.disconnect()
             terminal.dispose()
         }
     }, [fontProvider])
-
-    const handleSelectionChange = useCallback(() => {
-        const container = containerRef.current
-        if (!container) {
-            return
-        }
-        const selection = document.getSelection()
-        if (!selection || selection.isCollapsed) {
-            if (selectionTextRef.current) {
-                selectionTextRef.current = ''
-                setSelectionText('')
-            }
-            return
-        }
-
-        const anchorNode = selection.anchorNode
-        const focusNode = selection.focusNode
-        const selectionInside = (anchorNode && container.contains(anchorNode)) || (focusNode && container.contains(focusNode))
-        if (!selectionInside) {
-            if (selectionTextRef.current) {
-                selectionTextRef.current = ''
-                setSelectionText('')
-            }
-            return
-        }
-
-        const text = selection.toString()
-        if (!text) {
-            if (selectionTextRef.current) {
-                selectionTextRef.current = ''
-                setSelectionText('')
-            }
-            return
-        }
-
-        if (selectionTextRef.current !== text) {
-            selectionTextRef.current = text
-            setSelectionText(text)
-        }
-    }, [])
-
-    useEffect(() => {
-        document.addEventListener('selectionchange', handleSelectionChange)
-        return () => {
-            document.removeEventListener('selectionchange', handleSelectionChange)
-        }
-    }, [handleSelectionChange])
 
     const handleCopyPointerDown = useCallback((event: React.PointerEvent<HTMLButtonElement>) => {
         event.preventDefault()

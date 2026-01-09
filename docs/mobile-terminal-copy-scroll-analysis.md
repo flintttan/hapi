@@ -10,19 +10,17 @@ title: Mobile Terminal Copy/Scroll Analysis
 
 ## 1) 复制链路：当前实现与限制
 
-### 1.1 当前“选择文本”来源：`document.getSelection()`
+### 1.1 当前“选择文本”来源：xterm selection API（`onSelectionChange`/`getSelection`）
 
-`TerminalView` 通过监听全局 `selectionchange`，读取 `document.getSelection()`，并要求 selection 的 anchor/focus 节点位于 xterm 容器内，才认为“有选择内容”，从而显示 Copy 按钮：
+`TerminalView` 监听 xterm 的 `onSelectionChange`，并通过 `terminal.getSelection()` 获取选中文本，用于驱动 Copy 按钮的显隐与复制内容：
 
-- 入口：`web/src/components/Terminal/TerminalView.tsx:89`
-- 监听：`web/src/components/Terminal/TerminalView.tsx:129`
-- 文本来源：`web/src/components/Terminal/TerminalView.tsx:94`
-- 选择范围判断（是否在容器内）：`web/src/components/Terminal/TerminalView.tsx:103`
-- Copy UI 显示条件：`web/src/components/Terminal/TerminalView.tsx:158`
+- selection 监听：`web/src/components/Terminal/TerminalView.tsx:75`
+- 文本来源：`web/src/components/Terminal/TerminalView.tsx:76`
+- Copy UI 显示条件：`web/src/components/Terminal/TerminalView.tsx:133`
 
 结论：
-- 该方案依赖**浏览器原生 DOM 文本选择**。
-- 当终端输出是 **canvas 渲染**或“不可原生选择”的 DOM 结构时，移动端长按很难产生有效的 `document.getSelection()`，导致 Copy UI 不出现或内容为空。
+- Copy UI 不再依赖 `document.getSelection()`，避免把终端外的 selection 或 DOM 结构差异带进复制链路。
+- 复制内容来源于 xterm buffer 的 selection，适合做“保底复制”闭环（见 MTERM-030）。
 
 ### 1.2 xterm 渲染模式：当前依赖版本未暴露 `rendererType` 配置
 
@@ -46,12 +44,10 @@ Copy 按钮点击后走 `safeCopyToClipboard`：优先 `navigator.clipboard.writ
 - 复制入口是按钮点击（用户手势）→ 符合 iOS 对 Clipboard 的基本限制。
 - 但在 iOS/WebView 中，`navigator.clipboard` 能力与权限差异较大，fallback 可能仍失败，需要明确失败反馈（当前 hook 已有 haptic 反馈：`web/src/hooks/useCopyToClipboard.ts:16`）。
 
-### 1.4 最小改动点建议（不在本 issue 中实现）
+### 1.4 最小改动点（已落地）
 
-为避免依赖 `document.getSelection()`（移动端不稳定/与 xterm 内部选择不一致），更稳的方向是改为使用 xterm selection API 驱动 Copy UI：
-
-- 现有选择检测点：`web/src/components/Terminal/TerminalView.tsx:89`
-- 未来替换点（建议）：用 `terminal.onSelectionChange` / `terminal.getSelection()` 取代 `document.getSelection()`（见 MTERM-030）。
+- 选择检测：`web/src/components/Terminal/TerminalView.tsx:75`
+- 复制内容：`web/src/components/Terminal/TerminalView.tsx:76`
 
 ## 2) 滚动链路：真正滚动元素与潜在阻断点
 
