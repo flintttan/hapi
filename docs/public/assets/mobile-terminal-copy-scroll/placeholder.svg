@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <rect width="1200" height="630" fill="#0b1220" />
+  <g fill="#e5e7eb" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif">
+    <text x="80" y="140" font-size="48" font-weight="700">Mobile Terminal Copy/Scroll</text>
+    <text x="80" y="210" font-size="28" opacity="0.9">Evidence placeholder</text>
+    <text x="80" y="280" font-size="22" opacity="0.8">Replace this file with a real screen recording or screenshot.</text>
+    <text x="80" y="340" font-size="22" opacity="0.8">Checklist: docs/mobile-terminal-copy-scroll-checklist.md</text>
+  </g>
+  <g fill="none" stroke="#334155" stroke-width="4">
+    <rect x="60" y="60" width="1080" height="510" rx="24" />
+  </g>
+</svg>
