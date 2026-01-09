@@ -6,6 +6,7 @@ import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useSession } from '@/hooks/queries/useSession'
 import { useTerminalSocket } from '@/hooks/useTerminalSocket'
 import { useVisualViewportMetrics } from '@/hooks/useVisualViewportHeight'
+import { getTerminalViewportOffsetMode } from '@/lib/terminalFlags'
 import { TerminalView } from '@/components/Terminal/TerminalView'
 import { LoadingState } from '@/components/LoadingState'
 function BackIcon() {
@@ -215,6 +216,13 @@ export default function TerminalPage() {
     const errorMessage = terminalState.status === 'error' ? terminalState.error : null
     const viewportHeight = visualViewportMetrics?.height
     const viewportOffsetTop = visualViewportMetrics?.offsetTop ?? 0
+    const viewportOffsetMode = getTerminalViewportOffsetMode()
+    const viewportOffsetStyle =
+        viewportOffsetTop
+            ? viewportOffsetMode === 'transform'
+                ? { transform: `translateY(${viewportOffsetTop}px)` }
+                : { position: 'relative' as const, top: `${viewportOffsetTop}px` }
+            : {}
 
     return (
         <div
@@ -223,8 +231,7 @@ export default function TerminalPage() {
             // Also compensate `offsetTop` (iOS/WebViews can pan the visual viewport when the keyboard is open).
             style={{
                 height: viewportHeight ? `${viewportHeight}px` : 'var(--tg-viewport-height, 100dvh)',
-                position: viewportOffsetTop ? 'relative' : undefined,
-                top: viewportOffsetTop ? `${viewportOffsetTop}px` : undefined,
+                ...viewportOffsetStyle,
             }}
         >
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">

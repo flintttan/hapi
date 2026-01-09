@@ -4,6 +4,7 @@ import { FitAddon } from '@xterm/addon-fit'
 import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
 import { createFontProvider, type ITerminalFontProvider } from '@/lib/terminalFont'
+import { getTerminalCopyMode } from '@/lib/terminalFlags'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { CheckIcon, CopyIcon } from '@/components/icons'
 
@@ -72,21 +73,64 @@ export function TerminalView(props: {
         terminal.loadAddon(webLinksAddon)
         terminal.open(container)
 
-        const selectionDisposable = terminal.onSelectionChange(() => {
-            const text = terminal.getSelection()
-            if (!text) {
-                if (selectionTextRef.current) {
-                    selectionTextRef.current = ''
-                    setSelectionText('')
+        const copyMode = getTerminalCopyMode()
+        let disposeSelection: (() => void) | undefined
+        if (copyMode === 'xterm') {
+            const selectionDisposable = terminal.onSelectionChange(() => {
+                const text = terminal.getSelection()
+                if (!text) {
+                    if (selectionTextRef.current) {
+                        selectionTextRef.current = ''
+                        setSelectionText('')
+                    }
+                    return
                 }
-                return
-            }
 
-            if (selectionTextRef.current !== text) {
-                selectionTextRef.current = text
-                setSelectionText(text)
+                if (selectionTextRef.current !== text) {
+                    selectionTextRef.current = text
+                    setSelectionText(text)
+                }
+            })
+            disposeSelection = () => selectionDisposable.dispose()
+        } else {
+            const handleSelectionChange = () => {
+                const selection = document.getSelection()
+                if (!selection || selection.isCollapsed) {
+                    if (selectionTextRef.current) {
+                        selectionTextRef.current = ''
+                        setSelectionText('')
+                    }
+                    return
+                }
+
+                const anchorNode = selection.anchorNode
+                const focusNode = selection.focusNode
+                const selectionInside = (anchorNode && container.contains(anchorNode)) || (focusNode && container.contains(focusNode))
+                if (!selectionInside) {
+                    if (selectionTextRef.current) {
+                        selectionTextRef.current = ''
+                        setSelectionText('')
+                    }
+                    return
+                }
+
+                const text = selection.toString()
+                if (!text) {
+                    if (selectionTextRef.current) {
+                        selectionTextRef.current = ''
+                        setSelectionText('')
+                    }
+                    return
+                }
+
+                if (selectionTextRef.current !== text) {
+                    selectionTextRef.current = text
+                    setSelectionText(text)
+                }
             }
-        })
+            document.addEventListener('selectionchange', handleSelectionChange)
+            disposeSelection = () => document.removeEventListener('selectionchange', handleSelectionChange)
+        }
 
         const resizeTerminal = () => {
             fitAddon.fit()
@@ -102,7 +146,7 @@ export function TerminalView(props: {
         onMountRef.current?.(terminal)
 
         return () => {
-            selectionDisposable.dispose()
+            disposeSelection?.()
             observer.disconnect()
             terminal.dispose()
         }
