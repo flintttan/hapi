@@ -223,7 +223,8 @@ export default function TerminalPage() {
             // Also compensate `offsetTop` (iOS/WebViews can pan the visual viewport when the keyboard is open).
             style={{
                 height: viewportHeight ? `${viewportHeight}px` : 'var(--tg-viewport-height, 100dvh)',
-                transform: viewportOffsetTop ? `translateY(${viewportOffsetTop}px)` : undefined,
+                position: viewportOffsetTop ? 'relative' : undefined,
+                top: viewportOffsetTop ? `${viewportOffsetTop}px` : undefined,
             }}
         >
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">

@@ -68,25 +68,22 @@ Copy 按钮点击后走 `safeCopyToClipboard`：优先 `navigator.clipboard.writ
 - 手势需要命中到 `.xterm-viewport`（或其可滚动祖先）才能产生 scrollTop 变化与惯性滚动。
 - 如果手势被 xterm canvas/overlay 捕获并 `preventDefault`，或 CSS/布局让 viewport 不可滚动，会表现为“滑不动/无惯性”。
 
-### 2.3 VisualViewport 补偿采用 `transform: translateY(...)`（iOS 风险点）
+### 2.3 VisualViewport 补偿：避免 `transform` 影响 iOS 惯性滚动
 
-为让底部快捷键避开键盘，页面根容器在键盘弹出（VisualViewport offsetTop 变化）时使用 transform 做整体位移：
+为让底部快捷键避开键盘，页面根容器需要在键盘弹出（VisualViewport offsetTop 变化）时做整体位移补偿。
 
-- transform 设置：`web/src/routes/sessions/terminal.tsx:224`
+已采取的修复（MTERM-040）：
+- 使用 `position: relative` + `top: <offsetTop>` 做补偿，避免使用 `transform`（`web/src/routes/sessions/terminal.tsx:224`）。
 
-结论（iOS/WebView 高风险点）：
-- iOS/Safari/WebView 下，**带 transform 的祖先元素**可能影响 `-webkit-overflow-scrolling: touch` 的惯性表现（典型症状：只能“拖动式滚动”或惯性失效/抖动）。
-- 这解释了为何问题在“键盘弹出（offsetTop 非 0）”场景更突出。
-
-建议的可回退修复方向（见 MTERM-040）：
-- 用不引入 transform 的布局方式实现 offsetTop 补偿（例如用 `top`/`padding`/布局重排），或把 scroll 容器移出 transform 影响范围；并以移动端条件开关保护。
+结论（iOS/WebView 关注点）：
+- iOS/Safari/WebView 下，带 `transform` 的祖先元素可能影响 `-webkit-overflow-scrolling: touch` 的惯性表现；因此优先用不引入 transform 的方式做 offsetTop 补偿。
 
 ## 3) iOS/Android 差异点（回归关注）
 
 - iOS Safari / iOS WebView：
   - 原生长按选择对 canvas 输出不友好；更依赖 DOM renderer 或自建 Copy UI。
   - Clipboard API 权限/能力差异大，必须保持“用户手势触发 + 明确失败反馈”。
-  - transform + `-webkit-overflow-scrolling: touch` 组合容易导致惯性滚动异常（尤其键盘弹出时）。
+  - 若使用 `transform` 做 VisualViewport offsetTop 补偿，可能导致 `-webkit-overflow-scrolling: touch` 惯性异常（尤其键盘弹出时）；当前已改为 `top` 补偿，仍需真机回归。
 - Android Chrome：
   - `touch-action` 支持相对完整，但“选择复制”仍受 xterm 渲染方式影响。
   - 更可能出现“滚动可以但选择不行”的组合，需要分别验证。

@@ -122,6 +122,7 @@ body {
 .terminal-xterm .xterm-viewport {
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
+    touch-action: pan-y;
 }
 
 @media (hover: hover) and (pointer: fine) {
