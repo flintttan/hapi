@@ -64,3 +64,9 @@ localStorage.removeItem('hapi:terminal.viewportOffsetMode')
 
 - `terminal_copy=document` 依赖浏览器原生 selection，可能在某些 WebView/布局下不稳定；但它可作为 xterm selection 路径异常时的回退。
 - `terminal_offset=transform` 可能在 iOS/WebView 场景影响 `-webkit-overflow-scrolling: touch` 的惯性表现；但可作为 `top` 补偿导致布局异常时的回退。
+
+## 5) Android PWA：长按只出现“粘贴”的说明
+
+在 Android（尤其是 PWA）里，长按通常会触发 `contextmenu`。xterm 默认会把 `contextmenu` 绑定到隐藏 textarea 的复制/粘贴逻辑，若当前没有可复制的选中内容，系统菜单可能只剩“粘贴”。
+
+当前策略：在触控设备上启用 `rightClickSelectsWord`，让长按时先选中一个单词，从而让系统菜单出现 Copy/Select all 等选项；同时不影响桌面端右键行为。
