@@ -217,6 +217,13 @@ export default function TerminalPage() {
     const viewportHeight = visualViewportMetrics?.height
     const viewportOffsetTop = visualViewportMetrics?.offsetTop ?? 0
     const viewportOffsetMode = getTerminalViewportOffsetMode()
+    const shouldUseVisualViewportHeight =
+        typeof window !== 'undefined' && viewportHeight
+            ? viewportHeight < window.innerHeight - 80
+            : false
+    const containerHeightStyle = shouldUseVisualViewportHeight
+        ? `${viewportHeight}px`
+        : 'var(--tg-viewport-stable-height, 100dvh)'
     const viewportOffsetStyle =
         viewportOffsetTop
             ? viewportOffsetMode === 'transform'
@@ -230,7 +237,7 @@ export default function TerminalPage() {
             // Prefer VisualViewport height so the bottom quick keys stay above mobile keyboards.
             // Also compensate `offsetTop` (iOS/WebViews can pan the visual viewport when the keyboard is open).
             style={{
-                height: viewportHeight ? `${viewportHeight}px` : 'var(--tg-viewport-height, 100dvh)',
+                height: containerHeightStyle,
                 ...viewportOffsetStyle,
             }}
         >
