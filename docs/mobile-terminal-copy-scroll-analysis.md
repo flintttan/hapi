@@ -24,15 +24,15 @@ title: Mobile Terminal Copy/Scroll Analysis
 - 该方案依赖**浏览器原生 DOM 文本选择**。
 - 当终端输出是 **canvas 渲染**或“不可原生选择”的 DOM 结构时，移动端长按很难产生有效的 `document.getSelection()`，导致 Copy UI 不出现或内容为空。
 
-### 1.2 xterm 渲染模式：默认未指定 `rendererType`
+### 1.2 xterm 渲染模式：当前依赖版本未暴露 `rendererType` 配置
 
-`Terminal` 初始化未传入 `rendererType`，等价于使用 xterm 默认渲染（通常为 canvas/webgl 路径，随运行环境而定）：
+项目依赖 `@xterm/xterm` `^6.0.0`（`web/package.json:26`），其 public typings 中未提供 `rendererType` 选项（`web/node_modules/@xterm/xterm/typings/xterm.d.ts:26` 起的 `ITerminalOptions` 列表中无该字段）。
 
-- 初始化：`web/src/components/Terminal/TerminalView.tsx:49`
+- 初始化位置：`web/src/components/Terminal/TerminalView.tsx:49`
 
-结论（可复核点）：
-- 若默认走 canvas renderer，则**终端输出不是可被系统长按选择的真实文本节点**，`document.getSelection()` 通常拿不到“你看到的那段终端文本”。
-- 移动端想要“系统级长按选择/拖拽柄/Copy 菜单”，更可能需要 DOM renderer（见 MTERM-020 的 POC 方向）。
+结论（POC 结果，用于校准后续方案）：
+- “切换到 DOM renderer”在当前依赖版本下**无法通过 options 显式配置**，需要以实际运行表现为准。
+- 因此移动端复制问题更可能来自 **选择检测逻辑（当前依赖 `document.getSelection()`）与 xterm 自身 selection 机制不一致**，或来自移动端交互/布局（例如滚动、键盘弹出时的布局补偿）导致的选择/复制体验不稳定（见 MTERM-030 的保底方向）。
 
 ### 1.3 复制写入剪贴板：用户手势触发 + 降级路径
 
