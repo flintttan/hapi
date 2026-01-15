@@ -3,6 +3,7 @@ import { authAndSetupMachineIfNeeded } from '@/ui/auth'
 import { initializeToken } from '@/ui/tokenInit'
 import { maybeAutoStartServer } from '@/utils/autoStartServer'
 import type { CommandDefinition } from './types'
+import type { CodexPermissionMode } from '@hapi/protocol/types'
 
 export const codexCommand: CommandDefinition = {
     name: 'codex',
@@ -14,12 +15,22 @@ export const codexCommand: CommandDefinition = {
             const options: {
                 startedBy?: 'daemon' | 'terminal'
                 codexArgs?: string[]
-                permissionMode?: 'default' | 'read-only' | 'safe-yolo' | 'yolo'
+                permissionMode?: CodexPermissionMode
+                resumeSessionId?: string
             } = {}
             const unknownArgs: string[] = []
 
             for (let i = 0; i < commandArgs.length; i++) {
                 const arg = commandArgs[i]
+                if (i === 0 && arg === 'resume') {
+                    const candidate = commandArgs[i + 1]
+                    if (!candidate || candidate.startsWith('-')) {
+                        throw new Error('resume requires a session id')
+                    }
+                    options.resumeSessionId = candidate
+                    i += 1
+                    continue
+                }
                 if (arg === '--started-by') {
                     options.startedBy = commandArgs[++i] as 'daemon' | 'terminal'
                 } else if (arg === '--yolo' || arg === '--dangerously-bypass-approvals-and-sandbox') {

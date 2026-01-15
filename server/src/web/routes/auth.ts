@@ -6,7 +6,7 @@ import { configuration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import { validateTelegramInitData } from '../telegramInitData'
-import { getOrCreateOwnerId } from '../ownerId'
+import { getOrCreateOwnerId } from '../../config/ownerId'
 import type { WebAppEnv } from '../middleware/auth'
 import type { Store } from '../../store'
 
@@ -27,7 +27,12 @@ const refreshTokenAuthSchema = z.object({
     refreshToken: z.string()
 })
 
-const authBodySchema = z.union([telegramAuthSchema, accessTokenAuthSchema, usernamePasswordAuthSchema, refreshTokenAuthSchema])
+const authBodySchema = z.union([
+    telegramAuthSchema,
+    accessTokenAuthSchema,
+    usernamePasswordAuthSchema,
+    refreshTokenAuthSchema
+])
 
 const refreshTokenPayloadSchema = z.object({
     uid: z.union([z.string(), z.number()]),
@@ -53,7 +58,6 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
         let firstName: string | undefined
         let lastName: string | undefined
         let namespace: string | undefined
-        let userIdString: string | undefined  // For storing TEXT user IDs
 
         if ('refreshToken' in parsed.data) {
             try {
@@ -69,7 +73,6 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
                 firstName = tokenPayload.data.firstName
                 lastName = tokenPayload.data.lastName
 
-                // Fallback to database user info when available (e.g. password auth)
                 const tokenUserId = String(userId)
                 const resolvedNamespace = namespace ?? tokenUserId
                 const storedUser = store.getUserById(resolvedNamespace) ?? store.getUserById(tokenUserId)
@@ -101,7 +104,6 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
             }
         }
 
-        // Access Token authentication (CLI_API_TOKEN)
         if ('accessToken' in parsed.data) {
             const parsedToken = parseAccessToken(parsed.data.accessToken)
             if (!parsedToken || !constantTimeEquals(parsedToken.baseToken, configuration.cliApiToken)) {
@@ -111,7 +113,6 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
             firstName = 'Web User'
             namespace = parsedToken.namespace
         } else if ('username' in parsed.data && 'password' in parsed.data) {
-            // Username/password authentication
             const user = store.getUserByUsername(parsed.data.username)
             if (!user || !user.password_hash) {
                 return c.json({ error: 'Invalid username or password' }, 401)
@@ -122,25 +123,22 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
                 return c.json({ error: 'Invalid username or password' }, 401)
             }
 
-            // Use the actual user's ID from the database for proper multi-user support
-            userIdString = user.id
-            userId = await getOrCreateOwnerId()  // Keep numeric userId for backward compatibility
+            userId = await getOrCreateOwnerId()
             username = user.username
             firstName = user.username
-            namespace = user.id  // Use user's ID as namespace for data isolation
+            namespace = user.id
         } else if ('initData' in parsed.data) {
             if (!configuration.telegramEnabled || !configuration.telegramBotToken) {
                 return c.json({ error: 'Telegram authentication is disabled. Configure TELEGRAM_BOT_TOKEN.' }, 503)
             }
 
-            // Telegram initData authentication
             const result = validateTelegramInitData(parsed.data.initData, configuration.telegramBotToken)
             if (!result.ok) {
                 return c.json({ error: result.error }, 401)
             }
 
             const telegramUserId = String(result.user.id)
-            const storedUser = store.getPlatformUser('telegram', telegramUserId)
+            const storedUser = store.users.getUser('telegram', telegramUserId)
             if (!storedUser) {
                 return c.json({ error: 'not_bound' }, 401)
             }
@@ -154,7 +152,9 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
             return c.json({ error: 'Invalid authentication method' }, 400)
         }
 
-        const token = await new SignJWT({ uid: userId, ns: namespace, tokenType: 'access' })
+        const resolvedNamespace = namespace ?? String(userId)
+
+        const token = await new SignJWT({ uid: userId, ns: resolvedNamespace, tokenType: 'access' })
             .setProtectedHeader({ alg: 'HS256' })
             .setIssuedAt()
             .setExpirationTime('15m')
@@ -162,7 +162,7 @@ export function createAuthRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
 
         const refreshToken = await new SignJWT({
             uid: userId,
-            ns: namespace,
+            ns: resolvedNamespace,
             tokenType: 'refresh',
             username,
             firstName,

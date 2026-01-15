@@ -15,16 +15,23 @@ import { getToolName } from "./getToolName";
 import { EnhancedMode, PermissionMode } from "../loop";
 import { getToolDescriptor } from "./getToolDescriptor";
 import { delay } from "@/utils/time";
+import {
+    BasePermissionHandler,
+    type PendingPermissionRequest,
+    type PermissionCompletion
+} from "@/modules/common/permission/BasePermissionHandler";
 
 interface PermissionResponse {
     id: string;
     approved: boolean;
     reason?: string;
-    mode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan';
+    mode?: PermissionMode;
     allowTools?: string[];
     answers?: Record<string, string[]>;
     receivedAt?: number;
 }
+
+const PLAN_EXIT_MODES: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
 
 function isObject(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object';
@@ -89,17 +96,9 @@ function buildAskUserQuestionUpdatedInput(input: unknown, answers: Record<string
     };
 }
 
-interface PendingRequest {
-    resolve: (value: PermissionResult) => void;
-    reject: (error: Error) => void;
-    toolName: string;
-    input: unknown;
-}
-
-export class PermissionHandler {
+export class PermissionHandler extends BasePermissionHandler<PermissionResponse, PermissionResult> {
     private toolCalls: { id: string, name: string, input: any, used: boolean }[] = [];
     private responses = new Map<string, PermissionResponse>();
-    private pendingRequests = new Map<string, PendingRequest>();
     private session: Session;
     private allowedTools = new Set<string>();
     private allowedBashLiterals = new Set<string>();
@@ -108,8 +107,8 @@ export class PermissionHandler {
     private onPermissionRequestCallback?: (toolCallId: string) => void;
 
     constructor(session: Session) {
+        super(session.client);
         this.session = session;
-        this.setupClientHandler();
     }
     
     /**
@@ -127,10 +126,17 @@ export class PermissionHandler {
     /**
      * Handler response
      */
-    private handlePermissionResponse(
+    protected handlePermissionResponse(
         response: PermissionResponse,
-        pending: PendingRequest
-    ): void {
+        pending: PendingPermissionRequest<PermissionResult>
+    ): PermissionCompletion {
+        const completion: PermissionCompletion = {
+            status: response.approved ? 'approved' : 'denied',
+            reason: response.reason,
+            mode: response.mode,
+            allowTools: response.allowTools,
+            answers: response.answers
+        };
 
         // Update allowed tools
         if (response.allowTools && response.allowTools.length > 0) {
@@ -152,19 +158,20 @@ export class PermissionHandler {
             this.session.setPermissionMode(response.mode);
         }
 
-        // Handle 
+        // Handle ask_user_question
         if (isAskUserQuestionToolName(pending.toolName)) {
             const answers = response.answers ?? {};
             if (Object.keys(answers).length === 0) {
                 pending.resolve({ behavior: 'deny', message: 'No answers were provided.' });
-                return;
+                completion.status = 'denied';
+                completion.reason = completion.reason ?? 'No answers were provided.';
+            } else {
+                pending.resolve({
+                    behavior: 'allow',
+                    updatedInput: buildAskUserQuestionUpdatedInput(pending.input, answers)
+                });
             }
-
-            pending.resolve({
-                behavior: 'allow',
-                updatedInput: buildAskUserQuestionUpdatedInput(pending.input, answers)
-            });
-            return;
+            return completion;
         }
 
         if (pending.toolName === 'exit_plan_mode' || pending.toolName === 'ExitPlanMode') {
@@ -173,7 +180,7 @@ export class PermissionHandler {
             if (response.approved) {
                 logger.debug('Plan approved - injecting PLAN_FAKE_RESTART');
                 // Inject the approval message at the beginning of the queue
-                if (response.mode && ['default', 'acceptEdits', 'bypassPermissions'].includes(response.mode)) {
+                if (response.mode && PLAN_EXIT_MODES.includes(response.mode)) {
                     this.session.queue.unshift(PLAN_FAKE_RESTART, { permissionMode: response.mode });
                 } else {
                     this.session.queue.unshift(PLAN_FAKE_RESTART, { permissionMode: 'default' });
@@ -182,14 +189,16 @@ export class PermissionHandler {
             } else {
                 pending.resolve({ behavior: 'deny', message: response.reason || 'Plan rejected' });
             }
-        } else {
-            // Handle default case for all other tools
-            const result: PermissionResult = response.approved
-                ? { behavior: 'allow', updatedInput: (pending.input as Record<string, unknown>) || {} }
-                : { behavior: 'deny', message: response.reason || `The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.` };
-
-            pending.resolve(result);
+            return completion;
         }
+
+        // Handle default case for all other tools
+        const result: PermissionResult = response.approved
+            ? { behavior: 'allow', updatedInput: (pending.input as Record<string, unknown>) || {} }
+            : { behavior: 'deny', message: response.reason || `The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are doing and wait for the user to tell you how to proceed.` };
+
+        pending.resolve(result);
+        return completion;
     }
 
     /**
@@ -265,7 +274,7 @@ export class PermissionHandler {
             signal.addEventListener('abort', abortHandler, { once: true });
 
             // Store the pending request
-            this.pendingRequests.set(id, {
+            this.addPendingRequest(id, toolName, input, {
                 resolve: (result: PermissionResult) => {
                     signal.removeEventListener('abort', abortHandler);
                     resolve(result);
@@ -273,28 +282,8 @@ export class PermissionHandler {
                 reject: (error: Error) => {
                     signal.removeEventListener('abort', abortHandler);
                     reject(error);
-                },
-                toolName,
-                input
-            });
-
-            // Trigger callback to send delayed messages immediately
-            if (this.onPermissionRequestCallback) {
-                this.onPermissionRequestCallback(id);
-            }
-            
-            // Update agent state
-            this.session.client.updateAgentState((currentState) => ({
-                ...currentState,
-                requests: {
-                    ...currentState.requests,
-                    [id]: {
-                        tool: toolName,
-                        arguments: input,
-                        createdAt: Date.now()
-                    }
                 }
-            }));
+            });
 
             logger.debug(`Permission request sent for tool call ${id}: ${toolName}`);
         });
@@ -414,80 +403,9 @@ export class PermissionHandler {
         this.allowedBashLiterals.clear();
         this.allowedBashPrefixes.clear();
 
-        // Cancel all pending requests
-        for (const [, pending] of this.pendingRequests.entries()) {
-            pending.reject(new Error('Session reset'));
-        }
-        this.pendingRequests.clear();
-
-        // Move all pending requests to completedRequests with canceled status
-        this.session.client.updateAgentState((currentState) => {
-            const pendingRequests = currentState.requests || {};
-            const completedRequests = { ...currentState.completedRequests };
-
-            // Move each pending request to completed with canceled status
-            for (const [id, request] of Object.entries(pendingRequests)) {
-                completedRequests[id] = {
-                    ...request,
-                    completedAt: Date.now(),
-                    status: 'canceled',
-                    reason: 'Session switched to local mode'
-                };
-            }
-
-            return {
-                ...currentState,
-                requests: {}, // Clear all pending requests
-                completedRequests
-            };
-        });
-    }
-
-    /**
-     * Sets up the client handler for permission responses
-     */
-    private setupClientHandler(): void {
-        this.session.client.rpcHandlerManager.registerHandler<PermissionResponse, void>('permission', async (message) => {
-            logger.debug(`Permission response: ${JSON.stringify(message)}`);
-
-            const id = message.id;
-            const pending = this.pendingRequests.get(id);
-
-            if (!pending) {
-                logger.debug('Permission request not found or already resolved');
-                return;
-            }
-
-            // Store the response with timestamp
-            this.responses.set(id, { ...message, receivedAt: Date.now() });
-            this.pendingRequests.delete(id);
-
-            // Handle the permission response based on tool type
-            this.handlePermissionResponse(message, pending);
-
-            // Move processed request to completedRequests
-            this.session.client.updateAgentState((currentState) => {
-                const request = currentState.requests?.[id];
-                if (!request) return currentState;
-                let r = { ...currentState.requests };
-                delete r[id];
-                return {
-                    ...currentState,
-                    requests: r,
-                    completedRequests: {
-                        ...currentState.completedRequests,
-                        [id]: {
-                            ...request,
-                            completedAt: Date.now(),
-                            status: message.approved ? 'approved' : 'denied',
-                            reason: message.reason,
-                            mode: message.mode,
-                            allowTools: message.allowTools,
-                            answers: message.answers
-                        }
-                    }
-                };
-            });
+        this.cancelPendingRequests({
+            completedReason: 'Session switched to local mode',
+            rejectMessage: 'Session reset'
         });
     }
 
@@ -496,5 +414,20 @@ export class PermissionHandler {
      */
     getResponses(): Map<string, PermissionResponse> {
         return this.responses;
+    }
+
+    protected handleMissingPendingResponse(_response: PermissionResponse): void {
+        logger.debug('Permission request not found or already resolved');
+    }
+
+    protected onResponseReceived(response: PermissionResponse): void {
+        logger.debug(`Permission response: ${JSON.stringify(response)}`);
+        this.responses.set(response.id, { ...response, receivedAt: Date.now() });
+    }
+
+    protected onRequestRegistered(toolCallId: string): void {
+        if (this.onPermissionRequestCallback) {
+            this.onPermissionRequestCallback(toolCallId);
+        }
     }
 }

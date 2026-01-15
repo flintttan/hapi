@@ -1,10 +1,9 @@
-import { InvalidateSync } from "@/utils/sync";
 import { RawJSONLines, RawJSONLinesSchema } from "../types";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { readFile } from "node:fs/promises";
 import { logger } from "@/ui/logger";
-import { startFileWatcher } from "@/modules/watcher/startFileWatcher";
 import { getProjectPath } from "./path";
+import { BaseSessionScanner, SessionFileScanEntry, SessionFileScanResult, SessionFileScanStats } from "@/modules/common/session/BaseSessionScanner";
 
 /**
  * Known internal Claude Code event types that should be silently skipped.
@@ -18,132 +17,138 @@ const INTERNAL_CLAUDE_EVENT_TYPES = new Set([
 ]);
 
 export async function createSessionScanner(opts: {
-    sessionId: string | null,
-    workingDirectory: string
-    onMessage: (message: RawJSONLines) => void
+    sessionId: string | null;
+    workingDirectory: string;
+    onMessage: (message: RawJSONLines) => void;
 }) {
-
-    // Resolve project directory
-    const projectDir = getProjectPath(opts.workingDirectory);
-
-    // Finished, pending finishing and current session
-    let finishedSessions = new Set<string>();
-    let pendingSessions = new Set<string>();
-    let currentSessionId: string | null = null;
-    let watchers = new Map<string, (() => void)>();
-    let processedMessageKeys = new Set<string>();
-
-    // Mark existing messages as processed and start watching the initial session
-    if (opts.sessionId) {
-        let messages = await readSessionLog(projectDir, opts.sessionId);
-        logger.debug(`[SESSION_SCANNER] Marking ${messages.length} existing messages as processed from session ${opts.sessionId}`);
-        for (let m of messages) {
-            processedMessageKeys.add(messageKey(m));
-        }
-        // IMPORTANT: Also start watching the initial session file because Claude Code
-        // may continue writing to it even after creating a new session with --resume
-        // (agent tasks and other updates can still write to the original session file)
-        currentSessionId = opts.sessionId;
-    }
-
-    // Main sync function
-    const sync = new InvalidateSync(async () => {
-        // logger.debug(`[SESSION_SCANNER] Syncing...`);
-
-        // Collect session ids - include ALL sessions that have watchers
-        // This ensures we continue processing sessions that Claude Code may still write to
-        let sessions: string[] = [];
-        for (let p of pendingSessions) {
-            sessions.push(p);
-        }
-        if (currentSessionId && !pendingSessions.has(currentSessionId)) {
-            sessions.push(currentSessionId);
-        }
-        // Also process sessions that have active watchers (they may still receive updates)
-        for (let [sessionId] of watchers) {
-            if (!sessions.includes(sessionId)) {
-                sessions.push(sessionId);
-            }
-        }
-
-        // Process sessions
-        for (let session of sessions) {
-            const sessionMessages = await readSessionLog(projectDir, session);
-            let skipped = 0;
-            let sent = 0;
-            for (let file of sessionMessages) {
-                let key = messageKey(file);
-                if (processedMessageKeys.has(key)) {
-                    skipped++;
-                    continue;
-                }
-                processedMessageKeys.add(key);
-                logger.debug(`[SESSION_SCANNER] Sending new message: type=${file.type}, uuid=${file.type === 'summary' ? file.leafUuid : file.uuid}`);
-                opts.onMessage(file);
-                sent++;
-            }
-            if (sessionMessages.length > 0) {
-                logger.debug(`[SESSION_SCANNER] Session ${session}: found=${sessionMessages.length}, skipped=${skipped}, sent=${sent}`);
-            }
-        }
-
-        // Move pending sessions to finished sessions (but keep processing them via watchers)
-        for (let p of sessions) {
-            if (pendingSessions.has(p)) {
-                pendingSessions.delete(p);
-                finishedSessions.add(p);
-            }
-        }
-
-        // Update watchers for all sessions
-        for (let p of sessions) {
-            if (!watchers.has(p)) {
-                logger.debug(`[SESSION_SCANNER] Starting watcher for session: ${p}`);
-                watchers.set(p, startFileWatcher(join(projectDir, `${p}.jsonl`), () => { sync.invalidate(); }));
-            }
-        }
+    const scanner = new ClaudeSessionScanner({
+        sessionId: opts.sessionId,
+        workingDirectory: opts.workingDirectory,
+        onMessage: opts.onMessage
     });
-    await sync.invalidateAndAwait();
 
-    // Periodic sync
-    const intervalId = setInterval(() => { sync.invalidate(); }, 3000);
+    await scanner.start();
 
-    // Public interface
     return {
         cleanup: async () => {
-            clearInterval(intervalId);
-            for (let w of watchers.values()) {
-                w();
-            }
-            watchers.clear();
-            await sync.invalidateAndAwait();
-            sync.stop();
+            await scanner.cleanup();
         },
         onNewSession: (sessionId: string) => {
-            if (currentSessionId === sessionId) {
-                logger.debug(`[SESSION_SCANNER] New session: ${sessionId} is the same as the current session, skipping`);
-                return;
-            }
-            if (finishedSessions.has(sessionId)) {
-                logger.debug(`[SESSION_SCANNER] New session: ${sessionId} is already finished, skipping`);
-                return;
-            }
-            if (pendingSessions.has(sessionId)) {
-                logger.debug(`[SESSION_SCANNER] New session: ${sessionId} is already pending, skipping`);
-                return;
-            }
-            if (currentSessionId) {
-                pendingSessions.add(currentSessionId);
-            }
-            logger.debug(`[SESSION_SCANNER] New session: ${sessionId}`)
-            currentSessionId = sessionId;
-            sync.invalidate();
-        },
-    }
+            scanner.onNewSession(sessionId);
+        }
+    };
 }
 
 export type SessionScanner = ReturnType<typeof createSessionScanner>;
 
+
+class ClaudeSessionScanner extends BaseSessionScanner<RawJSONLines> {
+    private readonly projectDir: string;
+    private readonly onMessage: (message: RawJSONLines) => void;
+    private readonly finishedSessions = new Set<string>();
+    private readonly pendingSessions = new Set<string>();
+    private currentSessionId: string | null;
+    private readonly scannedSessions = new Set<string>();
+
+    constructor(opts: { sessionId: string | null; workingDirectory: string; onMessage: (message: RawJSONLines) => void }) {
+        super({ intervalMs: 3000 });
+        this.projectDir = getProjectPath(opts.workingDirectory);
+        this.onMessage = opts.onMessage;
+        this.currentSessionId = opts.sessionId;
+    }
+
+    public onNewSession(sessionId: string): void {
+        if (this.currentSessionId === sessionId) {
+            logger.debug(`[SESSION_SCANNER] New session: ${sessionId} is the same as the current session, skipping`);
+            return;
+        }
+        if (this.finishedSessions.has(sessionId)) {
+            logger.debug(`[SESSION_SCANNER] New session: ${sessionId} is already finished, skipping`);
+            return;
+        }
+        if (this.pendingSessions.has(sessionId)) {
+            logger.debug(`[SESSION_SCANNER] New session: ${sessionId} is already pending, skipping`);
+            return;
+        }
+        if (this.currentSessionId) {
+            this.pendingSessions.add(this.currentSessionId);
+        }
+        logger.debug(`[SESSION_SCANNER] New session: ${sessionId}`);
+        this.currentSessionId = sessionId;
+        this.invalidate();
+    }
+
+    protected async initialize(): Promise<void> {
+        if (!this.currentSessionId) {
+            return;
+        }
+        const sessionFile = this.sessionFilePath(this.currentSessionId);
+        const { events, totalLines } = await readSessionLog(sessionFile, 0);
+        logger.debug(`[SESSION_SCANNER] Marking ${events.length} existing messages as processed from session ${this.currentSessionId}`);
+        const keys = events.map((entry) => messageKey(entry.event));
+        this.seedProcessedKeys(keys);
+        this.setCursor(sessionFile, totalLines);
+    }
+
+    protected async beforeScan(): Promise<void> {
+        this.scannedSessions.clear();
+    }
+
+    protected async findSessionFiles(): Promise<string[]> {
+        const files = new Set<string>();
+        for (const sessionId of this.pendingSessions) {
+            files.add(this.sessionFilePath(sessionId));
+        }
+        if (this.currentSessionId && !this.pendingSessions.has(this.currentSessionId)) {
+            files.add(this.sessionFilePath(this.currentSessionId));
+        }
+        for (const watched of this.getWatchedFiles()) {
+            files.add(watched);
+        }
+        return [...files];
+    }
+
+    protected async parseSessionFile(filePath: string, cursor: number): Promise<SessionFileScanResult<RawJSONLines>> {
+        const sessionId = sessionIdFromPath(filePath);
+        if (sessionId) {
+            this.scannedSessions.add(sessionId);
+        }
+        const { events, totalLines } = await readSessionLog(filePath, cursor);
+        return {
+            events,
+            nextCursor: totalLines
+        };
+    }
+
+    protected generateEventKey(event: RawJSONLines): string {
+        return messageKey(event);
+    }
+
+    protected async handleFileScan(stats: SessionFileScanStats<RawJSONLines>): Promise<void> {
+        for (const message of stats.events) {
+            const id = message.type === 'summary' ? message.leafUuid : message.uuid;
+            logger.debug(`[SESSION_SCANNER] Sending new message: type=${message.type}, uuid=${id}`);
+            this.onMessage(message);
+        }
+        if (stats.parsedCount > 0) {
+            const sessionId = sessionIdFromPath(stats.filePath) ?? 'unknown';
+            logger.debug(`[SESSION_SCANNER] Session ${sessionId}: found=${stats.parsedCount}, skipped=${stats.skippedCount}, sent=${stats.newCount}`);
+        }
+    }
+
+    protected async afterScan(): Promise<void> {
+        for (const sessionId of this.scannedSessions) {
+            if (this.pendingSessions.has(sessionId)) {
+                this.pendingSessions.delete(sessionId);
+                this.finishedSessions.add(sessionId);
+            }
+        }
+    }
+
+    private sessionFilePath(sessionId: string): string {
+        return join(this.projectDir, `${sessionId}.jsonl`);
+    }
+}
 
 //
 // Helpers
@@ -164,22 +169,28 @@ function messageKey(message: RawJSONLines): string {
 }
 
 /**
- * Read and parse session log file
- * Returns only valid conversation messages, silently skipping internal events
+ * Read and parse session log file.
+ * Returns only valid conversation messages, silently skipping internal events.
  */
-async function readSessionLog(projectDir: string, sessionId: string): Promise<RawJSONLines[]> {
-    const expectedSessionFile = join(projectDir, `${sessionId}.jsonl`);
-    logger.debug(`[SESSION_SCANNER] Reading session file: ${expectedSessionFile}`);
+async function readSessionLog(filePath: string, startLine: number): Promise<{ events: SessionFileScanEntry<RawJSONLines>[]; totalLines: number }> {
+    logger.debug(`[SESSION_SCANNER] Reading session file: ${filePath}`);
     let file: string;
     try {
-        file = await readFile(expectedSessionFile, 'utf-8');
+        file = await readFile(filePath, 'utf-8');
     } catch (error) {
-        logger.debug(`[SESSION_SCANNER] Session file not found: ${expectedSessionFile}`);
-        return [];
+        logger.debug(`[SESSION_SCANNER] Session file not found: ${filePath}`);
+        return { events: [], totalLines: startLine };
     }
-    let lines = file.split('\n');
-    let messages: RawJSONLines[] = [];
-    for (let l of lines) {
+    const lines = file.split('\n');
+    const hasTrailingEmpty = lines.length > 0 && lines[lines.length - 1] === '';
+    const totalLines = hasTrailingEmpty ? lines.length - 1 : lines.length;
+    let effectiveStartLine = startLine;
+    if (effectiveStartLine > totalLines) {
+        effectiveStartLine = 0;
+    }
+    const messages: SessionFileScanEntry<RawJSONLines>[] = [];
+    for (let index = effectiveStartLine; index < lines.length; index += 1) {
+        const l = lines[index];
         try {
             if (l.trim() === '') {
                 continue;
@@ -194,15 +205,22 @@ async function readSessionLog(projectDir: string, sessionId: string): Promise<Ra
             
             let parsed = RawJSONLinesSchema.safeParse(message);
             if (!parsed.success) {
-                // Unknown message types are silently skipped
-                // They will be tracked by processedMessageKeys to avoid reprocessing
+                // Unknown message types are silently skipped.
                 continue;
             }
-            messages.push(parsed.data);
+            messages.push({ event: parsed.data, lineIndex: index });
         } catch (e) {
             logger.debug(`[SESSION_SCANNER] Error processing message: ${e}`);
             continue;
         }
     }
-    return messages;
+    return { events: messages, totalLines };
+}
+
+function sessionIdFromPath(filePath: string): string | null {
+    const base = basename(filePath);
+    if (!base.endsWith('.jsonl')) {
+        return null;
+    }
+    return base.slice(0, -'.jsonl'.length);
 }

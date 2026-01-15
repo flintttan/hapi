@@ -3,6 +3,7 @@ import { isPermissionModeAllowedForFlavor } from '@hapi/protocol'
 import type { ApiClient } from '@/api/client'
 import type { ModelMode, PermissionMode } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
+import { clearMessageWindow } from '@/lib/message-window-store'
 
 export function useSessionActions(
     api: ApiClient | null,
@@ -100,7 +101,7 @@ export function useSessionActions(
         onSuccess: async () => {
             if (!sessionId) return
             queryClient.removeQueries({ queryKey: queryKeys.session(sessionId) })
-            queryClient.removeQueries({ queryKey: queryKeys.messages(sessionId) })
+            clearMessageWindow(sessionId)
             await queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
         },
     })

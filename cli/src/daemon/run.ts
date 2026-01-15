@@ -12,6 +12,8 @@ import { getEnvironmentInfo } from '@/ui/doctor';
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
 import { writeDaemonState, DaemonLocallyPersistedState, readDaemonState, acquireDaemonLock, releaseDaemonLock } from '@/persistence';
 import { isProcessAlive, isWindows, killProcess, killProcessByChildProcess } from '@/utils/process';
+import { withRetry } from '@/utils/time';
+import { isRetryableConnectionError } from '@/utils/errorUtils';
 
 import { cleanupDaemonState, getInstalledCliMtimeMs, isDaemonRunningCurrentlyInstalledHappyVersion, stopDaemon } from './controlClient';
 import { startDaemonControlServer } from './controlServer';
@@ -522,12 +524,24 @@ export async function startDaemon(): Promise<void> {
     // Create API client
     const api = await ApiClient.create();
 
-    // Get or create machine
-    const machine = await api.getOrCreateMachine({
-      machineId,
-      metadata: buildMachineMetadata(),
-      daemonState: initialDaemonState
-    });
+    // Get or create machine (with retry for transient connection errors)
+    const machine = await withRetry(
+      () => api.getOrCreateMachine({
+        machineId,
+        metadata: buildMachineMetadata(),
+        daemonState: initialDaemonState
+      }),
+      {
+        maxAttempts: 60,
+        minDelay: 1000,
+        maxDelay: 30000,
+        shouldRetry: isRetryableConnectionError,
+        onRetry: (error, attempt, nextDelayMs) => {
+          const errorMsg = error instanceof Error ? error.message : String(error)
+          logger.debug(`[DAEMON RUN] Failed to register machine (attempt ${attempt}), retrying in ${nextDelayMs}ms: ${errorMsg}`)
+        }
+      }
+    );
     logger.debug(`[DAEMON RUN] Machine registered: ${machine.id}`);
 
     // Create realtime machine session

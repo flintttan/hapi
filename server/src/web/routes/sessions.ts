@@ -1,68 +1,10 @@
-import { getPermissionModesForFlavor, isModelModeAllowedForFlavor } from '@hapi/protocol'
+import { getPermissionModesForFlavor, isModelModeAllowedForFlavor, isPermissionModeAllowedForFlavor, toSessionSummary } from '@hapi/protocol'
 import { ModelModeSchema, PermissionModeSchema } from '@hapi/protocol/schemas'
 import { Hono } from 'hono'
 import { z } from 'zod'
-import type { ModelMode } from '@hapi/protocol/types'
 import type { SyncEngine, Session } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
-
-type SessionSummaryMetadata = {
-    name?: string
-    path: string
-    machineId?: string
-    summary?: { text: string }
-    flavor?: string | null
-    worktree?: {
-        basePath: string
-        branch: string
-        name: string
-        worktreePath?: string
-        createdAt?: number
-    }
-}
-
-type SessionSummary = {
-    id: string
-    active: boolean
-    thinking: boolean
-    activeAt: number
-    updatedAt: number
-    metadata: SessionSummaryMetadata | null
-    todoProgress: { completed: number; total: number } | null
-    pendingRequestsCount: number
-    modelMode?: ModelMode
-}
-
-function toSessionSummary(session: Session): SessionSummary {
-    const pendingRequestsCount = session.agentState?.requests ? Object.keys(session.agentState.requests).length : 0
-
-    const metadata: SessionSummaryMetadata | null = session.metadata ? {
-        name: session.metadata.name,
-        path: session.metadata.path,
-        machineId: session.metadata.machineId ?? undefined,
-        summary: session.metadata.summary ? { text: session.metadata.summary.text } : undefined,
-        flavor: session.metadata.flavor ?? null,
-        worktree: session.metadata.worktree
-    } : null
-
-    const todoProgress = session.todos?.length ? {
-        completed: session.todos.filter(t => t.status === 'completed').length,
-        total: session.todos.length
-    } : null
-
-    return {
-        id: session.id,
-        active: session.active,
-        thinking: session.thinking,
-        activeAt: session.activeAt,
-        updatedAt: session.updatedAt,
-        metadata,
-        todoProgress,
-        pendingRequestsCount,
-        modelMode: session.modelMode
-    }
-}
 
 const permissionModeSchema = z.object({
     mode: PermissionModeSchema
@@ -189,7 +131,7 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Permission mode not supported for session flavor' }, 400)
         }
 
-        if (!allowedModes.includes(mode)) {
+        if (!isPermissionModeAllowedForFlavor(mode, flavor)) {
             return c.json({ error: 'Invalid permission mode for session flavor' }, 400)
         }
 

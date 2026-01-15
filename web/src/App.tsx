@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { Outlet, useLocation, useMatchRoute } from '@tanstack/react-router'
+import { Outlet, useLocation, useMatchRoute, useRouter } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { getTelegramWebApp, isTelegramApp } from '@/hooks/useTelegram'
 import { initializeTheme } from '@/hooks/useTheme'
@@ -9,22 +9,41 @@ import { useServerUrl } from '@/hooks/useServerUrl'
 import { useSSE } from '@/hooks/useSSE'
 import { useSyncingState } from '@/hooks/useSyncingState'
 import { usePushNotifications } from '@/hooks/usePushNotifications'
+import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { queryKeys } from '@/lib/query-keys'
 import { AppContextProvider } from '@/lib/app-context'
+import { fetchLatestMessages } from '@/lib/message-window-store'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
+import { useTranslation } from '@/lib/use-translation'
 import { LoginPrompt } from '@/components/LoginPrompt'
 import { InstallPrompt } from '@/components/InstallPrompt'
 import { OfflineBanner } from '@/components/OfflineBanner'
 import { SyncingBanner } from '@/components/SyncingBanner'
 import { LoadingState } from '@/components/LoadingState'
+import { ToastContainer } from '@/components/ToastContainer'
+import { ToastProvider, useToast } from '@/lib/toast-context'
+import type { SyncEvent } from '@/types/api'
+
+type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
 
 export function App() {
+    return (
+        <ToastProvider>
+            <AppInner />
+        </ToastProvider>
+    )
+}
+
+function AppInner() {
+    const { t } = useTranslation()
     const { serverUrl, baseUrl, setServerUrl, clearServerUrl } = useServerUrl()
     const { authSource, storedUser, isLoading: isAuthSourceLoading, setAccessToken, clearAuth } = useAuthSource(baseUrl)
     const { token, api, user, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl, storedUser)
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
     const matchRoute = useMatchRoute()
+    const router = useRouter()
+    const { addToast } = useToast()
 
     useEffect(() => {
         const tg = getTelegramWebApp()
@@ -91,16 +110,17 @@ export function App() {
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId' })
     const isNewSessionPage = Boolean(matchRoute({ to: '/sessions/new' }))
     const selectedSessionId = sessionMatch && !isNewSessionPage ? sessionMatch.sessionId : null
-    const handleLogout = useCallback(() => {
-        clearAuth()
-        queryClient.clear()
-    }, [clearAuth, queryClient])
     const { isSyncing, startSync, endSync } = useSyncingState()
     const syncTokenRef = useRef(0)
     const isFirstConnectRef = useRef(true)
     const baseUrlRef = useRef(baseUrl)
     const pushPromptedRef = useRef(false)
     const { isSupported: isPushSupported, permission: pushPermission, requestPermission, subscribe } = usePushNotifications(api)
+
+    const handleLogout = useCallback(() => {
+        clearAuth()
+        queryClient.clear()
+    }, [clearAuth, queryClient])
 
     useEffect(() => {
         if (baseUrlRef.current === baseUrl) {
@@ -111,6 +131,21 @@ export function App() {
         syncTokenRef.current = 0
         queryClient.clear()
     }, [baseUrl, queryClient])
+
+    // Clean up URL params after successful auth (for direct access links)
+    useEffect(() => {
+        if (!token || !api) return
+        const { pathname, search, hash, state } = router.history.location
+        const searchParams = new URLSearchParams(search)
+        if (!searchParams.has('server') && !searchParams.has('token')) {
+            return
+        }
+        searchParams.delete('server')
+        searchParams.delete('token')
+        const nextSearch = searchParams.toString()
+        const nextHref = `${pathname}${nextSearch ? `?${nextSearch}` : ''}${hash}`
+        router.history.replace(nextHref, state)
+    }, [token, api, router])
 
     useEffect(() => {
         if (!api || !token) {
@@ -157,11 +192,13 @@ export function App() {
         const invalidations = [
             queryClient.invalidateQueries({ queryKey: queryKeys.sessions }),
             ...(selectedSessionId ? [
-                queryClient.invalidateQueries({ queryKey: queryKeys.session(selectedSessionId) }),
-                queryClient.invalidateQueries({ queryKey: queryKeys.messages(selectedSessionId) })
+                queryClient.invalidateQueries({ queryKey: queryKeys.session(selectedSessionId) })
             ] : [])
         ]
-        Promise.all(invalidations)
+        const refreshMessages = (selectedSessionId && api)
+            ? fetchLatestMessages(api, selectedSessionId)
+            : Promise.resolve()
+        Promise.all([...invalidations, refreshMessages])
             .catch((error) => {
                 console.error('Failed to invalidate queries on SSE connect:', error)
             })
@@ -171,9 +208,17 @@ export function App() {
                     endSync()
                 }
             })
-    }, [queryClient, selectedSessionId, startSync, endSync])
+    }, [api, queryClient, selectedSessionId, startSync, endSync])
 
     const handleSseEvent = useCallback(() => {}, [])
+    const handleToast = useCallback((event: ToastEvent) => {
+        addToast({
+            title: event.data.title,
+            body: event.data.body,
+            sessionId: event.data.sessionId,
+            url: event.data.url
+        })
+    }, [addToast])
 
     const eventSubscription = useMemo(() => {
         if (selectedSessionId) {
@@ -182,20 +227,27 @@ export function App() {
         return { all: true }
     }, [selectedSessionId])
 
-    useSSE({
-        enabled: Boolean(api && token && authSource),
+    const { subscriptionId } = useSSE({
+        enabled: Boolean(api && token),
         token: token ?? '',
         baseUrl,
         subscription: eventSubscription,
         onConnect: handleSseConnect,
         onEvent: handleSseEvent,
+        onToast: handleToast
+    })
+
+    useVisibilityReporter({
+        api,
+        subscriptionId,
+        enabled: Boolean(api && token)
     })
 
     // Loading auth source
     if (isAuthSourceLoading) {
         return (
             <div className="h-full flex items-center justify-center p-4">
-                <LoadingState label="Loading…" className="text-sm" />
+                <LoadingState label={t('loading')} className="text-sm" />
             </div>
         )
     }
@@ -231,14 +283,14 @@ export function App() {
     if (isAuthLoading || (authSource && !token && !authError)) {
         return (
             <div className="h-full flex items-center justify-center p-4">
-                <LoadingState label="Authorizing…" className="text-sm" />
+                <LoadingState label={t('authorizing')} className="text-sm" />
             </div>
         )
     }
 
     // Auth error
     if (authError || !token || !api) {
-        // Browser auth failed (refresh token / access token / password)
+        // If using access token and auth failed, show login again
         if (authSource.type === 'accessToken' || authSource.type === 'refreshToken' || authSource.type === 'password') {
             return (
                 <LoginPrompt
@@ -247,7 +299,7 @@ export function App() {
                     serverUrl={serverUrl}
                     setServerUrl={setServerUrl}
                     clearServerUrl={clearServerUrl}
-                    error={authError ?? 'Authentication failed'}
+                    error={authError ?? t('login.error.authFailed')}
                 />
             )
         }
@@ -255,9 +307,9 @@ export function App() {
         // Telegram auth failed
         return (
             <div className="p-4 space-y-3">
-                <div className="text-base font-semibold">HAPI</div>
+                <div className="text-base font-semibold">{t('login.title')}</div>
                 <div className="text-sm text-red-600">
-                    {authError ?? 'Not authorized'}
+                    {authError ?? t('login.error.authFailed')}
                 </div>
                 <div className="text-xs text-[var(--app-hint)]">
                     Open this page from Telegram using the bot's "Open App" button (not "Open in browser").
@@ -266,22 +318,14 @@ export function App() {
         )
     }
 
-    // 等待 user 就绪，避免首次登录时触发 error boundary。
-    if (!user) {
-        return (
-            <div className="h-full flex items-center justify-center p-4">
-                <LoadingState label="Authorizing…" className="text-sm" />
-            </div>
-        )
-    }
-
     return (
-        <AppContextProvider value={{ api, token, user, onLogout: handleLogout }}>
+        <AppContextProvider value={{ api, token, baseUrl, user, onLogout: handleLogout }}>
             <SyncingBanner isSyncing={isSyncing} />
             <OfflineBanner />
             <div className="h-full flex flex-col">
                 <Outlet />
             </div>
+            <ToastContainer />
             <InstallPrompt />
         </AppContextProvider>
     )

@@ -1,3 +1,5 @@
+import { isPermissionModeAllowedForFlavor } from '@hapi/protocol'
+import { PermissionModeSchema } from '@hapi/protocol/schemas'
 import { Hono } from 'hono'
 import { z } from 'zod'
 import type { SyncEngine } from '../../sync/syncEngine'
@@ -7,7 +9,7 @@ import { requireSessionFromParam, requireSyncEngine } from './guards'
 const decisionSchema = z.enum(['approved', 'approved_for_session', 'denied', 'abort'])
 
 const approveBodySchema = z.object({
-    mode: z.enum(['default', 'acceptEdits', 'bypassPermissions', 'plan']).optional(),
+    mode: PermissionModeSchema.optional(),
     allowTools: z.array(z.string()).optional(),
     decision: decisionSchema.optional(),
     answers: z.record(z.string(), z.array(z.string())).optional()
@@ -46,6 +48,12 @@ export function createPermissionsRoutes(getSyncEngine: () => SyncEngine | null):
         }
 
         const mode = parsed.data.mode
+        if (mode !== undefined) {
+            const flavor = session.metadata?.flavor ?? 'claude'
+            if (!isPermissionModeAllowedForFlavor(mode, flavor)) {
+                return c.json({ error: 'Invalid permission mode for session flavor' }, 400)
+            }
+        }
         const allowTools = parsed.data.allowTools
         const decision = parsed.data.decision
         const answers = parsed.data.answers

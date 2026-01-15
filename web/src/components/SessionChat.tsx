@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { AssistantRuntimeProvider } from '@assistant-ui/react'
 import type { ApiClient } from '@/api/client'
@@ -24,10 +24,14 @@ export function SessionChat(props: {
     isLoadingMessages: boolean
     isLoadingMoreMessages: boolean
     isSending: boolean
+    pendingCount: number
+    messagesVersion: number
     onBack: () => void
     onRefresh: () => void
     onLoadMore: () => Promise<unknown>
     onSend: (text: string) => void
+    onFlushPending: () => void
+    onAtBottomChange: (atBottom: boolean) => void
     onRetryMessage?: (localId: string) => void
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
 }) {
@@ -36,6 +40,7 @@ export function SessionChat(props: {
     const controlsDisabled = !props.session.active
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
+    const [forceScrollToken, setForceScrollToken] = useState(0)
     const agentFlavor = props.session.metadata?.flavor ?? null
     const { abortSession, switchSession, setPermissionMode, setModelMode } = useSessionActions(
         props.api,
@@ -134,11 +139,16 @@ export function SessionChat(props: {
         })
     }, [navigate, props.session.id])
 
+    const handleSend = useCallback((text: string) => {
+        props.onSend(text)
+        setForceScrollToken((token) => token + 1)
+    }, [props.onSend])
+
     const runtime = useHappyRuntime({
         session: props.session,
         blocks: reconciled.blocks,
         isSending: props.isSending,
-        onSendMessage: props.onSend,
+        onSendMessage: handleSend,
         onAbort: handleAbort
     })
 
@@ -170,14 +180,18 @@ export function SessionChat(props: {
                         disabled={controlsDisabled}
                         onRefresh={props.onRefresh}
                         onRetryMessage={props.onRetryMessage}
+                        onFlushPending={props.onFlushPending}
+                        onAtBottomChange={props.onAtBottomChange}
                         isLoadingMessages={props.isLoadingMessages}
                         messagesWarning={props.messagesWarning}
                         hasMoreMessages={props.hasMoreMessages}
                         isLoadingMoreMessages={props.isLoadingMoreMessages}
                         onLoadMore={props.onLoadMore}
+                        pendingCount={props.pendingCount}
                         rawMessagesCount={props.messages.length}
                         normalizedMessagesCount={normalizedMessages.length}
-                        renderedMessagesCount={reconciled.blocks.length}
+                        messagesVersion={props.messagesVersion}
+                        forceScrollToken={forceScrollToken}
                     />
 
                     <HappyComposer

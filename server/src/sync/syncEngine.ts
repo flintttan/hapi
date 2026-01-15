@@ -7,7 +7,7 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import type { ClaudePermissionMode, DecryptedMessage, ModelMode, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
+import type { DecryptedMessage, ModelMode, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import type { Server } from 'socket.io'
 import type { Store } from '../store'
 import type { RpcRegistry } from '../socket/rpcRegistry'
@@ -18,7 +18,6 @@ import { MessageService } from './messageService'
 import { RpcGateway, type RpcCommandResponse, type RpcPathExistsResponse, type RpcReadFileResponse } from './rpcGateway'
 import { SessionCache } from './sessionCache'
 
-export type ConnectionStatus = 'disconnected' | 'connected'
 export type { Session, SyncEvent } from '@hapi/protocol/types'
 export type { Machine } from './machineCache'
 export type { SyncEventListener } from './eventPublisher'
@@ -30,7 +29,6 @@ export class SyncEngine {
     private readonly machineCache: MachineCache
     private readonly messageService: MessageService
     private readonly rpcGateway: RpcGateway
-    private connectionStatus: ConnectionStatus = 'connected'
     private inactivityTimer: NodeJS.Timeout | null = null
 
     constructor(
@@ -55,10 +53,6 @@ export class SyncEngine {
         }
     }
 
-    start(): Promise<void> {
-        return Promise.resolve()
-    }
-
     subscribe(listener: SyncEventListener): () => void {
         return this.eventPublisher.subscribe(listener)
     }
@@ -74,10 +68,6 @@ export class SyncEngine {
             return this.machineCache.getMachine(event.machineId)?.namespace
         }
         return undefined
-    }
-
-    getConnectionStatus(): ConnectionStatus {
-        return this.connectionStatus
     }
 
     getSessions(): Session[] {
@@ -207,7 +197,7 @@ export class SyncEngine {
     async approvePermission(
         sessionId: string,
         requestId: string,
-        mode?: ClaudePermissionMode,
+        mode?: PermissionMode,
         allowTools?: string[],
         decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort',
         answers?: Record<string, string[]>

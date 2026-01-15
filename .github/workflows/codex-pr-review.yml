@@ -1,0 +1,118 @@
+name: Codex PR Review
+
+on:
+  pull_request_target:
+    types: [opened, ready_for_review]
+
+concurrency:
+  group: codex-pr-review-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  pr-review:
+    if: |
+      github.event.pull_request.draft == false &&
+      !endsWith(github.actor, '[bot]') &&
+      !contains(github.event.pull_request.labels.*.name, 'bot-skip')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      review_result: ${{ steps.run_codex.outputs.final-message }}
+
+    steps:
+      - name: Check for existing HAPI Bot review
+        id: check_bot
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "*HAPI Bot*";
+            const allowedLogins = (process.env.HAPI_BOT_LOGINS || "github-actions[bot]")
+              .split(",")
+              .map((value) => value.trim())
+              .filter(Boolean);
+            const reviews = await github.paginate(
+              github.rest.pulls.listReviews,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                per_page: 100
+              }
+            );
+            const hasBot = reviews.some(
+              (review) => {
+                if (!(review?.body || "").includes(marker)) {
+                  return false;
+                }
+                const user = review.user;
+                if (!user || user.type !== "Bot") {
+                  return false;
+                }
+                return allowedLogins.includes(user.login);
+              }
+            );
+            core.setOutput("has_bot", hasBot ? "true" : "false");
+            if (hasBot) {
+              core.info("Existing HAPI Bot review found; skipping.");
+            }
+        env:
+          HAPI_BOT_LOGINS: ${{ vars.HAPI_BOT_LOGINS }}
+
+      - name: Checkout repository
+        if: steps.check_bot.outputs.has_bot != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: refs/pull/${{ github.event.pull_request.number }}/merge
+          fetch-depth: 0
+
+      - name: Pre-fetch base and head refs
+        if: steps.check_bot.outputs.has_bot != 'true'
+        run: |
+          git fetch --no-tags origin \
+            ${{ github.event.pull_request.base.ref }} \
+            +refs/pull/${{ github.event.pull_request.number }}/head
+
+      - name: Run Codex for PR Review
+        id: run_codex
+        if: steps.check_bot.outputs.has_bot != 'true'
+        uses: openai/codex-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          responses-api-endpoint: ${{ secrets.OPENAI_BASE_URL }}
+          model: ${{ vars.OPENAI_MODEL || 'gpt-5.2-codex' }}
+          effort: ${{ vars.OPENAI_EFFORT || 'high' }}
+          sandbox: danger-full-access
+          safety-strategy: drop-sudo
+          prompt-file: .github/prompts/codex-pr-review.md
+          allow-bots: true
+          allow-users: "*"
+
+  post-review:
+    runs-on: ubuntu-latest
+    needs: pr-review
+    if: needs.pr-review.outputs.review_result != ''
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Post Review Comment
+        uses: actions/github-script@v7
+        env:
+          REVIEW_RESULT: ${{ needs.pr-review.outputs.review_result }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const body = process.env.REVIEW_RESULT;
+            if (body && body.trim()) {
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                body,
+                event: "COMMENT"
+              });
+            }

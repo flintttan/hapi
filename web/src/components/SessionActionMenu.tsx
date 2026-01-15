@@ -1,10 +1,13 @@
 import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle
-} from '@/components/ui/dialog'
-import { Button } from '@/components/ui/button'
+    useCallback,
+    useEffect,
+    useId,
+    useLayoutEffect,
+    useRef,
+    useState,
+    type CSSProperties
+} from 'react'
+import { useTranslation } from '@/lib/use-translation'
 
 type SessionActionMenuProps = {
     isOpen: boolean
@@ -13,6 +16,8 @@ type SessionActionMenuProps = {
     onRename: () => void
     onArchive: () => void
     onDelete: () => void
+    anchorPoint: { x: number; y: number }
+    menuId?: string
 }
 
 function EditIcon(props: { className?: string }) {
@@ -79,8 +84,29 @@ function TrashIcon(props: { className?: string }) {
     )
 }
 
+type MenuPosition = {
+    top: number
+    left: number
+    transformOrigin: string
+}
+
 export function SessionActionMenu(props: SessionActionMenuProps) {
-    const { isOpen, onClose, sessionActive, onRename, onArchive, onDelete } = props
+    const { t } = useTranslation()
+    const {
+        isOpen,
+        onClose,
+        sessionActive,
+        onRename,
+        onArchive,
+        onDelete,
+        anchorPoint,
+        menuId
+    } = props
+    const menuRef = useRef<HTMLDivElement | null>(null)
+    const [menuPosition, setMenuPosition] = useState<MenuPosition | null>(null)
+    const internalId = useId()
+    const resolvedMenuId = menuId ?? `session-action-menu-${internalId}`
+    const headingId = `${resolvedMenuId}-heading`
 
     const handleRename = () => {
         onClose()
@@ -97,62 +123,144 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onDelete()
     }
 
+    const updatePosition = useCallback(() => {
+        const menuEl = menuRef.current
+        if (!menuEl) return
+
+        const menuRect = menuEl.getBoundingClientRect()
+        const viewportWidth = window.innerWidth
+        const viewportHeight = window.innerHeight
+        const padding = 8
+        const gap = 8
+
+        const spaceBelow = viewportHeight - anchorPoint.y
+        const spaceAbove = anchorPoint.y
+        const openAbove = spaceBelow < menuRect.height + gap && spaceAbove > spaceBelow
+
+        let top = openAbove ? anchorPoint.y - menuRect.height - gap : anchorPoint.y + gap
+        let left = anchorPoint.x - menuRect.width / 2
+        const transformOrigin = openAbove ? 'bottom center' : 'top center'
+
+        top = Math.min(Math.max(top, padding), viewportHeight - menuRect.height - padding)
+        left = Math.min(Math.max(left, padding), viewportWidth - menuRect.width - padding)
+
+        setMenuPosition({ top, left, transformOrigin })
+    }, [anchorPoint])
+
+    useLayoutEffect(() => {
+        if (!isOpen) return
+        updatePosition()
+    }, [isOpen, updatePosition])
+
+    useEffect(() => {
+        if (!isOpen) {
+            setMenuPosition(null)
+            return
+        }
+
+        const handlePointerDown = (event: PointerEvent) => {
+            const target = event.target as Node
+            if (menuRef.current?.contains(target)) return
+            onClose()
+        }
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                onClose()
+            }
+        }
+
+        const handleReflow = () => {
+            updatePosition()
+        }
+
+        document.addEventListener('pointerdown', handlePointerDown)
+        document.addEventListener('keydown', handleKeyDown)
+        window.addEventListener('resize', handleReflow)
+        window.addEventListener('scroll', handleReflow, true)
+
+        return () => {
+            document.removeEventListener('pointerdown', handlePointerDown)
+            document.removeEventListener('keydown', handleKeyDown)
+            window.removeEventListener('resize', handleReflow)
+            window.removeEventListener('scroll', handleReflow, true)
+        }
+    }, [isOpen, onClose, updatePosition])
+
+    useEffect(() => {
+        if (!isOpen) return
+
+        const frame = window.requestAnimationFrame(() => {
+            const firstItem = menuRef.current?.querySelector<HTMLElement>('[role="menuitem"]')
+            firstItem?.focus()
+        })
+
+        return () => window.cancelAnimationFrame(frame)
+    }, [isOpen])
+
+    if (!isOpen) return null
+
+    const menuStyle: CSSProperties | undefined = menuPosition
+        ? {
+            top: menuPosition.top,
+            left: menuPosition.left,
+            transformOrigin: menuPosition.transformOrigin
+        }
+        : undefined
+
+    const baseItemClassName =
+        'flex w-full items-center gap-3 rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]'
+
     return (
-        <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-            <DialogContent
-                className="left-0 right-0 bottom-0 top-auto w-full max-w-none translate-x-0 translate-y-0 rounded-t-2xl rounded-b-none bg-transparent p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-none sm:left-1/2 sm:top-1/2 sm:bottom-auto sm:w-[calc(100vw-24px)] sm:max-w-sm sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:bg-[var(--app-secondary-bg)] sm:p-4 sm:shadow-2xl"
+        <div
+            ref={menuRef}
+            className="fixed z-50 min-w-[200px] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-1 shadow-lg animate-menu-pop"
+            style={menuStyle}
+        >
+            <div
+                id={headingId}
+                className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--app-hint)]"
             >
-                <DialogHeader className="px-1 pb-2 sm:px-0 sm:pb-0">
-                    <div
-                        className="mx-auto mb-2 h-1.5 w-10 rounded-full bg-[var(--app-divider)] sm:hidden"
-                        aria-hidden="true"
-                    />
-                    <DialogTitle className="text-sm sm:text-base">Session Actions</DialogTitle>
-                </DialogHeader>
+                {t('session.more')}
+            </div>
+            <div
+                id={resolvedMenuId}
+                role="menu"
+                aria-labelledby={headingId}
+                className="flex flex-col gap-1"
+            >
+                <button
+                    type="button"
+                    role="menuitem"
+                    className={`${baseItemClassName} hover:bg-[var(--app-subtle-bg)]`}
+                    onClick={handleRename}
+                >
+                    <EditIcon className="text-[var(--app-hint)]" />
+                    {t('session.action.rename')}
+                </button>
 
-                <div className="mt-3 flex flex-col gap-2 sm:mt-4">
-                    <div className="overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)]">
-                        <button
-                            type="button"
-                            onClick={handleRename}
-                            className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-[var(--app-fg)] transition-colors hover:bg-[var(--app-subtle-bg)] active:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                        >
-                            <EditIcon className="text-[var(--app-hint)]" />
-                            Rename
-                        </button>
-                        <div className="h-px bg-[var(--app-divider)]" aria-hidden="true" />
-
-                        {sessionActive ? (
-                            <button
-                                type="button"
-                                onClick={handleArchive}
-                                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-red-600 transition-colors hover:bg-[var(--app-subtle-bg)] active:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                            >
-                                <ArchiveIcon className="text-red-600" />
-                                Archive
-                            </button>
-                        ) : (
-                            <button
-                                type="button"
-                                onClick={handleDelete}
-                                className="flex w-full items-center gap-3 px-4 py-3 text-left text-sm font-medium text-red-600 transition-colors hover:bg-[var(--app-subtle-bg)] active:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]"
-                            >
-                                <TrashIcon className="text-red-600" />
-                                Delete
-                            </button>
-                        )}
-                    </div>
-
-                    <Button
+                {sessionActive ? (
+                    <button
                         type="button"
-                        variant="secondary"
-                        className="h-12 w-full rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]"
-                        onClick={onClose}
+                        role="menuitem"
+                        className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
+                        onClick={handleArchive}
                     >
-                        Cancel
-                    </Button>
-                </div>
-            </DialogContent>
-        </Dialog>
+                        <ArchiveIcon className="text-red-500" />
+                        {t('session.action.archive')}
+                    </button>
+                ) : (
+                    <button
+                        type="button"
+                        role="menuitem"
+                        className={`${baseItemClassName} text-red-500 hover:bg-red-500/10`}
+                        onClick={handleDelete}
+                    >
+                        <TrashIcon className="text-red-500" />
+                        {t('session.action.delete')}
+                    </button>
+                )}
+            </div>
+        </div>
     )
 }

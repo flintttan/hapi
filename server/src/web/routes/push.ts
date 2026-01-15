@@ -31,7 +31,7 @@ export function createPushRoutes(store: Store, vapidPublicKey: string): Hono<Web
 
         const namespace = c.get('namespace')
         const { endpoint, keys } = parsed.data
-        store.addPushSubscription(namespace, {
+        store.push.addPushSubscription(namespace, {
             endpoint,
             p256dh: keys.p256dh,
             auth: keys.auth
@@ -48,7 +48,7 @@ export function createPushRoutes(store: Store, vapidPublicKey: string): Hono<Web
         }
 
         const namespace = c.get('namespace')
-        store.removePushSubscription(namespace, parsed.data.endpoint)
+        store.push.removePushSubscription(namespace, parsed.data.endpoint)
         return c.json({ ok: true })
     })
 

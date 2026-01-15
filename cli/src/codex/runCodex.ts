@@ -8,8 +8,8 @@ import type { CodexSession } from './session';
 import { parseCodexCliOverrides } from './utils/codexCliOverrides';
 import { bootstrapSession } from '@/agent/sessionFactory';
 import { createModeChangeHandler, createRunnerLifecycle, setControlledByUser } from '@/agent/runnerLifecycle';
-import { listSlashCommands } from '@/modules/common/slashCommands';
-import { expandCodexUserPrompt } from './utils/expandUserPrompt';
+import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
+import { PermissionModeSchema } from '@hapi/protocol/schemas';
 
 export { emitReadyIfIdle } from './utils/emitReadyIfIdle';
 
@@ -17,6 +17,7 @@ export async function runCodex(opts: {
     startedBy?: 'daemon' | 'terminal';
     codexArgs?: string[];
     permissionMode?: PermissionMode;
+    resumeSessionId?: string;
 }): Promise<void> {
     const workingDirectory = process.cwd();
     const startedBy = opts.startedBy ?? 'terminal';
@@ -47,19 +48,6 @@ export async function runCodex(opts: {
 
     let currentPermissionMode: PermissionMode = opts.permissionMode ?? 'default';
 
-    const codexUserPromptByName = new Map<string, string>();
-    try {
-        const commands = await listSlashCommands('codex');
-        for (const cmd of commands) {
-            if (cmd.source !== 'user') continue;
-            if (typeof cmd.name !== 'string' || cmd.name.trim().length === 0) continue;
-            if (typeof cmd.content !== 'string' || cmd.content.trim().length === 0) continue;
-            codexUserPromptByName.set(cmd.name.trim(), cmd.content);
-        }
-    } catch (error) {
-        logger.debug('[Codex] Failed to load user prompt templates:', error);
-    }
-
     const lifecycle = createRunnerLifecycle({
         session,
         logTag: 'codex',
@@ -85,13 +73,7 @@ export async function runCodex(opts: {
         const enhancedMode: EnhancedMode = {
             permissionMode: messagePermissionMode ?? 'default'
         };
-
-        const rawText = message.content.text;
-        const expanded = expandCodexUserPrompt(rawText, codexUserPromptByName);
-        if (expanded.matchedCommand) {
-            logger.debug(`[Codex] Expanding user prompt template: /${expanded.matchedCommand}`);
-        }
-        messageQueue.push(expanded.expandedText, enhancedMode);
+        messageQueue.push(message.content.text, enhancedMode);
     });
 
     const formatFailureReason = (message: string): string => {
@@ -102,18 +84,22 @@ export async function runCodex(opts: {
         return `${message.slice(0, maxLength)}...`;
     };
 
+    const resolvePermissionMode = (value: unknown): PermissionMode => {
+        const parsed = PermissionModeSchema.safeParse(value);
+        if (!parsed.success || !isPermissionModeAllowedForFlavor(parsed.data, 'codex')) {
+            throw new Error('Invalid permission mode');
+        }
+        return parsed.data as PermissionMode;
+    };
+
     session.rpcHandlerManager.registerHandler('set-session-config', async (payload: unknown) => {
         if (!payload || typeof payload !== 'object') {
             throw new Error('Invalid session config payload');
         }
-        const config = payload as { permissionMode?: PermissionMode };
+        const config = payload as { permissionMode?: unknown };
 
         if (config.permissionMode !== undefined) {
-            const validModes: PermissionMode[] = ['default', 'read-only', 'safe-yolo', 'yolo'];
-            if (!validModes.includes(config.permissionMode)) {
-                throw new Error('Invalid permission mode');
-            }
-            currentPermissionMode = config.permissionMode;
+            currentPermissionMode = resolvePermissionMode(config.permissionMode);
         }
 
         syncSessionMode();
@@ -131,6 +117,7 @@ export async function runCodex(opts: {
             codexCliOverrides,
             startedBy,
             permissionMode: currentPermissionMode,
+            resumeSessionId: opts.resumeSessionId,
             onModeChange: createModeChangeHandler(session),
             onSessionReady: (instance) => {
                 sessionWrapperRef.current = instance;

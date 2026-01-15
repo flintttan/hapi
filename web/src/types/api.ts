@@ -1,12 +1,21 @@
 import type {
     DecryptedMessage as ProtocolDecryptedMessage,
-    ModelMode,
     Session,
+    SessionSummary,
     SyncEvent as ProtocolSyncEvent,
     WorktreeMetadata
 } from '@hapi/protocol/types'
 
-export type { AgentState, ModelMode, PermissionMode, Session, TodoItem, WorktreeMetadata } from '@hapi/protocol/types'
+export type {
+    AgentState,
+    ModelMode,
+    PermissionMode,
+    Session,
+    SessionSummary,
+    SessionSummaryMetadata,
+    TodoItem,
+    WorktreeMetadata
+} from '@hapi/protocol/types'
 
 export type SessionMetadataSummary = {
     path: string
@@ -19,27 +28,6 @@ export type SessionMetadataSummary = {
     tools?: string[]
     flavor?: string | null
     worktree?: WorktreeMetadata
-}
-
-export type SessionSummaryMetadata = {
-    name?: string
-    path: string
-    machineId?: string
-    summary?: { text: string }
-    flavor?: string | null
-    worktree?: WorktreeMetadata
-}
-
-export type SessionSummary = {
-    id: string
-    active: boolean
-    thinking: boolean
-    activeAt: number
-    updatedAt: number
-    metadata: SessionSummaryMetadata | null
-    todoProgress: { completed: number; total: number } | null
-    pendingRequestsCount: number
-    modelMode?: ModelMode
 }
 
 export type MessageStatus = 'sending' | 'sent' | 'failed'
@@ -182,6 +170,11 @@ export type PushUnsubscribePayload = {
 
 export type PushVapidPublicKeyResponse = {
     publicKey: string
+}
+
+export type VisibilityPayload = {
+    subscriptionId: string
+    visibility: 'visible' | 'hidden'
 }
 
 export type SyncEvent = ProtocolSyncEvent

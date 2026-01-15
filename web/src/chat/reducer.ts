@@ -1,7 +1,7 @@
 import type { AgentState } from '@/types/api'
 import type { ChatBlock, NormalizedMessage, UsageData } from '@/chat/types'
 import { traceMessages, type TracedMessage } from '@/chat/tracer'
-import { dedupeAgentEvents } from '@/chat/reducerEvents'
+import { dedupeAgentEvents, foldApiErrorEvents } from '@/chat/reducerEvents'
 import { collectTitleChanges, collectToolIdsFromMessages, ensureToolBlock, getPermissions } from '@/chat/reducerTools'
 import { reduceTimeline } from '@/chat/reducerTimeline'
 
@@ -46,21 +46,6 @@ export function reduceChatBlocks(
     const reducerContext = { permissionsById, groups, consumedGroupIds, titleChangesByToolUseId, emittedTitleChangeToolUseIds }
     const rootResult = reduceTimeline(root, reducerContext)
     let hasReadyEvent = rootResult.hasReadyEvent
-
-    // If a group couldn't be attached to a Task tool call (e.g. legacy shapes), keep it visible.
-    for (const [taskMessageId, sidechainMessages] of groups) {
-        if (consumedGroupIds.has(taskMessageId)) continue
-        if (sidechainMessages.length === 0) continue
-        const child = reduceTimeline(sidechainMessages, reducerContext)
-        hasReadyEvent = hasReadyEvent || child.hasReadyEvent
-        rootResult.blocks.push({
-            kind: 'agent-event',
-            id: `sidechain:${taskMessageId}`,
-            createdAt: sidechainMessages[0].createdAt,
-            event: { type: 'message', message: 'Task sidechain' }
-        })
-        rootResult.blocks.push(...child.blocks)
-    }
 
     // Only create permission-only tool cards when there is no tool call/result in the transcript.
     for (const [id, entry] of permissionsById) {
@@ -109,5 +94,5 @@ export function reduceChatBlocks(
         }
     }
 
-    return { blocks: dedupeAgentEvents(rootResult.blocks), hasReadyEvent, latestUsage }
+    return { blocks: dedupeAgentEvents(foldApiErrorEvents(rootResult.blocks)), hasReadyEvent, latestUsage }
 }

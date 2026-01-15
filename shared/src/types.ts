@@ -10,6 +10,8 @@ export type {
     WorktreeMetadata
 } from './schemas'
 
+export type { SessionSummary, SessionSummaryMetadata } from './sessionSummary'
+
 export type {
     AgentFlavor,
     ClaudePermissionMode,

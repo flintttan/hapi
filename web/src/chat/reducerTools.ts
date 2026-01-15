@@ -142,6 +142,10 @@ export function collectToolIdsFromMessages(messages: NormalizedMessage[]): Set<s
     return ids
 }
 
+export function isChangeTitleToolName(name: string): boolean {
+    return name === 'mcp__hapi__change_title' || name === 'hapi__change_title'
+}
+
 export function extractTitleFromChangeTitleInput(input: unknown): string | null {
     if (!input || typeof input !== 'object') return null
     const title = (input as { title?: unknown }).title
@@ -154,7 +158,7 @@ export function collectTitleChanges(messages: NormalizedMessage[]): Map<string, 
         if (msg.role !== 'agent') continue
         for (const content of msg.content) {
             if (content.type !== 'tool-call') continue
-            if (content.name !== 'mcp__hapi__change_title') continue
+            if (!isChangeTitleToolName(content.name)) continue
             const title = extractTitleFromChangeTitleInput(content.input)
             if (!title) continue
             map.set(content.id, title)

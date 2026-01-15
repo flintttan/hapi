@@ -1,6 +1,8 @@
 import { logger } from '@/ui/logger';
 import { restoreTerminalState } from '@/ui/terminalState';
 import { spawnWithAbort } from '@/utils/spawnWithAbort';
+import { buildMcpServerConfigArgs, buildDeveloperInstructionsArg } from './utils/codexMcpConfig';
+import { codexSystemPrompt } from './utils/systemPrompt';
 
 /**
  * Filter out 'resume' subcommand which is managed internally by hapi.
@@ -29,6 +31,7 @@ export async function codexLocal(opts: {
     sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
     onSessionFound: (id: string) => void;
     codexArgs?: string[];
+    mcpServers?: Record<string, { command: string; args: string[] }>;
 }): Promise<void> {
     const args: string[] = [];
 
@@ -44,6 +47,14 @@ export async function codexLocal(opts: {
     if (opts.sandbox) {
         args.push('--sandbox', opts.sandbox);
     }
+
+    // Add MCP server configuration
+    if (opts.mcpServers && Object.keys(opts.mcpServers).length > 0) {
+        args.push(...buildMcpServerConfigArgs(opts.mcpServers));
+    }
+
+    // Add developer instructions (system prompt)
+    args.push(...buildDeveloperInstructionsArg(codexSystemPrompt));
 
     if (opts.codexArgs) {
         const safeArgs = filterResumeSubcommand(opts.codexArgs);
@@ -69,7 +80,8 @@ export async function codexLocal(opts: {
             spawnName: 'codex',
             installHint: 'Codex CLI',
             includeCause: true,
-            logExit: true
+            logExit: true,
+            shell: process.platform === 'win32'
         });
     } finally {
         process.stdin.resume();

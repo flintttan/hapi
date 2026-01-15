@@ -1,4 +1,4 @@
-import type { AgentEvent, ChatBlock, NormalizedMessage } from '@/chat/types'
+import type { AgentEvent, AgentEventBlock, ChatBlock, NormalizedMessage } from '@/chat/types'
 
 function parseClaudeUsageLimit(text: string): number | null {
     const match = text.match(/^Claude AI usage limit reached\|(\d+)$/)
@@ -79,6 +79,35 @@ export function dedupeAgentEvents(blocks: ChatBlock[]): ChatBlock[] {
         result.push(block)
         prevEventKey = key
         prevTitleChangedTo = null
+    }
+
+    return result
+}
+
+/**
+ * Fold consecutive api-error events, keeping only the latest state.
+ */
+export function foldApiErrorEvents(blocks: ChatBlock[]): ChatBlock[] {
+    const result: ChatBlock[] = []
+
+    for (const block of blocks) {
+        if (block.kind !== 'agent-event') {
+            result.push(block)
+            continue
+        }
+
+        const event = block.event as { type: string }
+        if (event.type !== 'api-error') {
+            result.push(block)
+            continue
+        }
+
+        const prev = result[result.length - 1] as AgentEventBlock | undefined
+        if (prev?.kind === 'agent-event' && (prev.event as { type: string }).type === 'api-error') {
+            result[result.length - 1] = block
+        } else {
+            result.push(block)
+        }
     }
 
     return result

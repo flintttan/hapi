@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { buildCodexStartConfig } from './codexStartConfig';
+import { codexSystemPrompt } from './systemPrompt';
 
 describe('buildCodexStartConfig', () => {
     const mcpServers = { hapi: { command: 'node', args: ['mcp'] } };
@@ -15,7 +16,10 @@ describe('buildCodexStartConfig', () => {
 
         expect(config.sandbox).toBe('danger-full-access');
         expect(config['approval-policy']).toBe('never');
-        expect(config.config).toEqual({ mcp_servers: mcpServers });
+        expect(config.config).toEqual({
+            mcp_servers: mcpServers,
+            developer_instructions: codexSystemPrompt
+        });
     });
 
     it('ignores CLI overrides when permission mode is not default', () => {

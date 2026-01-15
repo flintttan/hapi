@@ -155,9 +155,19 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
         data: z.unknown().optional()
     }),
     SessionEventBaseSchema.extend({
+        type: z.literal('toast'),
+        data: z.object({
+            title: z.string(),
+            body: z.string(),
+            sessionId: z.string(),
+            url: z.string()
+        })
+    }),
+    SessionEventBaseSchema.extend({
         type: z.literal('connection-changed'),
         data: z.object({
-            status: z.string()
+            status: z.string(),
+            subscriptionId: z.string().optional()
         }).optional()
     })
 ])

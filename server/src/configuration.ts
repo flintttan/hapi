@@ -3,14 +3,18 @@
  *
  * Configuration is loaded with priority: environment variable > settings.json > default
  * When values are read from environment variables and not present in settings.json,
- * they are automatically saved for future use.
+ * they are automatically saved for future use
  *
  * Optional environment variables:
  * - CLI_API_TOKEN: Shared secret for hapi CLI authentication (auto-generated if not set)
  * - TELEGRAM_BOT_TOKEN: Telegram Bot API token from @BotFather
+ * - TELEGRAM_NOTIFICATION: Enable/disable Telegram notifications (default: true)
  * - WEBAPP_PORT: Port for Mini App HTTP server (default: 3006)
  * - WEBAPP_URL: Public URL for Telegram Mini App
  * - CORS_ORIGINS: Comma-separated CORS origins
+ * - HAPI_RELAY_API: Relay API domain for tunwg (default: relay.hapi.run)
+ * - HAPI_RELAY_AUTH: Relay auth key for tunwg (default: hapi)
+ * - HAPI_RELAY_FORCE_TCP: Force TCP relay mode when UDP is unavailable (true/1)
  * - VAPID_SUBJECT: Contact email or URL for Web Push (defaults to mailto:admin@hapi.run)
  * - HAPI_HOME: Data directory (default: ~/.hapi)
  * - DB_PATH: SQLite database path (default: {HAPI_HOME}/hapi.db)
@@ -19,13 +23,16 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { loadServerSettings, type ServerSettings, type ServerSettingsResult } from './serverSettings'
-import { getOrCreateCliApiToken } from './web/cliApiToken'
+import { getOrCreateCliApiToken } from './config/cliApiToken'
+import { getSettingsFile } from './config/settings'
+import { loadServerSettings, type ServerSettings, type ServerSettingsResult } from './config/serverSettings'
 
 export type ConfigSource = 'env' | 'file' | 'default'
 
 export interface ConfigSources {
     telegramBotToken: ConfigSource
+    telegramNotification: ConfigSource
+    webappHost: ConfigSource
     webappPort: ConfigSource
     webappUrl: ConfigSource
     corsOrigins: ConfigSource
@@ -38,6 +45,9 @@ class Configuration {
 
     /** Telegram bot enabled status (token present) */
     public readonly telegramEnabled: boolean
+
+    /** Telegram notifications enabled */
+    public readonly telegramNotification: boolean
 
     /** CLI auth token (shared secret) */
     public cliApiToken: string
@@ -60,6 +70,9 @@ class Configuration {
     /** Port for the Mini App HTTP server */
     public readonly webappPort: number
 
+    /** Host/IP to bind the Mini App HTTP server to */
+    public readonly webappHost: string
+
     /** Public HTTPS URL for the Telegram Mini App (used in WebApp buttons) */
     public readonly miniAppUrl: string
 
@@ -78,11 +91,13 @@ class Configuration {
     ) {
         this.dataDir = dataDir
         this.dbPath = dbPath
-        this.settingsFile = join(dataDir, 'settings.json')
+        this.settingsFile = getSettingsFile(dataDir)
 
         // Apply server settings
         this.telegramBotToken = serverSettings.telegramBotToken
         this.telegramEnabled = Boolean(this.telegramBotToken)
+        this.telegramNotification = serverSettings.telegramNotification
+        this.webappHost = serverSettings.webappHost
         this.webappPort = serverSettings.webappPort
         this.miniAppUrl = serverSettings.webappUrl
         this.corsOrigins = serverSettings.corsOrigins
@@ -124,7 +139,7 @@ class Configuration {
         const settingsResult = await loadServerSettings(dataDir)
 
         if (settingsResult.savedToFile) {
-            console.log(`[Server] Configuration saved to ${join(dataDir, 'settings.json')}`)
+            console.log(`[Server] Configuration saved to ${getSettingsFile(dataDir)}`)
         }
 
         // 4. Create configuration instance

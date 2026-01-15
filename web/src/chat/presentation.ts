@@ -13,6 +13,19 @@ export type EventPresentation = {
 }
 
 export function getEventPresentation(event: AgentEvent): EventPresentation {
+    if (event.type === 'api-error') {
+        const { retryAttempt, maxRetries } = event as { retryAttempt: number; maxRetries: number }
+        if (maxRetries > 0 && retryAttempt >= maxRetries) {
+            return { icon: '⚠️', text: 'API error: Max retries reached' }
+        }
+        if (maxRetries > 0) {
+            return { icon: '⏳', text: `API error: Retrying (${retryAttempt}/${maxRetries})` }
+        }
+        if (retryAttempt > 0) {
+            return { icon: '⏳', text: 'API error: Retrying...' }
+        }
+        return { icon: '⚠️', text: 'API error' }
+    }
     if (event.type === 'switch') {
         const mode = event.mode === 'local' ? 'local' : 'remote'
         return { icon: '🔄', text: `Switched to ${mode}` }

@@ -1,9 +1,29 @@
 import { Database } from 'bun:sqlite'
+import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { chmodSync, closeSync, existsSync, mkdirSync, openSync } from 'node:fs'
 import { dirname } from 'node:path'
-import { createHash, randomBytes, randomUUID } from 'node:crypto'
 
-export type User = {
+import { MachineStore } from './machineStore'
+import { MessageStore } from './messageStore'
+import { PushStore } from './pushStore'
+import { SessionStore } from './sessionStore'
+import { UserStore } from './userStore'
+
+export type {
+    StoredMachine,
+    StoredMessage,
+    StoredPushSubscription,
+    StoredSession,
+    StoredUser,
+    VersionedUpdateResult
+} from './types'
+export { MachineStore } from './machineStore'
+export { MessageStore } from './messageStore'
+export { PushStore } from './pushStore'
+export { SessionStore } from './sessionStore'
+export { UserStore } from './userStore'
+
+export type AppUser = {
     id: string
     telegram_id: string | null
     username: string
@@ -12,211 +32,21 @@ export type User = {
     created_at: number
 }
 
-export type CliToken = {
+type DbCliTokenLookup = {
     id: string
     user_id: string
-    token: string
-    name: string | null
-    created_at: number
-    last_used_at: number | null
 }
 
-type DbCliTokenRow = {
-    id: string
-    user_id: string
-    token: string
-    name: string | null
-    created_at: number
-    last_used_at: number | null
-}
-
-export type StoredSession = {
-    id: string
-    tag: string | null
-    namespace: string
-    machineId: string | null
-    createdAt: number
-    updatedAt: number
-    metadata: unknown | null
-    metadataVersion: number
-    agentState: unknown | null
-    agentStateVersion: number
-    todos: unknown | null
-    todosUpdatedAt: number | null
-    active: boolean
-    activeAt: number | null
-    seq: number
-}
-
-export type StoredMachine = {
-    id: string
-    namespace: string
-    createdAt: number
-    updatedAt: number
-    metadata: unknown | null
-    metadataVersion: number
-    daemonState: unknown | null
-    daemonStateVersion: number
-    active: boolean
-    activeAt: number | null
-    seq: number
-}
-
-export type StoredMessage = {
-    id: string
-    sessionId: string
-    content: unknown
-    createdAt: number
-    seq: number
-    localId: string | null
-}
-
-export type StoredPlatformUser = {
-    id: number
-    platform: string
-    platformUserId: string
-    namespace: string
-    createdAt: number
-}
-
-export type StoredPushSubscription = {
-    id: number
-    namespace: string
-    endpoint: string
-    p256dh: string
-    auth: string
-    createdAt: number
-}
-
-export type VersionedUpdateResult<T> =
-    | { result: 'success'; version: number; value: T }
-    | { result: 'version-mismatch'; version: number; value: T }
-    | { result: 'error' }
-
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION = 3
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
     'messages',
     'users',
-    'cli_tokens',
-    'platform_users',
-    'push_subscriptions'
+    'push_subscriptions',
+    'app_users',
+    'cli_tokens'
 ] as const
-
-type DbSessionRow = {
-    id: string
-    tag: string | null
-    namespace: string
-    machine_id: string | null
-    created_at: number
-    updated_at: number
-    metadata: string | null
-    metadata_version: number
-    agent_state: string | null
-    agent_state_version: number
-    todos: string | null
-    todos_updated_at: number | null
-    active: number
-    active_at: number | null
-    seq: number
-}
-
-type DbMachineRow = {
-    id: string
-    namespace: string
-    created_at: number
-    updated_at: number
-    metadata: string | null
-    metadata_version: number
-    daemon_state: string | null
-    daemon_state_version: number
-    active: number
-    active_at: number | null
-    seq: number
-}
-
-type DbMessageRow = {
-    id: string
-    session_id: string
-    content: string
-    created_at: number
-    seq: number
-    local_id: string | null
-}
-
-type DbPlatformUserRow = {
-    id: number
-    platform: string
-    platform_user_id: string
-    namespace: string
-    created_at: number
-}
-
-type DbPushSubscriptionRow = {
-    id: number
-    namespace: string
-    endpoint: string
-    p256dh: string
-    auth: string
-    created_at: number
-}
-
-function safeJsonParse(value: string | null): unknown | null {
-    if (value === null) return null
-    try {
-        return JSON.parse(value) as unknown
-    } catch {
-        return null
-    }
-}
-
-function toStoredSession(row: DbSessionRow): StoredSession {
-    return {
-        id: row.id,
-        tag: row.tag,
-        namespace: row.namespace,
-        machineId: row.machine_id,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        metadata: safeJsonParse(row.metadata),
-        metadataVersion: row.metadata_version,
-        agentState: safeJsonParse(row.agent_state),
-        agentStateVersion: row.agent_state_version,
-        todos: safeJsonParse(row.todos),
-        todosUpdatedAt: row.todos_updated_at,
-        active: row.active === 1,
-        activeAt: row.active_at,
-        seq: row.seq
-    }
-}
-
-function toStoredMachine(row: DbMachineRow): StoredMachine {
-    return {
-        id: row.id,
-        namespace: row.namespace,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        metadata: safeJsonParse(row.metadata),
-        metadataVersion: row.metadata_version,
-        daemonState: safeJsonParse(row.daemon_state),
-        daemonStateVersion: row.daemon_state_version,
-        active: row.active === 1,
-        activeAt: row.active_at,
-        seq: row.seq
-    }
-}
-
-function toStoredMessage(row: DbMessageRow): StoredMessage {
-    return {
-        id: row.id,
-        sessionId: row.session_id,
-        content: safeJsonParse(row.content),
-        createdAt: row.created_at,
-        seq: row.seq,
-        localId: row.local_id
-    }
-}
 
 function validateUserId(userId: string): void {
     if (!userId || typeof userId !== 'string' || userId.trim().length === 0) {
@@ -224,30 +54,15 @@ function validateUserId(userId: string): void {
     }
 }
 
-function toStoredPlatformUser(row: DbPlatformUserRow): StoredPlatformUser {
-    return {
-        id: row.id,
-        platform: row.platform,
-        platformUserId: row.platform_user_id,
-        namespace: row.namespace,
-        createdAt: row.created_at
-    }
-}
-
-function toStoredPushSubscription(row: DbPushSubscriptionRow): StoredPushSubscription {
-    return {
-        id: row.id,
-        namespace: row.namespace,
-        endpoint: row.endpoint,
-        p256dh: row.p256dh,
-        auth: row.auth,
-        createdAt: row.created_at
-    }
-}
-
 export class Store {
     private db: Database
     private readonly dbPath: string
+
+    readonly sessions: SessionStore
+    readonly machines: MachineStore
+    readonly messages: MessageStore
+    readonly users: UserStore
+    readonly push: PushStore
 
     constructor(dbPath: string) {
         this.dbPath = dbPath
@@ -283,43 +98,64 @@ export class Store {
                 }
             }
         }
+
+        this.sessions = new SessionStore(this.db)
+        this.machines = new MachineStore(this.db)
+        this.messages = new MessageStore(this.db)
+        this.users = new UserStore(this.db)
+        this.push = new PushStore(this.db)
     }
 
     private initSchema(): void {
         const currentVersion = this.getUserVersion()
-        if (currentVersion === 0) {
-            if (this.hasAnyUserTables()) {
-                this.migrateLegacySchema()
-                this.setUserVersion(SCHEMA_VERSION)
-                return
-            }
-
+        if (currentVersion === 0 && !this.hasAnyUserTables()) {
             this.createSchema()
             this.ensureSystemUsers()
             this.setUserVersion(SCHEMA_VERSION)
             return
         }
 
-        if (currentVersion === 1) {
-            this.migrateV1ToV2()
-            this.setUserVersion(SCHEMA_VERSION)
-            return
-        }
-
-        if (currentVersion !== SCHEMA_VERSION) {
+        if (currentVersion > SCHEMA_VERSION) {
             throw this.buildSchemaMismatchError(currentVersion)
         }
 
+        if (currentVersion < SCHEMA_VERSION) {
+            this.migrateSchema(currentVersion)
+            this.setUserVersion(SCHEMA_VERSION)
+        }
+
         this.assertRequiredTablesPresent()
+    }
+
+    private migrateSchema(_currentVersion: number): void {
+        this.normalizeUserTables()
+        this.createSchema()
+        this.ensureSessionsSchema()
+        this.ensureMachinesSchema()
+        this.ensureMessagesSchema()
+        this.ensureAppUsersSchema()
         this.ensureSystemUsers()
     }
 
-    private createSchema(): void {
-        this.createTables()
-        this.createIndexes()
+    private normalizeUserTables(): void {
+        if (this.hasTable('users')) {
+            const columns = this.getColumnNames('users')
+            const looksLikePlatformUsers = columns.has('platform') && columns.has('platform_user_id') && !columns.has('username')
+            const looksLikeAppUsers = columns.has('username')
+
+            if (looksLikeAppUsers && !this.hasTable('app_users')) {
+                this.db.exec('ALTER TABLE users RENAME TO app_users')
+            } else if (!looksLikePlatformUsers && !looksLikeAppUsers && !this.hasTable('app_users')) {
+                this.db.exec('ALTER TABLE users RENAME TO app_users')
+            }
+        }
+
+        if (!this.hasTable('users') && this.hasTable('platform_users')) {
+            this.db.exec('ALTER TABLE platform_users RENAME TO users')
+        }
     }
 
-    private createTables(): void {
+    private createSchema(): void {
         this.db.exec(`
             CREATE TABLE IF NOT EXISTS sessions (
                 id TEXT PRIMARY KEY,
@@ -338,6 +174,8 @@ export class Store {
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0
             );
+            CREATE INDEX IF NOT EXISTS idx_sessions_tag ON sessions(tag);
+            CREATE INDEX IF NOT EXISTS idx_sessions_tag_namespace ON sessions(tag, namespace);
 
             CREATE TABLE IF NOT EXISTS machines (
                 id TEXT PRIMARY KEY,
@@ -352,6 +190,7 @@ export class Store {
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0
             );
+            CREATE INDEX IF NOT EXISTS idx_machines_namespace ON machines(namespace);
 
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
@@ -362,27 +201,10 @@ export class Store {
                 local_id TEXT,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
+            CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_local_id ON messages(session_id, local_id) WHERE local_id IS NOT NULL;
 
             CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                telegram_id TEXT UNIQUE,
-                username TEXT NOT NULL,
-                email TEXT,
-                password_hash TEXT,
-                created_at INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS cli_tokens (
-                id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                token TEXT UNIQUE NOT NULL,
-                name TEXT,
-                created_at INTEGER NOT NULL,
-                last_used_at INTEGER,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-            );
-
-            CREATE TABLE IF NOT EXISTS platform_users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 platform TEXT NOT NULL,
                 platform_user_id TEXT NOT NULL,
@@ -390,6 +212,32 @@ export class Store {
                 created_at INTEGER NOT NULL,
                 UNIQUE(platform, platform_user_id)
             );
+            CREATE INDEX IF NOT EXISTS idx_users_platform ON users(platform);
+            CREATE INDEX IF NOT EXISTS idx_users_platform_namespace ON users(platform, namespace);
+
+            CREATE TABLE IF NOT EXISTS app_users (
+                id TEXT PRIMARY KEY,
+                telegram_id TEXT,
+                username TEXT NOT NULL,
+                email TEXT,
+                password_hash TEXT,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username);
+            CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email);
+            CREATE INDEX IF NOT EXISTS idx_app_users_telegram_id ON app_users(telegram_id);
+
+            CREATE TABLE IF NOT EXISTS cli_tokens (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                token TEXT NOT NULL,
+                name TEXT,
+                created_at INTEGER NOT NULL,
+                last_used_at INTEGER,
+                FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE
+            );
+            CREATE INDEX IF NOT EXISTS idx_cli_tokens_user_id ON cli_tokens(user_id);
+            CREATE INDEX IF NOT EXISTS idx_cli_tokens_token ON cli_tokens(token);
 
             CREATE TABLE IF NOT EXISTS push_subscriptions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -400,22 +248,6 @@ export class Store {
                 created_at INTEGER NOT NULL,
                 UNIQUE(namespace, endpoint)
             );
-        `)
-    }
-
-    private createIndexes(): void {
-        this.db.exec(`
-            CREATE INDEX IF NOT EXISTS idx_sessions_tag ON sessions(tag);
-            CREATE INDEX IF NOT EXISTS idx_sessions_tag_namespace ON sessions(tag, namespace);
-            CREATE INDEX IF NOT EXISTS idx_machines_namespace ON machines(namespace);
-            CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_local_id ON messages(session_id, local_id) WHERE local_id IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email) WHERE email IS NOT NULL;
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_users_telegram_id ON users(telegram_id) WHERE telegram_id IS NOT NULL;
-            CREATE INDEX IF NOT EXISTS idx_cli_tokens_user_id ON cli_tokens(user_id);
-            CREATE INDEX IF NOT EXISTS idx_platform_users_platform ON platform_users(platform);
-            CREATE INDEX IF NOT EXISTS idx_platform_users_platform_namespace ON platform_users(platform, namespace);
             CREATE INDEX IF NOT EXISTS idx_push_subscriptions_namespace ON push_subscriptions(namespace);
         `)
     }
@@ -449,13 +281,13 @@ export class Store {
     }
 
     private ensureSystemUsers(): void {
-        if (!this.hasTable('users')) {
+        if (!this.hasTable('app_users')) {
             return
         }
 
         const now = Date.now()
         const insertSystemUser = this.db.prepare(`
-            INSERT OR IGNORE INTO users (id, telegram_id, username, email, password_hash, created_at)
+            INSERT OR IGNORE INTO app_users (id, telegram_id, username, email, password_hash, created_at)
             VALUES (@id, NULL, @username, NULL, NULL, @created_at)
         `)
 
@@ -463,17 +295,20 @@ export class Store {
         insertSystemUser.run({ id: 'cli-user', username: 'CLI User', created_at: now })
     }
 
-    private ensureUserAccountColumns(): void {
-        if (!this.hasTable('users')) {
+    private ensureAppUsersSchema(): void {
+        if (!this.hasTable('app_users')) {
             return
         }
 
-        const columns = this.getColumnNames('users')
+        const columns = this.getColumnNames('app_users')
         if (!columns.has('password_hash')) {
-            this.db.exec('ALTER TABLE users ADD COLUMN password_hash TEXT')
+            this.db.exec('ALTER TABLE app_users ADD COLUMN password_hash TEXT')
         }
         if (!columns.has('email')) {
-            this.db.exec('ALTER TABLE users ADD COLUMN email TEXT')
+            this.db.exec('ALTER TABLE app_users ADD COLUMN email TEXT')
+        }
+        if (!columns.has('telegram_id')) {
+            this.db.exec('ALTER TABLE app_users ADD COLUMN telegram_id TEXT')
         }
     }
 
@@ -511,7 +346,7 @@ export class Store {
         // If legacy tables have user_id, map it into namespace for isolation.
         if (columns.has('user_id')) {
             try {
-                this.db.exec("UPDATE sessions SET namespace = user_id WHERE namespace = 'default'")
+                this.db.exec("UPDATE sessions SET namespace = user_id WHERE namespace = 'default' AND user_id IS NOT NULL")
             } catch {
             }
         }
@@ -547,12 +382,10 @@ export class Store {
 
         if (columns.has('user_id')) {
             try {
-                this.db.exec("UPDATE machines SET namespace = user_id WHERE namespace = 'default'")
+                this.db.exec("UPDATE machines SET namespace = user_id WHERE namespace = 'default' AND user_id IS NOT NULL")
             } catch {
             }
-        }
 
-        if (columns.has('user_id')) {
             const duplicate = this.db.prepare(
                 'SELECT id, COUNT(*) AS c FROM machines GROUP BY id HAVING c > 1 LIMIT 1'
             ).get() as { id: string; c: number } | undefined
@@ -616,44 +449,6 @@ export class Store {
         }
     }
 
-    private migrateV1ToV2(): void {
-        if (this.hasTable('users')) {
-            const columns = this.getColumnNames('users')
-            const looksLikePlatformUsers = columns.has('platform') && columns.has('platform_user_id') && !columns.has('username')
-            if (looksLikePlatformUsers && !this.hasTable('platform_users')) {
-                this.db.exec('ALTER TABLE users RENAME TO platform_users')
-            }
-        }
-
-        this.createTables()
-        this.ensureUserAccountColumns()
-        this.ensureSessionsSchema()
-        this.ensureMachinesSchema()
-        this.ensureMessagesSchema()
-        this.ensureSystemUsers()
-        this.createIndexes()
-        this.assertRequiredTablesPresent()
-    }
-
-    private migrateLegacySchema(): void {
-        if (this.hasTable('users')) {
-            const columns = this.getColumnNames('users')
-            const looksLikePlatformUsers = columns.has('platform') && columns.has('platform_user_id') && !columns.has('username')
-            if (looksLikePlatformUsers && !this.hasTable('platform_users')) {
-                this.db.exec('ALTER TABLE users RENAME TO platform_users')
-            }
-        }
-
-        this.createTables()
-        this.ensureUserAccountColumns()
-        this.ensureSessionsSchema()
-        this.ensureMachinesSchema()
-        this.ensureMessagesSchema()
-        this.ensureSystemUsers()
-        this.createIndexes()
-        this.assertRequiredTablesPresent()
-    }
-
     private assertRequiredTablesPresent(): void {
         const placeholders = REQUIRED_TABLES.map(() => '?').join(', ')
         const rows = this.db.prepare(
@@ -682,410 +477,14 @@ export class Store {
         )
     }
 
-    getOrCreateSession(tag: string, metadata: unknown, agentState: unknown, namespace: string): StoredSession {
-        const existing = this.db.prepare(
-            'SELECT * FROM sessions WHERE tag = ? AND namespace = ? ORDER BY created_at DESC LIMIT 1'
-        ).get(tag, namespace) as DbSessionRow | undefined
-
-        if (existing) {
-            return toStoredSession(existing)
-        }
-
-        const now = Date.now()
-        const id = randomUUID()
-
-        const metadataJson = JSON.stringify(metadata)
-        const agentStateJson = agentState === null || agentState === undefined ? null : JSON.stringify(agentState)
-
-        this.db.prepare(`
-            INSERT INTO sessions (
-                id, tag, namespace, machine_id, created_at, updated_at,
-                metadata, metadata_version,
-                agent_state, agent_state_version,
-                todos, todos_updated_at,
-                active, active_at, seq
-            ) VALUES (
-                @id, @tag, @namespace, NULL, @created_at, @updated_at,
-                @metadata, 1,
-                @agent_state, 1,
-                NULL, NULL,
-                0, NULL, 0
-            )
-        `).run({
-            id,
-            tag,
-            namespace,
-            created_at: now,
-            updated_at: now,
-            metadata: metadataJson,
-            agent_state: agentStateJson
-        })
-
-        const row = this.getSession(id)
-        if (!row) {
-            throw new Error('Failed to create session')
-        }
-        return row
-    }
-
-    updateSessionMetadata(
-        id: string,
-        metadata: unknown,
-        expectedVersion: number,
-        namespace: string,
-        options?: { touchUpdatedAt?: boolean }
-    ): VersionedUpdateResult<unknown | null> {
-        try {
-            const now = Date.now()
-            const json = JSON.stringify(metadata)
-            const touchUpdatedAt = options?.touchUpdatedAt !== false
-            const result = this.db.prepare(`
-                UPDATE sessions
-                SET metadata = @metadata,
-                    metadata_version = metadata_version + 1,
-                    updated_at = CASE WHEN @touch_updated_at = 1 THEN @updated_at ELSE updated_at END,
-                    seq = seq + 1
-                WHERE id = @id AND namespace = @namespace AND metadata_version = @expectedVersion
-            `).run({
-                id,
-                metadata: json,
-                updated_at: now,
-                expectedVersion,
-                namespace,
-                touch_updated_at: touchUpdatedAt ? 1 : 0
-            })
-
-            if (result.changes === 1) {
-                return { result: 'success', version: expectedVersion + 1, value: metadata }
-            }
-
-            const current = this.db.prepare(
-                'SELECT metadata, metadata_version FROM sessions WHERE id = ? AND namespace = ?'
-            ).get(id, namespace) as
-                | { metadata: string | null; metadata_version: number }
-                | undefined
-            if (!current) {
-                return { result: 'error' }
-            }
-            return {
-                result: 'version-mismatch',
-                version: current.metadata_version,
-                value: safeJsonParse(current.metadata)
-            }
-        } catch {
-            return { result: 'error' }
-        }
-    }
-
-    updateSessionAgentState(
-        id: string,
-        agentState: unknown,
-        expectedVersion: number,
-        namespace: string
-    ): VersionedUpdateResult<unknown | null> {
-        try {
-            const now = Date.now()
-            const json = agentState === null || agentState === undefined ? null : JSON.stringify(agentState)
-            const result = this.db.prepare(`
-                UPDATE sessions
-                SET agent_state = @agent_state,
-                    agent_state_version = agent_state_version + 1,
-                    updated_at = @updated_at,
-                    seq = seq + 1
-                WHERE id = @id AND namespace = @namespace AND agent_state_version = @expectedVersion
-            `).run({ id, agent_state: json, updated_at: now, expectedVersion, namespace })
-
-            if (result.changes === 1) {
-                return { result: 'success', version: expectedVersion + 1, value: agentState === undefined ? null : agentState }
-            }
-
-            const current = this.db.prepare(
-                'SELECT agent_state, agent_state_version FROM sessions WHERE id = ? AND namespace = ?'
-            ).get(id, namespace) as
-                | { agent_state: string | null; agent_state_version: number }
-                | undefined
-            if (!current) {
-                return { result: 'error' }
-            }
-            return {
-                result: 'version-mismatch',
-                version: current.agent_state_version,
-                value: safeJsonParse(current.agent_state)
-            }
-        } catch {
-            return { result: 'error' }
-        }
-    }
-
-    setSessionTodos(id: string, todos: unknown, todosUpdatedAt: number, namespace: string): boolean {
-        try {
-            const json = todos === null || todos === undefined ? null : JSON.stringify(todos)
-            const result = this.db.prepare(`
-                UPDATE sessions
-                SET todos = @todos,
-                    todos_updated_at = @todos_updated_at,
-                    updated_at = CASE WHEN updated_at > @updated_at THEN updated_at ELSE @updated_at END,
-                    seq = seq + 1
-                WHERE id = @id
-                  AND namespace = @namespace
-                  AND (todos_updated_at IS NULL OR todos_updated_at < @todos_updated_at)
-            `).run({
-                id,
-                todos: json,
-                todos_updated_at: todosUpdatedAt,
-                updated_at: todosUpdatedAt,
-                namespace
-            })
-
-            return result.changes === 1
-        } catch {
-            return false
-        }
-    }
-
-    getSession(id: string): StoredSession | null {
-        const row = this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(id) as DbSessionRow | undefined
-        return row ? toStoredSession(row) : null
-    }
-
-    getSessionByNamespace(id: string, namespace: string): StoredSession | null {
-        const row = this.db.prepare(
-            'SELECT * FROM sessions WHERE id = ? AND namespace = ?'
-        ).get(id, namespace) as DbSessionRow | undefined
-        return row ? toStoredSession(row) : null
-    }
-
-    getSessions(): StoredSession[] {
-        const rows = this.db.prepare('SELECT * FROM sessions ORDER BY updated_at DESC').all() as DbSessionRow[]
-        return rows.map(toStoredSession)
-    }
-
-    getSessionsByNamespace(namespace: string): StoredSession[] {
-        const rows = this.db.prepare(
-            'SELECT * FROM sessions WHERE namespace = ? ORDER BY updated_at DESC'
-        ).all(namespace) as DbSessionRow[]
-        return rows.map(toStoredSession)
-    }
-
-    getOrCreateMachine(id: string, metadata: unknown, daemonState: unknown, namespace: string): StoredMachine {
-        const existing = this.db.prepare('SELECT * FROM machines WHERE id = ?').get(id) as DbMachineRow | undefined
-        if (existing) {
-            const stored = toStoredMachine(existing)
-            if (stored.namespace !== namespace) {
-                throw new Error('Machine namespace mismatch')
-            }
-            return stored
-        }
-
-        const now = Date.now()
-        const metadataJson = JSON.stringify(metadata)
-        const daemonStateJson = daemonState === null || daemonState === undefined ? null : JSON.stringify(daemonState)
-
-        this.db.prepare(`
-            INSERT INTO machines (
-                id, namespace, created_at, updated_at,
-                metadata, metadata_version,
-                daemon_state, daemon_state_version,
-                active, active_at, seq
-            ) VALUES (
-                @id, @namespace, @created_at, @updated_at,
-                @metadata, 1,
-                @daemon_state, 1,
-                0, NULL, 0
-            )
-        `).run({
-            id,
-            namespace,
-            created_at: now,
-            updated_at: now,
-            metadata: metadataJson,
-            daemon_state: daemonStateJson
-        })
-
-        const row = this.getMachine(id)
-        if (!row) {
-            throw new Error('Failed to create machine')
-        }
-        return row
-    }
-
-    updateMachineMetadata(
-        id: string,
-        metadata: unknown,
-        expectedVersion: number,
-        namespace: string
-    ): VersionedUpdateResult<unknown | null> {
-        try {
-            const now = Date.now()
-            const json = JSON.stringify(metadata)
-            const result = this.db.prepare(`
-                UPDATE machines
-                SET metadata = @metadata,
-                    metadata_version = metadata_version + 1,
-                    updated_at = @updated_at,
-                    seq = seq + 1
-                WHERE id = @id AND namespace = @namespace AND metadata_version = @expectedVersion
-            `).run({ id, metadata: json, updated_at: now, expectedVersion, namespace })
-
-            if (result.changes === 1) {
-                return { result: 'success', version: expectedVersion + 1, value: metadata }
-            }
-
-            const current = this.db.prepare(
-                'SELECT metadata, metadata_version FROM machines WHERE id = ? AND namespace = ?'
-            ).get(id, namespace) as
-                | { metadata: string | null; metadata_version: number }
-                | undefined
-            if (!current) {
-                return { result: 'error' }
-            }
-            return {
-                result: 'version-mismatch',
-                version: current.metadata_version,
-                value: safeJsonParse(current.metadata)
-            }
-        } catch {
-            return { result: 'error' }
-        }
-    }
-
-    updateMachineDaemonState(
-        id: string,
-        daemonState: unknown,
-        expectedVersion: number,
-        namespace: string
-    ): VersionedUpdateResult<unknown | null> {
-        try {
-            const now = Date.now()
-            const json = daemonState === null || daemonState === undefined ? null : JSON.stringify(daemonState)
-            const result = this.db.prepare(`
-                UPDATE machines
-                SET daemon_state = @daemon_state,
-                    daemon_state_version = daemon_state_version + 1,
-                    updated_at = @updated_at,
-                    active = 1,
-                    active_at = @active_at,
-                    seq = seq + 1
-                WHERE id = @id AND namespace = @namespace AND daemon_state_version = @expectedVersion
-            `).run({ id, daemon_state: json, updated_at: now, active_at: now, expectedVersion, namespace })
-
-            if (result.changes === 1) {
-                return { result: 'success', version: expectedVersion + 1, value: daemonState === undefined ? null : daemonState }
-            }
-
-            const current = this.db.prepare(
-                'SELECT daemon_state, daemon_state_version FROM machines WHERE id = ? AND namespace = ?'
-            ).get(id, namespace) as
-                | { daemon_state: string | null; daemon_state_version: number }
-                | undefined
-            if (!current) {
-                return { result: 'error' }
-            }
-            return {
-                result: 'version-mismatch',
-                version: current.daemon_state_version,
-                value: safeJsonParse(current.daemon_state)
-            }
-        } catch {
-            return { result: 'error' }
-        }
-    }
-
-    getMachine(id: string): StoredMachine | null {
-        const row = this.db.prepare('SELECT * FROM machines WHERE id = ?').get(id) as DbMachineRow | undefined
-        return row ? toStoredMachine(row) : null
-    }
-
-    getMachineByNamespace(id: string, namespace: string): StoredMachine | null {
-        const row = this.db.prepare(
-            'SELECT * FROM machines WHERE id = ? AND namespace = ?'
-        ).get(id, namespace) as DbMachineRow | undefined
-        return row ? toStoredMachine(row) : null
-    }
-
-    getMachines(): StoredMachine[] {
-        const rows = this.db.prepare('SELECT * FROM machines ORDER BY updated_at DESC').all() as DbMachineRow[]
-        return rows.map(toStoredMachine)
-    }
-
-    getMachinesByNamespace(namespace: string): StoredMachine[] {
-        const rows = this.db.prepare(
-            'SELECT * FROM machines WHERE namespace = ? ORDER BY updated_at DESC'
-        ).all(namespace) as DbMachineRow[]
-        return rows.map(toStoredMachine)
-    }
-
-    addMessage(sessionId: string, content: unknown, localId?: string): StoredMessage {
-        const now = Date.now()
-
-        if (localId) {
-            const existing = this.db.prepare(
-                'SELECT * FROM messages WHERE session_id = ? AND local_id = ? LIMIT 1'
-            ).get(sessionId, localId) as DbMessageRow | undefined
-            if (existing) {
-                return toStoredMessage(existing)
-            }
-        }
-
-        const msgSeqRow = this.db.prepare(
-            'SELECT COALESCE(MAX(seq), 0) + 1 AS nextSeq FROM messages WHERE session_id = ?'
-        ).get(sessionId) as { nextSeq: number }
-        const msgSeq = msgSeqRow.nextSeq
-
-        const id = randomUUID()
-        const json = JSON.stringify(content)
-
-        this.db.prepare(`
-            INSERT INTO messages (
-                id, session_id, content, created_at, seq, local_id
-            ) VALUES (
-                @id, @session_id, @content, @created_at, @seq, @local_id
-            )
-        `).run({
-            id,
-            session_id: sessionId,
-            content: json,
-            created_at: now,
-            seq: msgSeq,
-            local_id: localId ?? null
-        })
-
-        const row = this.db.prepare('SELECT * FROM messages WHERE id = ?').get(id) as DbMessageRow | undefined
-        if (!row) {
-            throw new Error('Failed to create message')
-        }
-        return toStoredMessage(row)
-    }
-
-    getMessages(sessionId: string, limit: number = 200, beforeSeq?: number): StoredMessage[] {
-        const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 200
-
-        const rows = (beforeSeq !== undefined && beforeSeq !== null && Number.isFinite(beforeSeq))
-            ? this.db.prepare(
-                'SELECT * FROM messages WHERE session_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?'
-            ).all(sessionId, beforeSeq, safeLimit) as DbMessageRow[]
-            : this.db.prepare(
-                'SELECT * FROM messages WHERE session_id = ? ORDER BY seq DESC LIMIT ?'
-            ).all(sessionId, safeLimit) as DbMessageRow[]
-
-        return rows.reverse().map(toStoredMessage)
-    }
-
-    getMessagesAfter(sessionId: string, afterSeq: number, limit: number = 200): StoredMessage[] {
-        const safeLimit = Number.isFinite(limit) ? Math.max(1, Math.min(200, limit)) : 200
-        const safeAfterSeq = Number.isFinite(afterSeq) ? afterSeq : 0
-
-        const rows = this.db.prepare(
-            'SELECT * FROM messages WHERE session_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?'
-        ).all(sessionId, safeAfterSeq, safeLimit) as DbMessageRow[]
-
-        return rows.map(toStoredMessage)
-    }
-
     getDefaultCliUserId(): string {
+        if (!this.hasTable('app_users')) {
+            return 'cli-user'
+        }
+
         const row = this.db.prepare(`
             SELECT id
-            FROM users
+            FROM app_users
             WHERE id NOT IN ('admin-user', 'cli-user')
             AND (
                 password_hash IS NOT NULL
@@ -1105,11 +504,11 @@ export class Store {
         email?: string | null
         password_hash?: string | null
         created_at?: number
-    }): User {
+    }): AppUser {
         const now = user.created_at ?? Date.now()
 
         this.db.prepare(`
-            INSERT INTO users (id, telegram_id, username, email, password_hash, created_at)
+            INSERT INTO app_users (id, telegram_id, username, email, password_hash, created_at)
             VALUES (@id, @telegram_id, @username, @email, @password_hash, @created_at)
         `).run({
             id: user.id,
@@ -1130,28 +529,43 @@ export class Store {
         }
     }
 
-    getUserById(id: string): User | null {
-        const row = this.db.prepare('SELECT * FROM users WHERE id = ?').get(id) as User | undefined
+    getUserById(id: string): AppUser | null {
+        if (!this.hasTable('app_users')) {
+            return null
+        }
+        const row = this.db.prepare('SELECT * FROM app_users WHERE id = ?').get(id) as AppUser | undefined
         return row ?? null
     }
 
-    getUserByTelegramId(telegramId: string): User | null {
-        const row = this.db.prepare('SELECT * FROM users WHERE telegram_id = ?').get(telegramId) as User | undefined
+    getUserByTelegramId(telegramId: string): AppUser | null {
+        if (!this.hasTable('app_users')) {
+            return null
+        }
+        const row = this.db.prepare('SELECT * FROM app_users WHERE telegram_id = ?').get(telegramId) as AppUser | undefined
         return row ?? null
     }
 
-    getUserByUsername(username: string): User | null {
-        const row = this.db.prepare('SELECT * FROM users WHERE username = ?').get(username) as User | undefined
+    getUserByUsername(username: string): AppUser | null {
+        if (!this.hasTable('app_users')) {
+            return null
+        }
+        const row = this.db.prepare('SELECT * FROM app_users WHERE username = ?').get(username) as AppUser | undefined
         return row ?? null
     }
 
-    getUserByEmail(email: string): User | null {
-        const row = this.db.prepare('SELECT * FROM users WHERE email = ?').get(email) as User | undefined
+    getUserByEmail(email: string): AppUser | null {
+        if (!this.hasTable('app_users')) {
+            return null
+        }
+        const row = this.db.prepare('SELECT * FROM app_users WHERE email = ?').get(email) as AppUser | undefined
         return row ?? null
     }
 
-    getAllUsers(): User[] {
-        const rows = this.db.prepare('SELECT * FROM users ORDER BY created_at DESC').all() as User[]
+    getAllUsers(): AppUser[] {
+        if (!this.hasTable('app_users')) {
+            return []
+        }
+        const rows = this.db.prepare('SELECT * FROM app_users ORDER BY created_at DESC').all() as AppUser[]
         return rows
     }
 
@@ -1186,7 +600,7 @@ export class Store {
         const hashedToken = createHash('sha256').update(token).digest('hex')
         const row = this.db.prepare(
             'SELECT id, user_id FROM cli_tokens WHERE token = ?'
-        ).get(hashedToken) as { id: string; user_id: string } | undefined
+        ).get(hashedToken) as DbCliTokenLookup | undefined
 
         if (!row) {
             return null
@@ -1221,105 +635,5 @@ export class Store {
             'SELECT id, name, created_at, last_used_at FROM cli_tokens WHERE user_id = ? ORDER BY created_at DESC'
         ).all(userId) as Array<{ id: string; name: string | null; created_at: number; last_used_at: number | null }>
         return rows
-    }
-
-    getPlatformUser(platform: string, platformUserId: string): StoredPlatformUser | null {
-        const row = this.db.prepare(
-            'SELECT * FROM platform_users WHERE platform = ? AND platform_user_id = ? LIMIT 1'
-        ).get(platform, platformUserId) as DbPlatformUserRow | undefined
-        return row ? toStoredPlatformUser(row) : null
-    }
-
-    getPlatformUsersByPlatform(platform: string): StoredPlatformUser[] {
-        const rows = this.db.prepare(
-            'SELECT * FROM platform_users WHERE platform = ? ORDER BY created_at ASC'
-        ).all(platform) as DbPlatformUserRow[]
-        return rows.map(toStoredPlatformUser)
-    }
-
-    getPlatformUsersByPlatformAndNamespace(platform: string, namespace: string): StoredPlatformUser[] {
-        const rows = this.db.prepare(
-            'SELECT * FROM platform_users WHERE platform = ? AND namespace = ? ORDER BY created_at ASC'
-        ).all(platform, namespace) as DbPlatformUserRow[]
-        return rows.map(toStoredPlatformUser)
-    }
-
-    addPlatformUser(platform: string, platformUserId: string, namespace: string): StoredPlatformUser {
-        const now = Date.now()
-        this.db.prepare(`
-            INSERT OR IGNORE INTO platform_users (
-                platform, platform_user_id, namespace, created_at
-            ) VALUES (
-                @platform, @platform_user_id, @namespace, @created_at
-            )
-        `).run({
-            platform,
-            platform_user_id: platformUserId,
-            namespace,
-            created_at: now
-        })
-
-        const row = this.getPlatformUser(platform, platformUserId)
-        if (!row) {
-            throw new Error('Failed to create user')
-        }
-        return row
-    }
-
-    removePlatformUser(platform: string, platformUserId: string): boolean {
-        const result = this.db.prepare(
-            'DELETE FROM platform_users WHERE platform = ? AND platform_user_id = ?'
-        ).run(platform, platformUserId)
-        return result.changes > 0
-    }
-
-    /**
-     * Delete a session and all associated data.
-     * Messages are automatically cascade-deleted via foreign key constraint.
-     * Todos are stored in the sessions.todos column and deleted with the row.
-     */
-    deleteSession(id: string, namespace: string): boolean {
-        const result = this.db.prepare(
-            'DELETE FROM sessions WHERE id = ? AND namespace = ?'
-        ).run(id, namespace)
-        return result.changes > 0
-    }
-
-    addPushSubscription(
-        namespace: string,
-        subscription: { endpoint: string; p256dh: string; auth: string }
-    ): void {
-        const now = Date.now()
-        this.db.prepare(`
-            INSERT INTO push_subscriptions (
-                namespace, endpoint, p256dh, auth, created_at
-            ) VALUES (
-                @namespace, @endpoint, @p256dh, @auth, @created_at
-            )
-            ON CONFLICT(namespace, endpoint)
-            DO UPDATE SET
-                p256dh = excluded.p256dh,
-                auth = excluded.auth,
-                created_at = excluded.created_at
-        `).run({
-            namespace,
-            endpoint: subscription.endpoint,
-            p256dh: subscription.p256dh,
-            auth: subscription.auth,
-            created_at: now
-        })
-    }
-
-    removePushSubscription(namespace: string, endpoint: string): void {
-        this.db.prepare(
-            'DELETE FROM push_subscriptions WHERE namespace = ? AND endpoint = ?'
-        ).run(namespace, endpoint)
-    }
-
-    getPushSubscriptionsByNamespace(namespace: string): StoredPushSubscription[] {
-        const rows = this.db.prepare(
-            'SELECT * FROM push_subscriptions WHERE namespace = ? ORDER BY created_at DESC'
-        ).all(namespace) as DbPushSubscriptionRow[]
-        return rows.map(toStoredPushSubscription)
     }
 }

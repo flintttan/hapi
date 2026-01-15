@@ -16,6 +16,10 @@ function isUserMessage(msg: DecryptedMessage): boolean {
     return false
 }
 
+function isOptimisticMessage(msg: DecryptedMessage): boolean {
+    return Boolean(msg.localId && msg.id === msg.localId)
+}
+
 function compareMessages(a: DecryptedMessage, b: DecryptedMessage): number {
     const aSeq = typeof a.seq === 'number' ? a.seq : null
     const bSeq = typeof b.seq === 'number' ? b.seq : null
@@ -46,33 +50,32 @@ export function mergeMessages(existing: DecryptedMessage[], incoming: DecryptedM
 
     let merged = Array.from(byId.values())
 
-    const incomingLocalIds = new Set<string>()
+    const incomingStoredLocalIds = new Set<string>()
     for (const msg of incoming) {
-        if (msg.localId) {
-            incomingLocalIds.add(msg.localId)
+        if (msg.localId && !isOptimisticMessage(msg)) {
+            incomingStoredLocalIds.add(msg.localId)
         }
     }
 
-    // If we received a stored message with a localId, drop any optimistic bubble with the same localId.
-    if (incomingLocalIds.size > 0) {
+    // If we received stored messages with a localId, drop any optimistic bubbles with the same localId.
+    if (incomingStoredLocalIds.size > 0) {
         merged = merged.filter((msg) => {
-            if (!msg.localId || !incomingLocalIds.has(msg.localId)) {
+            if (!msg.localId || !incomingStoredLocalIds.has(msg.localId)) {
                 return true
             }
-            return !msg.status
+            return !isOptimisticMessage(msg)
         })
     }
 
     // Fallback: if an optimistic message was marked as sent but we didn't get a localId echo,
     // drop it when a server user message appears close in time.
-    const optimisticMessages = merged.filter((m) => m.localId && m.status)
-    const nonOptimisticMessages = merged.filter((m) => !m.localId || !m.status)
+    const optimisticMessages = merged.filter((m) => isOptimisticMessage(m))
+    const nonOptimisticMessages = merged.filter((m) => !isOptimisticMessage(m))
     const result: DecryptedMessage[] = [...nonOptimisticMessages]
 
     for (const optimistic of optimisticMessages) {
         if (optimistic.status === 'sent') {
             const hasServerUserMessage = nonOptimisticMessages.some((m) =>
-                !m.status &&
                 isUserMessage(m) &&
                 Math.abs(m.createdAt - optimistic.createdAt) < 10_000
             )

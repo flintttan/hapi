@@ -5,7 +5,7 @@ import { configuration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
 import { parseAccessToken } from '../../utils/accessToken'
 import { validateTelegramInitData } from '../telegramInitData'
-import { getOrCreateOwnerId } from '../ownerId'
+import { getOrCreateOwnerId } from '../../config/ownerId'
 import type { WebAppEnv } from '../middleware/auth'
 import type { Store } from '../../store'
 
@@ -40,11 +40,11 @@ export function createBindRoutes(jwtSecret: Uint8Array, store: Store): Hono<WebA
         }
 
         const telegramUserId = String(result.user.id)
-        const existingUser = store.getPlatformUser('telegram', telegramUserId)
+        const existingUser = store.users.getUser('telegram', telegramUserId)
         if (existingUser && existingUser.namespace !== namespace) {
             return c.json({ error: 'already_bound' }, 409)
         }
-        store.addPlatformUser('telegram', telegramUserId, namespace)
+        store.users.addUser('telegram', telegramUserId, namespace)
 
         const userId = await getOrCreateOwnerId()
 

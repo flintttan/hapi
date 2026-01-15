@@ -14,10 +14,12 @@ import { registerKillSessionHandler } from './registerKillSessionHandler';
 import type { Session } from './session';
 import { bootstrapSession } from '@/agent/sessionFactory';
 import { createModeChangeHandler, createRunnerLifecycle, setControlledByUser } from '@/agent/runnerLifecycle';
+import { isModelModeAllowedForFlavor, isPermissionModeAllowedForFlavor } from '@hapi/protocol';
+import { ModelModeSchema, PermissionModeSchema } from '@hapi/protocol/schemas';
 
 export interface StartOptions {
     model?: string
-    permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
+    permissionMode?: PermissionMode
     startingMode?: 'local' | 'remote'
     shouldStartDaemon?: boolean
     claudeEnvVars?: Record<string, string>
@@ -156,13 +158,8 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
     };
     session.onUserMessage((message) => {
         const sessionPermissionMode = currentSessionRef.current?.getPermissionMode();
-        if (
-            sessionPermissionMode === 'default'
-            || sessionPermissionMode === 'acceptEdits'
-            || sessionPermissionMode === 'bypassPermissions'
-            || sessionPermissionMode === 'plan'
-        ) {
-            currentPermissionMode = sessionPermissionMode;
+        if (sessionPermissionMode && isPermissionModeAllowedForFlavor(sessionPermissionMode, 'claude')) {
+            currentPermissionMode = sessionPermissionMode as PermissionMode;
         }
         const messagePermissionMode = currentPermissionMode;
         const messageModel = currentModel;
@@ -267,27 +264,36 @@ export async function runClaude(options: StartOptions = {}): Promise<void> {
         logger.debugLargeJson('User message pushed to queue:', message)
     });
 
+    const resolvePermissionMode = (value: unknown): PermissionMode => {
+        const parsed = PermissionModeSchema.safeParse(value);
+        if (!parsed.success || !isPermissionModeAllowedForFlavor(parsed.data, 'claude')) {
+            throw new Error('Invalid permission mode');
+        }
+        return parsed.data as PermissionMode;
+    };
+
+    const resolveModelMode = (value: unknown): SessionModelMode => {
+        const parsed = ModelModeSchema.safeParse(value);
+        if (!parsed.success || !isModelModeAllowedForFlavor(parsed.data, 'claude')) {
+            throw new Error('Invalid model mode');
+        }
+        return parsed.data;
+    };
+
     session.rpcHandlerManager.registerHandler('set-session-config', async (payload: unknown) => {
         if (!payload || typeof payload !== 'object') {
             throw new Error('Invalid session config payload');
         }
-        const config = payload as { permissionMode?: PermissionMode; modelMode?: SessionModelMode };
+        const config = payload as { permissionMode?: unknown; modelMode?: unknown };
 
         if (config.permissionMode !== undefined) {
-            const validModes: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
-            if (!validModes.includes(config.permissionMode)) {
-                throw new Error('Invalid permission mode');
-            }
-            currentPermissionMode = config.permissionMode;
+            currentPermissionMode = resolvePermissionMode(config.permissionMode);
         }
 
         if (config.modelMode !== undefined) {
-            const validModels: SessionModelMode[] = ['default', 'sonnet', 'opus'];
-            if (!validModels.includes(config.modelMode)) {
-                throw new Error('Invalid model mode');
-            }
-            currentModelMode = config.modelMode;
-            currentModel = config.modelMode === 'default' ? undefined : config.modelMode;
+            const resolvedModelMode = resolveModelMode(config.modelMode);
+            currentModelMode = resolvedModelMode;
+            currentModel = resolvedModelMode === 'default' ? undefined : resolvedModelMode;
         }
 
         syncSessionModes();

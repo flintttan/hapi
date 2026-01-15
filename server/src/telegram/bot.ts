@@ -162,7 +162,7 @@ export class HappyBot implements NotificationChannel {
      * Get bound Telegram chat IDs from storage.
      */
     private getBoundChatIds(namespace: string): number[] {
-        const users = this.store.getPlatformUsersByPlatformAndNamespace('telegram', namespace)
+        const users = this.store.users.getUsersByPlatformAndNamespace('telegram', namespace)
         const ids = new Set<number>()
         for (const user of users) {
             const chatId = Number(user.platformUserId)
@@ -177,7 +177,7 @@ export class HappyBot implements NotificationChannel {
         if (!chatId) {
             return null
         }
-        const stored = this.store.getPlatformUser('telegram', String(chatId))
+        const stored = this.store.users.getUser('telegram', String(chatId))
         return stored?.namespace ?? null
     }
 

@@ -216,6 +216,22 @@ export function normalizeAgentRecord(
                 meta
             }
         }
+        if (data.type === 'system' && data.subtype === 'api_error') {
+            return {
+                id: messageId,
+                localId,
+                createdAt,
+                role: 'event',
+                content: {
+                    type: 'api-error',
+                    retryAttempt: asNumber(data.retryAttempt) ?? 0,
+                    maxRetries: asNumber(data.maxRetries) ?? 0,
+                    error: data.error
+                },
+                isSidechain: false,
+                meta
+            }
+        }
         return null
     }
 

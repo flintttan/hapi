@@ -34,6 +34,7 @@ function resolveEnvNumber(name: string, fallback: number): number {
 export type SocketServerDeps = {
     store: Store
     jwtSecret: Uint8Array
+    corsOrigins?: string[]
     getSession?: (sessionId: string) => { active: boolean; namespace: string } | null
     onWebappEvent?: (event: SyncEvent) => void
     onSessionAlive?: (payload: { sid: string; time: number; thinking?: boolean; mode?: 'local' | 'remote' }) => void
@@ -46,30 +47,30 @@ export function createSocketServer(deps: SocketServerDeps): {
     engine: Engine
     rpcRegistry: RpcRegistry
 } {
-    const corsOrigins = configuration.corsOrigins
+    const corsOrigins = deps.corsOrigins ?? configuration.corsOrigins
     const allowAllOrigins = corsOrigins.includes('*')
+    const corsOriginOption = allowAllOrigins ? '*' : corsOrigins
+    const corsOptions = {
+        origin: corsOriginOption,
+        methods: ['GET', 'POST'],
+        credentials: false
+    }
 
     const io = new Server<DefaultEventsMap, DefaultEventsMap, DefaultEventsMap, SocketData>({
-        cors: {
-            origin: (origin, callback) => {
-                if (!origin) {
-                    callback(null, true)
-                    return
-                }
-
-                if (allowAllOrigins || corsOrigins.includes(origin)) {
-                    callback(null, true)
-                    return
-                }
-
-                callback(new Error('Origin not allowed'), false)
-            },
-            methods: ['GET', 'POST'],
-            credentials: false
-        }
+        cors: corsOptions
     })
 
-    const engine = new Engine({ path: '/socket.io/' })
+    const engine = new Engine({
+        path: '/socket.io/',
+        cors: corsOptions,
+        allowRequest: async (req) => {
+            const origin = req.headers.get('origin')
+            if (!origin || allowAllOrigins || corsOrigins.includes(origin)) {
+                return
+            }
+            throw 'Origin not allowed'
+        }
+    })
     io.bind(engine)
 
     const rpcRegistry = new RpcRegistry()
@@ -158,7 +159,7 @@ export function createSocketServer(deps: SocketServerDeps): {
     })
     terminalNs.on('connection', (socket) => registerTerminalHandlers(socket, {
         io,
-        getSession: (sessionId) => deps.getSession?.(sessionId) ?? deps.store.getSession(sessionId),
+        getSession: (sessionId) => deps.getSession?.(sessionId) ?? deps.store.sessions.getSession(sessionId),
         terminalRegistry,
         maxTerminalsPerSocket,
         maxTerminalsPerSession

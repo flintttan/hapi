@@ -55,7 +55,7 @@ export function createRegisterRoutes(jwtSecret: Uint8Array, store: Store): Hono<
         })
 
         // Generate JWT token
-        const token = await new SignJWT({ uid: user.id, tokenType: 'access' })
+        const token = await new SignJWT({ uid: user.id, ns: user.id, tokenType: 'access' })
             .setProtectedHeader({ alg: 'HS256' })
             .setIssuedAt()
             .setExpirationTime('7d')
@@ -63,6 +63,7 @@ export function createRegisterRoutes(jwtSecret: Uint8Array, store: Store): Hono<
 
         const refreshToken = await new SignJWT({
             uid: user.id,
+            ns: user.id,
             tokenType: 'refresh',
             username: user.username,
             firstName: user.username

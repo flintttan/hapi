@@ -6,8 +6,9 @@ import { codexLocalLauncher } from './codexLocalLauncher';
 import { codexRemoteLauncher } from './codexRemoteLauncher';
 import { ApiClient, ApiSessionClient } from '@/lib';
 import type { CodexCliOverrides } from './utils/codexCliOverrides';
+import type { CodexPermissionMode } from '@hapi/protocol/types';
 
-export type PermissionMode = 'default' | 'read-only' | 'safe-yolo' | 'yolo';
+export type PermissionMode = CodexPermissionMode;
 
 export interface EnhancedMode {
     permissionMode: PermissionMode;
@@ -25,6 +26,7 @@ interface LoopOptions {
     codexArgs?: string[];
     codexCliOverrides?: CodexCliOverrides;
     permissionMode?: PermissionMode;
+    resumeSessionId?: string;
     onSessionReady?: (session: CodexSession) => void;
 }
 
@@ -36,7 +38,7 @@ export async function loop(opts: LoopOptions): Promise<void> {
         api: opts.api,
         client: opts.session,
         path: opts.path,
-        sessionId: null,
+        sessionId: opts.resumeSessionId ?? null,
         logPath,
         messageQueue: opts.messageQueue,
         onModeChange: opts.onModeChange,

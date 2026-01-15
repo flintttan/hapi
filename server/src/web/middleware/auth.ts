@@ -4,6 +4,7 @@ import { jwtVerify } from 'jose'
 import type { Store } from '../../store'
 import { configuration } from '../../configuration'
 import { constantTimeEquals } from '../../utils/crypto'
+import { parseAccessToken } from '../../utils/accessToken'
 
 export type WebAppEnv = {
     Variables: {
@@ -51,15 +52,14 @@ export function createAuthMiddleware(jwtSecret: Uint8Array, store: Store): Middl
                 cliApiToken = typeof process.env.CLI_API_TOKEN === 'string' ? process.env.CLI_API_TOKEN : null
             }
 
-            if (constantTimeEquals(token, cliApiToken)) {
-                const defaultCliUserId = store.getDefaultCliUserId()
-                const cliUser = store.getUserById(defaultCliUserId)
-                if (cliUser) {
-                    c.set('userId', cliUser.id)
-                    c.set('namespace', cliUser.id)
-                    await next()
-                    return
-                }
+            const parsedToken = cliApiToken ? parseAccessToken(token) : null
+            if (parsedToken && cliApiToken && constantTimeEquals(parsedToken.baseToken, cliApiToken)) {
+                const namespace = parsedToken.namespace
+                const userId = store.getUserById(namespace) ? namespace : store.getDefaultCliUserId()
+                c.set('userId', userId)
+                c.set('namespace', namespace)
+                await next()
+                return
             }
 
             const verified = await jwtVerify(token, jwtSecret, { algorithms: ['HS256'] })

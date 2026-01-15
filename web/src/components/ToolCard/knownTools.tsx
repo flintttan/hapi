@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
 import type { SessionMetadataSummary } from '@/types/api'
 import { BulbIcon, ClipboardIcon, EyeIcon, FileDiffIcon, GlobeIcon, PuzzleIcon, QuestionIcon, RocketIcon, SearchIcon, TerminalIcon, WrenchIcon } from '@/components/ToolCard/icons'
-import { basename, resolveDisplayPath } from '@/components/ToolCard/path'
+import { basename, resolveDisplayPath } from '@/utils/path'
 
 const DEFAULT_ICON_CLASS = 'h-3.5 w-3.5'
 // Tool presentation registry for `hapi/web` (aligned with `hapi-app`).
@@ -137,6 +137,21 @@ export const knownTools: Record<string, {
             }
             return null
         },
+        minimal: true
+    },
+    CodexPermission: {
+        icon: () => <QuestionIcon className={DEFAULT_ICON_CLASS} />,
+        title: (opts) => {
+            const tool = getInputStringAny(opts.input, ['tool'])
+            return tool ? `Permission: ${tool}` : 'Permission request'
+        },
+        subtitle: (opts) => getInputStringAny(opts.input, ['message', 'command']) ?? null,
+        minimal: true
+    },
+    shell_command: {
+        icon: () => <TerminalIcon className={DEFAULT_ICON_CLASS} />,
+        title: (opts) => opts.description ?? 'Terminal',
+        subtitle: (opts) => getInputStringAny(opts.input, ['command', 'cmd']),
         minimal: true
     },
     Read: {

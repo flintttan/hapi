@@ -5,11 +5,17 @@ import { Future } from '@/utils/future';
 import { createCodexSessionScanner } from './utils/codexSessionScanner';
 import { convertCodexEvent } from './utils/codexEventConverter';
 import { getLocalLaunchExitReason } from '@/agent/localLaunchPolicy';
+import { buildHapiMcpBridge } from './utils/buildHapiMcpBridge';
 
 export async function codexLocalLauncher(session: CodexSession): Promise<'switch' | 'exit'> {
     let exitReason: 'switch' | 'exit' | null = null;
     const processAbortController = new AbortController();
     const exitFuture = new Future<void>();
+    const resumeSessionId = session.sessionId;
+
+    // Start hapi server for MCP bridge (same as remote mode)
+    const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
+    logger.debug(`[codex-local]: Started hapi MCP bridge server at ${happyServer.url}`);
 
     const handleSessionMatchFailed = (message: string) => {
         logger.warn(`[codex-local]: ${message}`);
@@ -23,7 +29,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     };
 
     const scanner = await createCodexSessionScanner({
-        sessionId: session.sessionId,
+        sessionId: resumeSessionId,
         cwd: session.path,
         startupTimestampMs: Date.now(),
         onSessionMatchFailed: handleSessionMatchFailed,
@@ -97,10 +103,11 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
             try {
                 await codexLocal({
                     path: session.path,
-                    sessionId: session.sessionId,
+                    sessionId: resumeSessionId,
                     onSessionFound: handleSessionFound,
                     abort: processAbortController.signal,
-                    codexArgs: session.codexArgs
+                    codexArgs: session.codexArgs,
+                    mcpServers
                 });
 
                 if (!exitReason) {
@@ -131,6 +138,8 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
         session.client.rpcHandlerManager.registerHandler('switch', async () => {});
         session.queue.setOnMessage(null);
         await scanner.cleanup();
+        happyServer.stop();
+        logger.debug('[codex-local]: Stopped hapi MCP bridge server');
     }
 
     return exitReason || 'exit';

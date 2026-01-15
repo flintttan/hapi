@@ -13,6 +13,7 @@ import type {
     SDKResultMessage
 } from '@/claude/sdk'
 import type { RawJSONLines } from '@/claude/types'
+import type { ClaudePermissionMode } from '@hapi/protocol/types'
 
 /**
  * Context for converting SDK messages to log format
@@ -23,6 +24,12 @@ export interface ConversionContext {
     version?: string
     gitBranch?: string
     parentUuid?: string | null
+}
+
+type PermissionResponse = {
+    approved: boolean
+    mode?: ClaudePermissionMode
+    reason?: string
 }
 
 /**
@@ -48,12 +55,12 @@ function getGitBranch(cwd: string): string | undefined {
 export class SDKToLogConverter {
     private lastUuid: string | null = null
     private context: ConversionContext
-    private responses?: Map<string, { approved: boolean, mode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan', reason?: string }>
+    private responses?: Map<string, PermissionResponse>
     private sidechainLastUUID = new Map<string, string>();
 
     constructor(
         context: Omit<ConversionContext, 'parentUuid'>,
-        responses?: Map<string, { approved: boolean, mode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan', reason?: string }>
+        responses?: Map<string, PermissionResponse>
     ) {
         this.context = {
             ...context,
@@ -321,7 +328,7 @@ export class SDKToLogConverter {
 export function convertSDKToLog(
     sdkMessage: SDKMessage,
     context: Omit<ConversionContext, 'parentUuid'>,
-    responses?: Map<string, { approved: boolean, mode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan', reason?: string }>
+    responses?: Map<string, PermissionResponse>
 ): RawJSONLines | null {
     const converter = new SDKToLogConverter(context, responses)
     return converter.convert(sdkMessage)

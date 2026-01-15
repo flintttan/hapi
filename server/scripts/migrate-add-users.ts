@@ -3,7 +3,7 @@
  * Database migration script to add multi-user support.
  *
  * This script performs the following operations:
- * 1. Creates a users table with support for CLI token and Telegram authentication
+ * 1. Creates an app_users table with support for CLI token and Telegram authentication
  * 2. Adds user_id columns to sessions, machines, and messages tables
  * 3. Establishes foreign key constraints with CASCADE delete
  * 4. Creates a default admin user and assigns existing data to it
@@ -18,7 +18,7 @@
  *
  * Options:
  *   --dry-run      Show migration plan without executing
- *   --rollback     Revert migration (remove user_id columns and users table)
+ *   --rollback     Revert migration (remove user_id columns and app_users table)
  *   --force        Skip confirmation prompts
  *   --help         Show this help message
  *
@@ -135,7 +135,7 @@ function createSchemaMigrationsTable(db: Database): void {
 
 function checkUsersTableExists(db: Database): boolean {
     const tables = db.query<{ name: string }, []>(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='app_users'"
     ).all()
     return tables.length > 0
 }
@@ -151,7 +151,7 @@ function migrateUp(db: Database, dryRun: boolean): void {
     console.log('\n=== Migration Plan (Version 1 → 2) ===\n')
 
     const steps = [
-        '1. Create users table (id, telegram_id, username, created_at)',
+        '1. Create app_users table (id, telegram_id, username, created_at)',
         '2. Create schema_migrations table for version tracking',
         '3. Create default admin user',
         '4. Recreate sessions table with user_id column and foreign key',
@@ -173,17 +173,17 @@ function migrateUp(db: Database, dryRun: boolean): void {
     try {
         db.run('BEGIN TRANSACTION')
 
-        // Step 1: Create users table
-        console.log('[1/7] Creating users table...')
+        // Step 1: Create app_users table
+        console.log('[1/7] Creating app_users table...')
         db.run(`
-            CREATE TABLE IF NOT EXISTS users (
+            CREATE TABLE IF NOT EXISTS app_users (
                 id TEXT PRIMARY KEY,
                 telegram_id TEXT UNIQUE,
                 username TEXT NOT NULL,
                 created_at INTEGER NOT NULL
             )
         `)
-        console.log('  ✓ users table created')
+        console.log('  ✓ app_users table created')
 
         // Step 2: Create schema_migrations table
         console.log('[2/7] Creating schema_migrations table...')
@@ -193,12 +193,12 @@ function migrateUp(db: Database, dryRun: boolean): void {
         // Step 3: Create default admin user
         console.log('[3/7] Creating default admin user...')
         const adminExists = db.query<{ id: string }, [string]>(
-            'SELECT id FROM users WHERE id = ?'
+            'SELECT id FROM app_users WHERE id = ?'
         ).get(ADMIN_USER_ID)
 
         if (!adminExists) {
             db.run(
-                'INSERT INTO users (id, telegram_id, username, created_at) VALUES (?, NULL, ?, ?)',
+                'INSERT INTO app_users (id, telegram_id, username, created_at) VALUES (?, NULL, ?, ?)',
                 [ADMIN_USER_ID, ADMIN_USERNAME, Date.now()]
             )
             console.log(`  ✓ Admin user created (id: ${ADMIN_USER_ID}, username: ${ADMIN_USERNAME})`)
@@ -225,7 +225,7 @@ function migrateUp(db: Database, dryRun: boolean): void {
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0,
                 user_id TEXT NOT NULL DEFAULT '${ADMIN_USER_ID}',
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE
             )
         `)
         db.run(`
@@ -256,7 +256,7 @@ function migrateUp(db: Database, dryRun: boolean): void {
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0,
                 user_id TEXT NOT NULL DEFAULT '${ADMIN_USER_ID}',
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE
             )
         `)
         db.run(`
@@ -283,7 +283,7 @@ function migrateUp(db: Database, dryRun: boolean): void {
                 local_id TEXT,
                 user_id TEXT NOT NULL DEFAULT '${ADMIN_USER_ID}',
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
-                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+                FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE
             )
         `)
         db.run(`
@@ -322,7 +322,7 @@ function migrateDown(db: Database, dryRun: boolean): void {
         '1. Remove user_id column from messages table',
         '2. Remove user_id column from machines table',
         '3. Remove user_id column from sessions table',
-        '4. Drop users table',
+        '4. Drop app_users table',
         '5. Update schema version to 1',
     ]
 
@@ -414,9 +414,9 @@ function migrateDown(db: Database, dryRun: boolean): void {
         db.run('CREATE INDEX IF NOT EXISTS idx_sessions_tag ON sessions(tag)')
         console.log('  ✓ sessions table recreated')
 
-        console.log('[4/5] Dropping users table...')
-        db.run('DROP TABLE IF EXISTS users')
-        console.log('  ✓ users table dropped')
+        console.log('[4/5] Dropping app_users table...')
+        db.run('DROP TABLE IF EXISTS app_users')
+        console.log('  ✓ app_users table dropped')
 
         console.log('[5/5] Updating schema version...')
         db.run('DELETE FROM schema_migrations WHERE version = ?', [MIGRATION_VERSION])
@@ -440,13 +440,13 @@ Usage: bun run server/scripts/migrate-add-users.ts [options]
 
 Options:
   --dry-run      Show migration plan without executing
-  --rollback     Revert migration (remove user_id columns and users table)
+  --rollback     Revert migration (remove user_id columns and app_users table)
   --force        Skip confirmation prompts
   --help         Show this help message
 
 Description:
   This script adds multi-user support to the HAPI database by:
-  - Creating a users table for authentication
+  - Creating an app_users table for authentication
   - Adding user_id foreign key columns to sessions, machines, and messages
   - Creating a default admin user and assigning existing data to it
   - Tracking schema version via schema_migrations table
@@ -483,7 +483,7 @@ Examples:
             }
 
             if (!options.force && !options.dryRun) {
-                const confirmed = await confirm('⚠️  WARNING: Rollback will DELETE the users table and all user associations. Continue?')
+                const confirmed = await confirm('⚠️  WARNING: Rollback will DELETE the app_users table and all user associations. Continue?')
                 if (!confirmed) {
                     console.log('Rollback aborted.')
                     process.exit(0)

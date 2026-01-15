@@ -2,7 +2,7 @@ import type { ChatBlock, ToolCallBlock, ToolPermission } from '@/chat/types'
 import type { TracedMessage } from '@/chat/tracer'
 import { createCliOutputBlock, isCliOutputText, mergeCliOutputBlocks } from '@/chat/reducerCliOutput'
 import { parseMessageAsEvent } from '@/chat/reducerEvents'
-import { ensureToolBlock, extractTitleFromChangeTitleInput, type PermissionEntry } from '@/chat/reducerTools'
+import { ensureToolBlock, extractTitleFromChangeTitleInput, isChangeTitleToolName, type PermissionEntry } from '@/chat/reducerTools'
 
 export function reduceTimeline(
     messages: TracedMessage[],
@@ -121,7 +121,7 @@ export function reduceTimeline(
                 }
 
                 if (c.type === 'tool-call') {
-                    if (c.name === 'mcp__hapi__change_title') {
+                    if (isChangeTitleToolName(c.name)) {
                         const title = context.titleChangesByToolUseId.get(c.id) ?? extractTitleFromChangeTitleInput(c.input)
                         if (title && !context.emittedTitleChangeToolUseIds.has(c.id)) {
                             context.emittedTitleChangeToolUseIds.add(c.id)

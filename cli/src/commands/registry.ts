@@ -6,7 +6,6 @@ import { daemonCommand } from './daemon'
 import { doctorCommand } from './doctor'
 import { geminiCommand } from './gemini'
 import { hookForwarderCommand } from './hookForwarder'
-import { logoutCommand } from './logout'
 import { mcpCommand } from './mcp'
 import { notifyCommand } from './notify'
 import { serverCommand } from './server'
@@ -22,7 +21,6 @@ const COMMANDS: CommandDefinition[] = [
     hookForwarderCommand,
     doctorCommand,
     daemonCommand,
-    logoutCommand,
     notifyCommand
 ]
 

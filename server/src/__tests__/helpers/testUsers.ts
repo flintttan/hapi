@@ -23,7 +23,7 @@ export function createTelegramUser(db: Database, username: string = 'telegram_us
     }
 
     db.run(
-        'INSERT INTO users (id, telegram_id, username, created_at) VALUES (?, ?, ?, ?)',
+        'INSERT INTO app_users (id, telegram_id, username, created_at) VALUES (?, ?, ?, ?)',
         [user.id, user.telegramId, user.username, user.createdAt]
     )
 
@@ -42,7 +42,7 @@ export function createCliUser(db: Database, username: string = 'cli_user'): Test
     }
 
     db.run(
-        'INSERT INTO users (id, telegram_id, username, created_at) VALUES (?, ?, ?, ?)',
+        'INSERT INTO app_users (id, telegram_id, username, created_at) VALUES (?, ?, ?, ?)',
         [user.id, user.telegramId, user.username, user.createdAt]
     )
 
@@ -83,13 +83,13 @@ export function createTestSession(
 
     db.run(
         `INSERT INTO sessions (
-            id, tag, machine_id, created_at, updated_at,
+            id, tag, namespace, machine_id, created_at, updated_at,
             metadata, metadata_version,
             agent_state, agent_state_version,
             todos, todos_updated_at,
-            active, active_at, seq, user_id
-        ) VALUES (?, NULL, NULL, ?, ?, ?, 1, NULL, 1, NULL, NULL, 1, ?, 0, ?)`,
-        [sessionId, now, now, metadata, now, userId]
+            active, active_at, seq
+        ) VALUES (?, NULL, ?, NULL, ?, ?, ?, 1, NULL, 1, NULL, NULL, 1, ?, 0)`,
+        [sessionId, userId, now, now, metadata, now]
     )
 
     return sessionId
@@ -112,11 +112,11 @@ export function createTestMachine(
 
     db.run(
         `INSERT INTO machines (
-            id, created_at, updated_at, metadata,
+            id, namespace, created_at, updated_at, metadata,
             metadata_version, daemon_state, daemon_state_version,
-            active, active_at, seq, user_id
-        ) VALUES (?, ?, ?, ?, 1, NULL, 1, 1, ?, 0, ?)`,
-        [machineId, now, now, metadata, now, userId]
+            active, active_at, seq
+        ) VALUES (?, ?, ?, ?, ?, 1, NULL, 1, 1, ?, 0)`,
+        [machineId, userId, now, now, metadata, now]
     )
 
     return machineId

@@ -1,6 +1,6 @@
 import * as webPush from 'web-push'
 import type { Store } from '../store'
-import type { VapidKeys } from './vapidKeys'
+import type { VapidKeys } from '../config/vapidKeys'
 
 export type PushPayload = {
     title: string
@@ -37,7 +37,7 @@ export class PushService {
     }
 
     async sendToNamespace(namespace: string, payload: PushPayload): Promise<void> {
-        const subscriptions = this.store.getPushSubscriptionsByNamespace(namespace)
+        const subscriptions = this.store.push.getPushSubscriptionsByNamespace(namespace)
         if (subscriptions.length === 0) {
             return
         }
@@ -69,7 +69,7 @@ export class PushService {
                 : null
 
             if (statusCode === 410) {
-                this.store.removePushSubscription(namespace, subscription.endpoint)
+                this.store.push.removePushSubscription(namespace, subscription.endpoint)
                 return
             }
 

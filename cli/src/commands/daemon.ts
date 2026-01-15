@@ -9,8 +9,6 @@ import {
 import { getLatestDaemonLog } from '@/ui/logger'
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI'
 import { runDoctorCommand } from '@/ui/doctor'
-import { install } from '@/daemon/install'
-import { uninstall } from '@/daemon/uninstall'
 import { initializeToken } from '@/ui/tokenInit'
 import type { CommandDefinition } from './types'
 
@@ -102,26 +100,6 @@ export const daemonCommand: CommandDefinition = {
                 console.log(latest.path)
             }
             process.exit(0)
-        }
-
-        if (daemonSubcommand === 'install') {
-            try {
-                await install()
-            } catch (error) {
-                console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error')
-                process.exit(1)
-            }
-            return
-        }
-
-        if (daemonSubcommand === 'uninstall') {
-            try {
-                await uninstall()
-            } catch (error) {
-                console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error')
-                process.exit(1)
-            }
-            return
         }
 
         console.log(`

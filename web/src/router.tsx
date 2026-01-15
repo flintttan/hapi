@@ -13,7 +13,7 @@ import { SessionChat } from '@/components/SessionChat'
 import { SessionList } from '@/components/SessionList'
 import { NewSession } from '@/components/NewSession'
 import { LoadingState } from '@/components/LoadingState'
-import { UserMenu } from '@/components/UserMenu'
+import { LanguageSwitcher } from '@/components/LanguageSwitcher'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { isTelegramApp } from '@/hooks/useTelegram'
@@ -24,6 +24,7 @@ import { useSessions } from '@/hooks/queries/useSessions'
 import { useSlashCommands } from '@/hooks/queries/useSlashCommands'
 import { useSendMessage } from '@/hooks/mutations/useSendMessage'
 import { queryKeys } from '@/lib/query-keys'
+import { useTranslation } from '@/lib/use-translation'
 import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
@@ -68,34 +69,35 @@ function PlusIcon(props: { className?: string }) {
 }
 
 function SessionsPage() {
-    const { api, user, onLogout } = useAppContext()
+    const { api } = useAppContext()
     const navigate = useNavigate()
+    const { t } = useTranslation()
     const { sessions, isLoading, error, refetch } = useSessions(api)
 
     const handleRefresh = useCallback(() => {
         void refetch()
     }, [refetch])
 
-    const projectCount = new Set(sessions.map(s => s.metadata?.path ?? 'Other')).size
+    const projectCount = new Set(sessions.map(s => s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other')).size
 
     return (
         <div className="flex h-full flex-col">
             <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
                 <div className="mx-auto w-full max-w-content flex items-center justify-between px-3 py-2">
-                    <div className="flex items-center gap-3">
-                        <UserMenu user={user} onLogout={onLogout} />
-                        <div className="text-xs text-[var(--app-hint)]">
-                            {sessions.length} sessions in {projectCount} projects
-                        </div>
+                    <div className="text-xs text-[var(--app-hint)]">
+                        {t('sessions.count', { n: sessions.length, m: projectCount })}
                     </div>
-                    <button
-                        type="button"
-                        onClick={() => navigate({ to: '/sessions/new' })}
-                        className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
-                        title="New Session"
-                    >
-                        <PlusIcon className="h-5 w-5" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <LanguageSwitcher />
+                        <button
+                            type="button"
+                            onClick={() => navigate({ to: '/sessions/new' })}
+                            className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
+                            title={t('sessions.new')}
+                        >
+                            <PlusIcon className="h-5 w-5" />
+                        </button>
+                    </div>
                 </div>
             </div>
             <div className="flex-1 overflow-y-auto">
@@ -137,6 +139,10 @@ function SessionPage() {
         hasMore: messagesHasMore,
         loadMore: loadMoreMessages,
         refetch: refetchMessages,
+        pendingCount,
+        messagesVersion,
+        flushPending,
+        setAtBottom,
     } = useMessages(api, sessionId)
     const {
         sendMessage,
@@ -173,10 +179,14 @@ function SessionPage() {
             isLoadingMessages={messagesLoading}
             isLoadingMoreMessages={messagesLoadingMore}
             isSending={isSending}
+            pendingCount={pendingCount}
+            messagesVersion={messagesVersion}
             onBack={goBack}
             onRefresh={refreshSelectedSession}
             onLoadMore={loadMoreMessages}
             onSend={sendMessage}
+            onFlushPending={flushPending}
+            onAtBottomChange={setAtBottom}
             onRetryMessage={retryMessage}
             autocompleteSuggestions={getSlashSuggestions}
         />

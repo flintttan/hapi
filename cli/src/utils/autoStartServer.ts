@@ -96,8 +96,16 @@ async function shouldAutoStartServer(): Promise<boolean> {
         return false
     }
 
-    // Condition 2: cliApiToken exists in settings.json (server was previously started)
+    // Condition 2: Check settings.json
     const settings = await readSettings()
+
+    // 2a: serverUrl is set in settings.json (user configured a specific server)
+    if (settings.serverUrl) {
+        logger.debug('[AUTO-START] serverUrl is set in settings.json, skipping auto-start')
+        return false
+    }
+
+    // 2b: cliApiToken exists in settings.json (server was previously started)
     if (!settings.cliApiToken) {
         logger.debug('[AUTO-START] No cliApiToken in settings, skipping auto-start')
         return false

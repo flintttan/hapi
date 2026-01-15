@@ -5,7 +5,8 @@ import type { AuthResponse } from '@/types/api'
 type AppContextValue = {
     api: ApiClient
     token: string
-    user: AuthResponse['user']
+    baseUrl: string
+    user?: AuthResponse['user'] | null
     onLogout?: () => void
 }
 

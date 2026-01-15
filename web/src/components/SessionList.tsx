@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
@@ -7,6 +7,7 @@ import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { useTranslation } from '@/lib/use-translation'
 
 type SessionGroup = {
     directory: string
@@ -146,21 +147,17 @@ function getAgentLabel(session: SessionSummary): string {
     return 'unknown'
 }
 
-function getModelLabel(session: SessionSummary): string {
-    return session.modelMode ?? 'default'
-}
-
-function formatRelativeTime(value: number): string | null {
+function formatRelativeTime(value: number, t: (key: string, params?: Record<string, string | number>) => string): string | null {
     const ms = value < 1_000_000_000_000 ? value * 1000 : value
     if (!Number.isFinite(ms)) return null
     const delta = Date.now() - ms
-    if (delta < 60_000) return 'just now'
+    if (delta < 60_000) return t('session.time.justNow')
     const minutes = Math.floor(delta / 60_000)
-    if (minutes < 60) return `${minutes}m ago`
+    if (minutes < 60) return t('session.time.minutesAgo', { n: minutes })
     const hours = Math.floor(minutes / 60)
-    if (hours < 24) return `${hours}h ago`
+    if (hours < 24) return t('session.time.hoursAgo', { n: hours })
     const days = Math.floor(hours / 24)
-    if (days < 7) return `${days}d ago`
+    if (days < 7) return t('session.time.daysAgo', { n: days })
     return new Date(ms).toLocaleDateString()
 }
 
@@ -170,9 +167,11 @@ function SessionItem(props: {
     showPath?: boolean
     api: ApiClient | null
 }) {
+    const { t } = useTranslation()
     const { session: s, onSelect, showPath = true, api } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
+    const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
     const [renameOpen, setRenameOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
@@ -184,11 +183,16 @@ function SessionItem(props: {
     )
 
     const longPressHandlers = useLongPress({
-        onLongPress: () => {
+        onLongPress: (point) => {
             haptic.impact('medium')
+            setMenuAnchorPoint(point)
             setMenuOpen(true)
         },
-        onClick: () => onSelect(s.id),
+        onClick: () => {
+            if (!menuOpen) {
+                onSelect(s.id)
+            }
+        },
         threshold: 500
     })
 
@@ -196,7 +200,6 @@ function SessionItem(props: {
     const statusDotClass = s.active
         ? (s.thinking ? 'bg-[#007AFF]' : 'bg-[var(--app-badge-success-text)]')
         : 'bg-[var(--app-hint)]'
-
     return (
         <>
             <button
@@ -217,6 +220,11 @@ function SessionItem(props: {
                         </div>
                     </div>
                     <div className="flex items-center gap-2 shrink-0 text-xs">
+                        {s.thinking ? (
+                            <span className="text-[#007AFF] animate-pulse">
+                                {t('session.item.thinking')}
+                            </span>
+                        ) : null}
                         {(() => {
                             const progress = getTodoProgress(s)
                             if (!progress) return null
@@ -229,11 +237,11 @@ function SessionItem(props: {
                         })()}
                         {s.pendingRequestsCount > 0 ? (
                             <span className="text-[var(--app-badge-warning-text)]">
-                                pending {s.pendingRequestsCount}
+                                {t('session.item.pending')} {s.pendingRequestsCount}
                             </span>
                         ) : null}
                         <span className="text-[var(--app-hint)]">
-                            {formatRelativeTime(s.updatedAt)}
+                            {formatRelativeTime(s.updatedAt, t)}
                         </span>
                     </div>
                 </div>
@@ -249,9 +257,9 @@ function SessionItem(props: {
                         </span>
                         {getAgentLabel(s)}
                     </span>
-                    <span>model: {getModelLabel(s)}</span>
+                    <span>{t('session.item.modelMode')}: {s.modelMode || 'default'}</span>
                     {s.metadata?.worktree?.branch ? (
-                        <span>worktree: {s.metadata.worktree.branch}</span>
+                        <span>{t('session.item.worktree')}: {s.metadata.worktree.branch}</span>
                     ) : null}
                 </div>
             </button>
@@ -263,6 +271,7 @@ function SessionItem(props: {
                 onRename={() => setRenameOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
                 onDelete={() => setDeleteOpen(true)}
+                anchorPoint={menuAnchorPoint}
             />
 
             <RenameSessionDialog
@@ -276,10 +285,10 @@ function SessionItem(props: {
             <ConfirmDialog
                 isOpen={archiveOpen}
                 onClose={() => setArchiveOpen(false)}
-                title="Archive Session"
-                description={`Are you sure you want to archive "${sessionName}"? This will disconnect the active session.`}
-                confirmLabel="Archive"
-                confirmingLabel="Archiving..."
+                title={t('dialog.archive.title')}
+                description={t('dialog.archive.description', { name: sessionName })}
+                confirmLabel={t('dialog.archive.confirm')}
+                confirmingLabel={t('dialog.archive.confirming')}
                 onConfirm={archiveSession}
                 isPending={isPending}
                 destructive
@@ -288,10 +297,10 @@ function SessionItem(props: {
             <ConfirmDialog
                 isOpen={deleteOpen}
                 onClose={() => setDeleteOpen(false)}
-                title="Delete Session"
-                description={`Are you sure you want to delete "${sessionName}"? This action cannot be undone.`}
-                confirmLabel="Delete"
-                confirmingLabel="Deleting..."
+                title={t('dialog.delete.title')}
+                description={t('dialog.delete.description', { name: sessionName })}
+                confirmLabel={t('dialog.delete.confirm')}
+                confirmingLabel={t('dialog.delete.confirming')}
                 onConfirm={deleteSession}
                 isPending={isPending}
                 destructive
@@ -309,6 +318,7 @@ export function SessionList(props: {
     renderHeader?: boolean
     api: ApiClient | null
 }) {
+    const { t } = useTranslation()
     const { renderHeader = true, api } = props
     const groups = useMemo(
         () => groupSessionsByDirectory(props.sessions),
@@ -352,13 +362,13 @@ export function SessionList(props: {
             {renderHeader ? (
                 <div className="flex items-center justify-between px-3 py-1">
                     <div className="text-xs text-[var(--app-hint)]">
-                        {props.sessions.length} sessions in {groups.length} projects
+                        {t('sessions.count', { n: props.sessions.length, m: groups.length })}
                     </div>
                     <button
                         type="button"
                         onClick={props.onNewSession}
                         className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
-                        title="New Session"
+                        title={t('sessions.new')}
                     >
                         <PlusIcon className="h-5 w-5" />
                     </button>

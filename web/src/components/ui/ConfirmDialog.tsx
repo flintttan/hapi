@@ -7,6 +7,7 @@ import {
     DialogDescription
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
+import { useTranslation } from '@/lib/use-translation'
 
 type ConfirmDialogProps = {
     isOpen: boolean
@@ -21,6 +22,7 @@ type ConfirmDialogProps = {
 }
 
 export function ConfirmDialog(props: ConfirmDialogProps) {
+    const { t } = useTranslation()
     const {
         isOpen,
         onClose,
@@ -48,7 +50,10 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
             await onConfirm()
             onClose()
         } catch (err) {
-            const message = err instanceof Error ? err.message : 'Operation failed. Please try again.'
+            const message =
+                err instanceof Error && err.message
+                    ? err.message
+                    : t('dialog.error.default')
             setError(message)
         }
     }
@@ -76,12 +81,11 @@ export function ConfirmDialog(props: ConfirmDialogProps) {
                         onClick={onClose}
                         disabled={isPending}
                     >
-                        Cancel
+                        {t('button.cancel')}
                     </Button>
                     <Button
                         type="button"
-                        variant="secondary"
-                        className={destructive ? 'text-red-500' : ''}
+                        variant={destructive ? 'destructive' : 'secondary'}
                         onClick={handleConfirm}
                         disabled={isPending}
                     >

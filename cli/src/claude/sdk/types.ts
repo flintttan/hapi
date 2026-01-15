@@ -4,6 +4,7 @@
  */
 
 import type { Readable } from 'node:stream'
+import type { ClaudePermissionMode } from '@hapi/protocol/types'
 
 /**
  * SDK message types
@@ -164,7 +165,7 @@ export interface QueryOptions {
     maxTurns?: number
     mcpServers?: Record<string, unknown>
     pathToClaudeCodeExecutable?: string
-    permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
+    permissionMode?: ClaudePermissionMode
     continue?: boolean
     resume?: string
     model?: string

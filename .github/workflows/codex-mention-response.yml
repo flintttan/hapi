@@ -1,0 +1,135 @@
+name: Codex Mention Response
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+concurrency:
+  group: codex-mention-${{ github.event.comment.id }}
+  cancel-in-progress: false
+
+jobs:
+  mention-response:
+    if: |
+      contains(github.event.comment.body, '@tiann') &&
+      !endsWith(github.event.comment.user.login, '[bot]')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Check user permissions and skip conditions
+        id: check_skip
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const marker = "*HAPI Bot*";
+            const triggeringCommentId = context.payload.comment.id;
+            const replyMarker = `<!-- reply-to:${triggeringCommentId} -->`;
+            const allowedLogins = (process.env.HAPI_BOT_LOGINS || "github-actions[bot]")
+              .split(",").map(v => v.trim()).filter(Boolean);
+
+            // Check user write permission
+            const commentAuthor = context.payload.comment.user.login;
+            const { data: permissionData } = await github.rest.repos.getCollaboratorPermissionLevel({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              username: commentAuthor
+            });
+            const permission = permissionData.permission;
+            const hasWriteAccess = ["admin", "write"].includes(permission);
+            if (!hasWriteAccess) {
+              core.setOutput("should_skip", "true");
+              core.info(`User ${commentAuthor} has '${permission}' permission; write access required. Skipping.`);
+              return;
+            }
+
+            // Determine context type
+            const isIssueComment = context.eventName === "issue_comment";
+
+            // Get issue/PR number and labels
+            let targetNumber, labels, isPR;
+            if (isIssueComment) {
+              targetNumber = context.payload.issue.number;
+              labels = context.payload.issue.labels || [];
+              isPR = !!context.payload.issue.pull_request;
+            } else {
+              targetNumber = context.payload.pull_request.number;
+              labels = context.payload.pull_request.labels || [];
+              isPR = true;
+            }
+
+            // Check for bot-skip label
+            const hasBotSkip = labels.some(l => l.name === "bot-skip");
+            if (hasBotSkip) {
+              core.setOutput("should_skip", "true");
+              core.info("bot-skip label found; skipping.");
+              return;
+            }
+
+            // Check for existing bot reply to this specific comment
+            const comments = await github.paginate(
+              github.rest.issues.listComments,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: targetNumber,
+                per_page: 100
+              }
+            );
+
+            const hasReply = comments.some(comment => {
+              const body = comment?.body || "";
+              if (!body.includes(marker) || !body.includes(replyMarker)) return false;
+              const user = comment.user;
+              return user?.type === "Bot" && allowedLogins.includes(user.login);
+            });
+
+            if (hasReply) {
+              core.setOutput("should_skip", "true");
+              core.info(`Existing reply to comment ${triggeringCommentId} found; skipping.`);
+              return;
+            }
+
+            core.setOutput("should_skip", "false");
+            core.setOutput("triggering_comment_id", triggeringCommentId);
+            core.setOutput("target_number", targetNumber);
+            core.setOutput("event_type", isIssueComment ? "issue_comment" : "pr_review_comment");
+            core.setOutput("is_pr", isPR ? "true" : "false");
+        env:
+          HAPI_BOT_LOGINS: ${{ vars.HAPI_BOT_LOGINS }}
+
+      - name: Checkout repository
+        if: steps.check_skip.outputs.should_skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: dev
+          fetch-depth: 0
+
+      - name: Fetch all branches
+        if: steps.check_skip.outputs.should_skip != 'true'
+        run: git fetch --all
+
+      - name: Run Codex for Mention Response
+        if: steps.check_skip.outputs.should_skip != 'true'
+        uses: openai/codex-action@v1
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          TRIGGERING_COMMENT_ID: ${{ steps.check_skip.outputs.triggering_comment_id }}
+          TARGET_NUMBER: ${{ steps.check_skip.outputs.target_number }}
+          EVENT_TYPE: ${{ steps.check_skip.outputs.event_type }}
+          IS_PR: ${{ steps.check_skip.outputs.is_pr }}
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          responses-api-endpoint: ${{ secrets.OPENAI_BASE_URL }}
+          model: ${{ vars.OPENAI_MODEL || 'gpt-5.2-codex' }}
+          effort: ${{ vars.OPENAI_EFFORT || 'high' }}
+          sandbox: danger-full-access
+          safety-strategy: drop-sudo
+          prompt-file: .github/prompts/codex-mention-response.md
+          allow-bots: true

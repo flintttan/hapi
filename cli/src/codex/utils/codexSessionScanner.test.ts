@@ -75,7 +75,7 @@ describe('codexSessionScanner', () => {
     });
 
     it('limits session scan to dates within the start window', async () => {
-        const referenceTimestampMs = Date.parse('2025-12-22T00:00:30.000Z');
+        const referenceTimestampMs = Date.parse('2025-12-22T00:00:00.000Z');
         const windowMs = 2 * 60 * 1000;
         const matchingSessionId = 'session-222';
         const outsideSessionId = 'session-999';
@@ -85,7 +85,7 @@ describe('codexSessionScanner', () => {
 
         await mkdir(outsideDir, { recursive: true });
         const baseLines = [
-            JSON.stringify({ type: 'session_meta', payload: { id: matchingSessionId, cwd: '/data/github/happy/hapi', timestamp: '2025-12-22T00:00:00.000Z' } }),
+            JSON.stringify({ type: 'session_meta', payload: { id: matchingSessionId, cwd: '/data/github/happy/hapi', timestamp: '2025-12-22T00:00:30.000Z' } }),
             JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'hello' } })
         ];
         await writeFile(matchingFile, baseLines.join('\n') + '\n');

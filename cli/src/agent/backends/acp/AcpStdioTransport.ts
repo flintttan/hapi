@@ -47,7 +47,8 @@ export class AcpStdioTransport {
     }) {
         this.process = spawn(options.command, options.args ?? [], {
             env: options.env,
-            stdio: ['pipe', 'pipe', 'pipe']
+            stdio: ['pipe', 'pipe', 'pipe'],
+            shell: process.platform === 'win32'
         });
 
         this.process.stdout.setEncoding('utf8');

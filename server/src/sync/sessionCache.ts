@@ -41,12 +41,12 @@ export class SessionCache {
     }
 
     getOrCreateSession(tag: string, metadata: unknown, agentState: unknown, namespace: string): Session {
-        const stored = this.store.getOrCreateSession(tag, metadata, agentState, namespace)
+        const stored = this.store.sessions.getOrCreateSession(tag, metadata, agentState, namespace)
         return this.refreshSession(stored.id) ?? (() => { throw new Error('Failed to load session') })()
     }
 
     refreshSession(sessionId: string): Session | null {
-        let stored = this.store.getSession(sessionId)
+        let stored = this.store.sessions.getSession(sessionId)
         if (!stored) {
             const existed = this.sessions.delete(sessionId)
             if (existed) {
@@ -59,14 +59,14 @@ export class SessionCache {
 
         if (stored.todos === null && !this.todoBackfillAttemptedSessionIds.has(sessionId)) {
             this.todoBackfillAttemptedSessionIds.add(sessionId)
-            const messages = this.store.getMessages(sessionId, 200)
+            const messages = this.store.messages.getMessages(sessionId, 200)
             for (let i = messages.length - 1; i >= 0; i -= 1) {
                 const message = messages[i]
                 const todos = extractTodoWriteTodosFromMessageContent(message.content)
                 if (todos) {
-                    const updated = this.store.setSessionTodos(sessionId, todos, message.createdAt, stored.namespace)
+                    const updated = this.store.sessions.setSessionTodos(sessionId, todos, message.createdAt, stored.namespace)
                     if (updated) {
-                        stored = this.store.getSession(sessionId) ?? stored
+                        stored = this.store.sessions.getSession(sessionId) ?? stored
                     }
                     break
                 }
@@ -114,7 +114,7 @@ export class SessionCache {
     }
 
     reloadAll(): void {
-        const sessions = this.store.getSessions()
+        const sessions = this.store.sessions.getSessions()
         for (const session of sessions) {
             this.refreshSession(session.id)
         }
@@ -227,7 +227,7 @@ export class SessionCache {
         const currentMetadata = session.metadata ?? { path: '', host: '' }
         const newMetadata = { ...currentMetadata, name }
 
-        const result = this.store.updateSessionMetadata(
+        const result = this.store.sessions.updateSessionMetadata(
             sessionId,
             newMetadata,
             session.metadataVersion,
@@ -256,7 +256,7 @@ export class SessionCache {
             throw new Error('Cannot delete active session')
         }
 
-        const deleted = this.store.deleteSession(sessionId, session.namespace)
+        const deleted = this.store.sessions.deleteSession(sessionId, session.namespace)
         if (!deleted) {
             throw new Error('Failed to delete session')
         }

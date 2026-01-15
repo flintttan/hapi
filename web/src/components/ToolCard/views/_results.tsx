@@ -1,7 +1,7 @@
 import type { ToolViewComponent, ToolViewProps } from '@/components/ToolCard/views/_all'
 import { CodeBlock } from '@/components/CodeBlock'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
-import { basename, resolveDisplayPath } from '@/components/ToolCard/path'
+import { basename, resolveDisplayPath } from '@/utils/path'
 
 function isObject(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object'
@@ -93,6 +93,26 @@ function extractTextFromResult(result: unknown, depth: number = 0): string | nul
     }
 
     return null
+}
+
+interface CodexBashOutput {
+    exitCode: number | null
+    wallTime: string | null
+    output: string
+}
+
+function parseCodexBashOutput(text: string): CodexBashOutput | null {
+    const exitMatch = text.match(/^Exit code:\s*(\d+)/m)
+    const wallMatch = text.match(/^Wall time:\s*(.+)$/m)
+    const outputMatch = text.match(/^Output:\n([\s\S]*)$/m)
+
+    if (!exitMatch && !wallMatch && !outputMatch) return null
+
+    return {
+        exitCode: exitMatch ? parseInt(exitMatch[1], 10) : null,
+        wallTime: wallMatch ? wallMatch[1].trim() : null,
+        output: outputMatch ? outputMatch[1] : text
+    }
 }
 
 function looksLikeHtml(text: string): boolean {
@@ -549,6 +569,24 @@ const GenericResultView: ToolViewComponent = (props: ToolViewProps) => {
         return <div className="text-sm text-[var(--app-hint)]">{placeholderForState(props.block.tool.state)}</div>
     }
 
+    // Detect codex bash output format and render accordingly
+    if (typeof result === 'string') {
+        const parsed = parseCodexBashOutput(result)
+        if (parsed) {
+            return (
+                <>
+                    <div className="text-xs text-[var(--app-hint)] mb-2">
+                        {parsed.exitCode !== null && `Exit code: ${parsed.exitCode}`}
+                        {parsed.exitCode !== null && parsed.wallTime && ' · '}
+                        {parsed.wallTime && `Wall time: ${parsed.wallTime}`}
+                    </div>
+                    {renderText(parsed.output.trim(), { mode: 'code' })}
+                    <RawJsonDevOnly value={result} />
+                </>
+            )
+        }
+    }
+
     const text = extractTextFromResult(result)
     if (text) {
         return (
@@ -569,7 +607,6 @@ const GenericResultView: ToolViewComponent = (props: ToolViewProps) => {
 export const toolResultViewRegistry: Record<string, ToolViewComponent> = {
     Task: MarkdownResultView,
     Bash: BashResultView,
-    CodexBash: BashResultView,
     Glob: LineListResultView,
     Grep: LineListResultView,
     LS: LineListResultView,

@@ -8,7 +8,6 @@ import { FileHandle } from 'node:fs/promises'
 import { readFile, writeFile, mkdir, open, unlink, rename, stat } from 'node:fs/promises'
 import { existsSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs'
 import { configuration } from '@/configuration'
-import { encodeBase64 } from '@/api/encryption';
 import { isProcessAlive } from '@/utils/process';
 
 interface Settings {
@@ -18,6 +17,7 @@ interface Settings {
   machineIdConfirmedByServer?: boolean
   daemonAutoStartWhenRunningHappy?: boolean
   cliApiToken?: string
+  // Server URL for API connections (priority: env HAPI_SERVER_URL > this > default)
   serverUrl?: string
 }
 
@@ -137,7 +137,7 @@ export async function writeCredentialsDataKey(credentials: { publicKey: Uint8Arr
     await mkdir(configuration.happyHomeDir, { recursive: true })
   }
   await writeFile(configuration.privateKeyFile, JSON.stringify({
-    encryption: { publicKey: encodeBase64(credentials.publicKey), machineKey: encodeBase64(credentials.machineKey) },
+    encryption: { publicKey: Buffer.from(credentials.publicKey).toString('base64'), machineKey: Buffer.from(credentials.machineKey).toString('base64') },
     token: credentials.token
   }, null, 2));
 }

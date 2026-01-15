@@ -15,7 +15,8 @@ export function cleanupTestDatabase(db: Database): void {
     db.exec('DELETE FROM sessions')
     db.exec('DELETE FROM machines')
     db.exec('DELETE FROM cli_tokens')
-    db.exec('DELETE FROM users WHERE id != "admin-user"')
+    db.exec('DELETE FROM users')
+    db.exec("DELETE FROM app_users WHERE id NOT IN ('admin-user', 'cli-user')")
 }
 
 /**
@@ -37,7 +38,7 @@ export function generateTestData(
         const username = `testuser${i}`
 
         db.run(
-            'INSERT INTO users (id, telegram_id, username, created_at) VALUES (?, ?, ?, ?)',
+            'INSERT INTO app_users (id, telegram_id, username, created_at) VALUES (?, ?, ?, ?)',
             [userId, telegramId, username, Date.now()]
         )
 
@@ -55,13 +56,13 @@ export function generateTestData(
 
             db.run(
                 `INSERT INTO sessions (
-                    id, tag, machine_id, created_at, updated_at,
+                    id, tag, namespace, machine_id, created_at, updated_at,
                     metadata, metadata_version,
                     agent_state, agent_state_version,
                     todos, todos_updated_at,
-                    active, active_at, seq, user_id
-                ) VALUES (?, NULL, NULL, ?, ?, ?, 1, NULL, 1, NULL, NULL, 1, ?, 0, ?)`,
-                [sessionId, now, now, metadata, now, userId]
+                    active, active_at, seq
+                ) VALUES (?, NULL, ?, NULL, ?, ?, ?, 1, NULL, 1, NULL, NULL, 1, ?, 0)`,
+                [sessionId, userId, now, now, metadata, now]
             )
         }
 
@@ -75,11 +76,11 @@ export function generateTestData(
 
         db.run(
             `INSERT INTO machines (
-                id, created_at, updated_at, metadata,
+                id, namespace, created_at, updated_at, metadata,
                 metadata_version, daemon_state, daemon_state_version,
-                active, active_at, seq, user_id
-            ) VALUES (?, ?, ?, ?, 1, NULL, 1, 1, ?, 0, ?)`,
-            [machineId, now2, now2, machineMetadata, now2, userId]
+                active, active_at, seq
+            ) VALUES (?, ?, ?, ?, ?, 1, NULL, 1, 1, ?, 0)`,
+            [machineId, userId, now2, now2, machineMetadata, now2]
         )
     }
 

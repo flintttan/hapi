@@ -15,6 +15,7 @@ import type {
     PushVapidPublicKeyResponse,
     SlashCommandsResponse,
     SpawnResponse,
+    VisibilityPayload,
     SessionResponse,
     SessionsResponse
 } from '@/types/api'
@@ -205,6 +206,13 @@ export class ApiClient {
     async unsubscribePushNotifications(payload: PushUnsubscribePayload): Promise<void> {
         await this.request('/api/push/subscribe', {
             method: 'DELETE',
+            body: JSON.stringify(payload)
+        })
+    }
+
+    async setVisibility(payload: VisibilityPayload): Promise<void> {
+        await this.request('/api/visibility', {
+            method: 'POST',
             body: JSON.stringify(payload)
         })
     }

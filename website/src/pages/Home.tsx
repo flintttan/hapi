@@ -2,7 +2,6 @@ import Layout from "@/components/Layout";
 import AppShowcase from "@/components/AppShowcase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowRight, Check, Code2, Copy, Globe, Laptop, Lock, MessageSquare, Smartphone, Terminal, Zap, GitBranch, ShieldAlert, Coffee, Mountain, Footprints } from "lucide-react";
 import { useState } from "react";
 import { Link } from "wouter";
@@ -268,42 +267,43 @@ export default function Home() {
         <div className="container max-w-4xl">
           <h2 className="text-3xl md:text-4xl font-bold text-center mb-12">{t('installation.title')}</h2>
           
-          <Tabs defaultValue="npm" className="w-full">
-            <TabsList className="grid w-full grid-cols-1 mb-8 h-14 p-1 bg-muted border-2 border-border rounded-xl">
-              <TabsTrigger value="npm" className="text-lg font-bold rounded-lg data-[state=active]:bg-white data-[state=active]:text-primary data-[state=active]:shadow-sm">NPM</TabsTrigger>
-            </TabsList>
-            
-            <TabsContent value="npm">
-              <Card className="border-2 border-border shadow-hard bg-card">
-                <CardContent className="p-6 space-y-6">
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <h3 className="font-bold">{t('installation.npm.step1')}</h3>
-                    </div>
-                    <div className="bg-slate-950 text-slate-50 p-4 rounded-xl font-mono text-sm flex justify-between items-center border-2 border-slate-800">
-                      <code>npm install -g hapi</code>
-                      <Button variant="ghost" size="icon" className="text-slate-400 hover:text-white hover:bg-slate-800" onClick={() => copyToClipboard("npm install -g hapi", "install")}>
-                        {copied === "install" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                      </Button>
-                    </div>
-                  </div>
-                  
-                  <div className="space-y-2">
-                    <div className="flex justify-between items-center">
-                      <h3 className="font-bold">{t('installation.npm.step2')}</h3>
-                    </div>
-                    <div className="bg-slate-950 text-slate-50 p-4 rounded-xl font-mono text-sm flex justify-between items-center border-2 border-slate-800">
-                      <code>hapi start</code>
-                      <Button variant="ghost" size="icon" className="text-slate-400 hover:text-white hover:bg-slate-800" onClick={() => copyToClipboard("hapi start", "start")}>
-                        {copied === "start" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                      </Button>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
-            
-          </Tabs>
+          <Card className="border-2 border-border shadow-hard bg-card">
+            <CardContent className="p-6 space-y-6">
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-bold">{t('installation.npm.step1')}</h3>
+                </div>
+                <div className="bg-slate-950 text-slate-50 p-4 rounded-xl font-mono text-sm flex justify-between items-center border-2 border-slate-800">
+                  <code>npx @twsxtd/hapi server --relay</code>
+                  <Button variant="ghost" size="icon" className="text-slate-400 hover:text-white hover:bg-slate-800" onClick={() => copyToClipboard("npx @twsxtd/hapi server --relay", "server")}>
+                    {copied === "server" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-bold">{t('installation.npm.step2')}</h3>
+                </div>
+                <div className="bg-slate-950 text-slate-50 p-4 rounded-xl font-mono text-sm flex justify-between items-center border-2 border-slate-800">
+                  <code>npx @twsxtd/hapi</code>
+                  <Button variant="ghost" size="icon" className="text-slate-400 hover:text-white hover:bg-slate-800" onClick={() => copyToClipboard("npx @twsxtd/hapi", "session")}>
+                    {copied === "session" ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <h3 className="font-bold">{t('installation.npm.step3')}</h3>
+                </div>
+                <div className="bg-slate-950 text-slate-50 p-4 rounded-xl font-mono text-sm border-2 border-slate-800">
+                  <code className="text-slate-400">{t('installation.npm.step3Hint')}</code>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <p className="text-center mt-4 text-sm text-muted-foreground">{t('installation.e2ee')}</p>
         </div>
       </section>
 

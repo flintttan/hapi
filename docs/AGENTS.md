@@ -1,5 +1,7 @@
 # AGENTS.md
 
+Work style: telegraph; noun-phrases ok; drop grammar;
+
 Short guide for AI agents in this repo. Prefer progressive loading: start with the root README, then package READMEs as needed.
 
 ## Repo layout
@@ -30,3 +32,10 @@ Short guide for AI agents in this repo. Prefer progressive loading: start with t
 - `cli/src/api/`, `cli/src/claude/`, `cli/src/commands/`, `cli/src/codex/`
 - `server/src/web/`, `server/src/socket/`, `server/src/telegram/`, `server/src/sync/`
 - `web/src/components/`, `web/src/api/`, `web/src/hooks/`
+
+## Critical Thinking
+
+1. Fix root cause (not band-aid).
+2. Unsure: read more code; if still stuck, ask w/ short options.
+3. Conflicts: call out; pick safer path.
+4. Unrecognized changes: assume other agent; keep going; focus your changes. If it causes issues, stop + ask user.

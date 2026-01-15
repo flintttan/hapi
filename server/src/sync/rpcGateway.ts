@@ -1,4 +1,4 @@
-import type { ClaudePermissionMode, ModelMode, PermissionMode } from '@hapi/protocol/types'
+import type { ModelMode, PermissionMode } from '@hapi/protocol/types'
 import type { Server } from 'socket.io'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 
@@ -30,7 +30,7 @@ export class RpcGateway {
     async approvePermission(
         sessionId: string,
         requestId: string,
-        mode?: ClaudePermissionMode,
+        mode?: PermissionMode,
         allowTools?: string[],
         decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort',
         answers?: Record<string, string[]>

@@ -1,35 +1,37 @@
 # HAPI
 
-HAPI means "哈皮" a Chinese transliteration of [Happy](https://github.com/slopus/happy). Great credit to the original project.
-
-Run Claude Code / Codex / Gemini sessions locally and control them remotely through a Web / PWA / Telegram Mini App.
+Run official Claude Code / Codex / Gemini sessions locally and control them remotely through a Web / PWA / Telegram Mini App.
 
 > **Why HAPI?** HAPI is a local-first alternative to Happy. See [Why Not Happy?](docs/guide/why-hapi.md) for the key differences.
 
 ## Features
 
-- **Seamless Handoff** - Work locally with native Claude Code or Codex, switch to remote when needed, switch back anytime.
-- Start AI coding sessions from any machine.
-- Monitor and control sessions from your phone or browser.
-- Approve or deny tool permissions remotely.
-- Browse files and view git diffs.
-- Track session progress with todo lists.
-- Supports multiple AI backends: Claude Code, Codex, and Gemini.
+- **Seamless Handoff** - Work locally, switch to remote when needed, switch back anytime. No context loss, no session restart.
+- **Native First** - HAPI wraps your AI agent instead of replacing it. Same terminal, same experience, same muscle memory.
+- **AFK Without Stopping** - Step away from your desk? Approve AI requests from your phone with one tap.
+- **Your AI, Your Choice** - Claude Code, Codex, Gemini—different models, one unified workflow.
+- **Terminal Anywhere** - Run commands from your phone or browser, directly connected to the working machine.
+
+## Demo
+
+https://github.com/user-attachments/assets/38230353-94c6-4dbe-9c29-b2a2cc457546
 
 ## Getting Started
 
 ```bash
-npx @twsxtd/hapi server # start the server locally
-npx @twsxtd/hapi # run claude code 
+npx @twsxtd/hapi server --relay  # start server with E2E encrypted relay
+npx @twsxtd/hapi                 # run claude code
 ```
 
-Open `http://<server-ip>:3006` and login with the token, if you need to access it remotely, see [Remote access](/guide/installation#remote-access)
+The terminal will display a URL and QR code. Scan the QR code with your phone or open the URL to access.
 
-More options: [Quick Start](docs/guide/quick-start.md) | [Installation](docs/guide/installation.md)
+> The relay uses WireGuard + TLS for end-to-end encryption. Your data is encrypted from your device to your machine.
+
+For self-hosted options (Cloudflare Tunnel, Tailscale), see [Installation](docs/guide/installation.md)
 
 ## Docs
 
-- [PWA](docs/guide/pwa.md)
+- [App](docs/guide/pwa.md)
 - [How it Works](docs/guide/how-it-works.md)
 - [Why HAPI](docs/guide/why-hapi.md)
 - [FAQ](docs/guide/faq.md)
@@ -40,3 +42,7 @@ More options: [Quick Start](docs/guide/quick-start.md) | [Installation](docs/gui
 bun install
 bun run build:single-exe
 ```
+
+## Credits
+
+HAPI means "哈皮" a Chinese transliteration of [Happy](https://github.com/slopus/happy). Great credit to the original project.

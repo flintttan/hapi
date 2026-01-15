@@ -248,7 +248,7 @@ export class CodexMcpClient {
                 const toolCallId = extractToolCallId(params) ?? randomUUID();
                 const command = extractCommand(params);
                 const cwd = extractCwd(params);
-                const toolName = 'CodexBash';
+                const toolName = 'CodexPermission';
 
                 // If no permission handler set, deny by default
                 if (!this.permissionHandler) {
@@ -262,8 +262,9 @@ export class CodexMcpClient {
                         toolCallId,
                         toolName,
                         {
-                            command: command ?? [],
-                            cwd: cwd ?? ''
+                            message: typeof params.message === 'string' ? params.message : undefined,
+                            command: command ?? undefined,
+                            cwd: cwd ?? undefined
                         }
                     );
 

@@ -1,8 +1,12 @@
-import { useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query'
+import { useMutation } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
-import type { DecryptedMessage, MessagesResponse } from '@/types/api'
-import { makeClientSideId, upsertMessagesInCache } from '@/lib/messages'
-import { queryKeys } from '@/lib/query-keys'
+import type { DecryptedMessage } from '@/types/api'
+import { makeClientSideId } from '@/lib/messages'
+import {
+    appendOptimisticMessage,
+    getMessageWindowState,
+    updateMessageStatus,
+} from '@/lib/message-window-store'
 import { usePlatform } from '@/hooks/usePlatform'
 
 type SendMessageInput = {
@@ -12,36 +16,16 @@ type SendMessageInput = {
     createdAt: number
 }
 
-function updateMessageStatus(
-    data: InfiniteData<MessagesResponse> | undefined,
-    localId: string,
-    status: DecryptedMessage['status'],
-): InfiniteData<MessagesResponse> | undefined {
-    if (!data) return data
-
-    const pages = data.pages.map((page) => ({
-        ...page,
-        messages: page.messages.map((message) =>
-            message.localId === localId
-                ? { ...message, status }
-                : message
-        ),
-    }))
-
-    return {
-        ...data,
-        pages,
-    }
-}
-
 function findMessageByLocalId(
-    data: InfiniteData<MessagesResponse> | undefined,
+    sessionId: string,
     localId: string,
 ): DecryptedMessage | null {
-    if (!data) return null
-    for (const page of data.pages) {
-        const match = page.messages.find((message) => message.localId === localId)
-        if (match) return match
+    const state = getMessageWindowState(sessionId)
+    for (const message of state.messages) {
+        if (message.localId === localId) return message
+    }
+    for (const message of state.pending) {
+        if (message.localId === localId) return message
     }
     return null
 }
@@ -51,7 +35,6 @@ export function useSendMessage(api: ApiClient | null, sessionId: string | null):
     retryMessage: (localId: string) => void
     isSending: boolean
 } {
-    const queryClient = useQueryClient()
     const { haptic } = usePlatform()
 
     const mutation = useMutation({
@@ -72,23 +55,14 @@ export function useSendMessage(api: ApiClient | null, sessionId: string | null):
                 originalText: input.text,
             }
 
-            queryClient.setQueryData<InfiniteData<MessagesResponse>>(
-                queryKeys.messages(input.sessionId),
-                (data) => upsertMessagesInCache(data, [optimisticMessage]),
-            )
+            appendOptimisticMessage(input.sessionId, optimisticMessage)
         },
         onSuccess: (_, input) => {
-            queryClient.setQueryData<InfiniteData<MessagesResponse>>(
-                queryKeys.messages(input.sessionId),
-                (data) => updateMessageStatus(data, input.localId, 'sent'),
-            )
+            updateMessageStatus(input.sessionId, input.localId, 'sent')
             haptic.notification('success')
         },
         onError: (_, input) => {
-            queryClient.setQueryData<InfiniteData<MessagesResponse>>(
-                queryKeys.messages(input.sessionId),
-                (data) => updateMessageStatus(data, input.localId, 'failed'),
-            )
+            updateMessageStatus(input.sessionId, input.localId, 'failed')
             haptic.notification('error')
         },
     })
@@ -109,14 +83,10 @@ export function useSendMessage(api: ApiClient | null, sessionId: string | null):
         if (!api || !sessionId) return
         if (mutation.isPending) return
 
-        const data = queryClient.getQueryData<InfiniteData<MessagesResponse>>(queryKeys.messages(sessionId))
-        const message = findMessageByLocalId(data, localId)
+        const message = findMessageByLocalId(sessionId, localId)
         if (!message?.originalText) return
 
-        queryClient.setQueryData<InfiniteData<MessagesResponse>>(
-            queryKeys.messages(sessionId),
-            (current) => updateMessageStatus(current, localId, 'sending'),
-        )
+        updateMessageStatus(sessionId, localId, 'sending')
 
         mutation.mutate({
             sessionId,

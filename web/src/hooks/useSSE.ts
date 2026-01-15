@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef } from 'react'
-import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
-import type { MessagesResponse, SyncEvent } from '@/types/api'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import type { SyncEvent } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
-import { upsertMessagesInCache } from '@/lib/messages'
+import { clearMessageWindow, ingestIncomingMessages } from '@/lib/message-window-store'
 
 function isObject(value: unknown): value is Record<string, unknown> {
     return Boolean(value) && typeof value === 'object'
@@ -14,9 +14,26 @@ type SSESubscription = {
     machineId?: string
 }
 
-function buildEventsUrl(baseUrl: string, token: string, subscription: SSESubscription): string {
+type VisibilityState = 'visible' | 'hidden'
+
+type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
+
+function getVisibilityState(): VisibilityState {
+    if (typeof document === 'undefined') {
+        return 'hidden'
+    }
+    return document.visibilityState === 'visible' ? 'visible' : 'hidden'
+}
+
+function buildEventsUrl(
+    baseUrl: string,
+    token: string,
+    subscription: SSESubscription,
+    visibility: VisibilityState
+): string {
     const params = new URLSearchParams()
     params.set('token', token)
+    params.set('visibility', visibility)
     if (subscription.all) {
         params.set('all', 'true')
     }
@@ -44,13 +61,16 @@ export function useSSE(options: {
     onConnect?: () => void
     onDisconnect?: (reason: string) => void
     onError?: (error: unknown) => void
-}): void {
+    onToast?: (event: ToastEvent) => void
+}): { subscriptionId: string | null } {
     const queryClient = useQueryClient()
     const onEventRef = useRef(options.onEvent)
     const onConnectRef = useRef(options.onConnect)
     const onDisconnectRef = useRef(options.onDisconnect)
     const onErrorRef = useRef(options.onError)
+    const onToastRef = useRef(options.onToast)
     const eventSourceRef = useRef<EventSource | null>(null)
+    const [subscriptionId, setSubscriptionId] = useState<string | null>(null)
 
     useEffect(() => {
         onEventRef.current = options.onEvent
@@ -68,6 +88,10 @@ export function useSSE(options: {
         onDisconnectRef.current = options.onDisconnect
     }, [options.onDisconnect])
 
+    useEffect(() => {
+        onToastRef.current = options.onToast
+    }, [options.onToast])
+
     const subscription = options.subscription ?? {}
     const subscriptionKey = useMemo(() => {
         return `${subscription.all ? '1' : '0'}|${subscription.sessionId ?? ''}|${subscription.machineId ?? ''}`
@@ -77,24 +101,33 @@ export function useSSE(options: {
         if (!options.enabled) {
             eventSourceRef.current?.close()
             eventSourceRef.current = null
+            setSubscriptionId(null)
             return
         }
 
-        const url = buildEventsUrl(options.baseUrl, options.token, subscription)
+        setSubscriptionId(null)
+        const url = buildEventsUrl(options.baseUrl, options.token, subscription, getVisibilityState())
         const eventSource = new EventSource(url)
         eventSourceRef.current = eventSource
 
         const handleSyncEvent = (event: SyncEvent) => {
+            if (event.type === 'connection-changed') {
+                const data = event.data
+                if (data && typeof data === 'object' && 'subscriptionId' in data) {
+                    const nextId = (data as { subscriptionId?: unknown }).subscriptionId
+                    if (typeof nextId === 'string' && nextId.length > 0) {
+                        setSubscriptionId(nextId)
+                    }
+                }
+            }
+
+            if (event.type === 'toast') {
+                onToastRef.current?.(event)
+                return
+            }
+
             if (event.type === 'message-received') {
-                queryClient.setQueryData<InfiniteData<MessagesResponse>>(
-                    queryKeys.messages(event.sessionId),
-                    (data) => upsertMessagesInCache(data, [event.message])
-                )
-                // Mark stale so the initial query still fetches history when it mounts.
-                void queryClient.invalidateQueries({
-                    queryKey: queryKeys.messages(event.sessionId),
-                    refetchType: 'none'
-                })
+                ingestIncomingMessages(event.sessionId, [event.message])
             }
 
             if (event.type === 'session-added' || event.type === 'session-updated' || event.type === 'session-removed') {
@@ -102,7 +135,7 @@ export function useSSE(options: {
                 if ('sessionId' in event) {
                     if (event.type === 'session-removed') {
                         void queryClient.removeQueries({ queryKey: queryKeys.session(event.sessionId) })
-                        void queryClient.removeQueries({ queryKey: queryKeys.messages(event.sessionId) })
+                        clearMessageWindow(event.sessionId)
                     } else {
                         void queryClient.invalidateQueries({ queryKey: queryKeys.session(event.sessionId) })
                     }
@@ -153,6 +186,9 @@ export function useSSE(options: {
             if (eventSourceRef.current === eventSource) {
                 eventSourceRef.current = null
             }
+            setSubscriptionId(null)
         }
     }, [options.baseUrl, options.enabled, options.token, subscriptionKey, queryClient])
+
+    return { subscriptionId }
 }

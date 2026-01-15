@@ -1,8 +1,11 @@
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
 import { randomUUID } from 'node:crypto'
+import { z } from 'zod'
 import type { SSEManager } from '../../sse/sseManager'
 import type { SyncEngine } from '../../sync/syncEngine'
+import type { VisibilityState } from '../../visibility/visibilityTracker'
+import type { VisibilityTracker } from '../../visibility/visibilityTracker'
 import type { WebAppEnv } from '../middleware/auth'
 
 function parseOptionalId(value: string | undefined): string | null {
@@ -19,9 +22,19 @@ function parseBoolean(value: string | undefined): boolean {
     return value === 'true' || value === '1'
 }
 
+function parseVisibility(value: string | undefined): VisibilityState {
+    return value === 'visible' ? 'visible' : 'hidden'
+}
+
+const visibilitySchema = z.object({
+    subscriptionId: z.string().min(1),
+    visibility: z.enum(['visible', 'hidden'])
+})
+
 export function createEventsRoutes(
     getSseManager: () => SSEManager | null,
-    getSyncEngine: () => SyncEngine | null
+    getSyncEngine: () => SyncEngine | null,
+    getVisibilityTracker: () => VisibilityTracker | null
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -41,6 +54,7 @@ export function createEventsRoutes(
         const sessionId = parseOptionalId(query.sessionId)
         const machineId = parseOptionalId(query.machineId)
         const subscriptionId = randomUUID()
+        const visibility = parseVisibility(query.visibility)
         const namespace = c.get('namespace')
 
         if (sessionId || machineId) {
@@ -78,10 +92,21 @@ export function createEventsRoutes(
                 all,
                 sessionId,
                 machineId,
+                visibility,
                 send: (event) => stream.writeSSE({ data: JSON.stringify(event) }),
                 sendHeartbeat: async () => {
                     await stream.write(': heartbeat\n\n')
                 }
+            })
+
+            await stream.writeSSE({
+                data: JSON.stringify({
+                    type: 'connection-changed',
+                    data: {
+                        status: 'connected',
+                        subscriptionId
+                    }
+                })
             })
 
             await new Promise<void>((resolve) => {
@@ -92,6 +117,27 @@ export function createEventsRoutes(
 
             manager.unsubscribe(subscriptionId)
         })
+    })
+
+    app.post('/visibility', async (c) => {
+        const tracker = getVisibilityTracker()
+        if (!tracker) {
+            return c.json({ error: 'Not connected' }, 503)
+        }
+
+        const json = await c.req.json().catch(() => null)
+        const parsed = visibilitySchema.safeParse(json)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        const namespace = c.get('namespace')
+        const updated = tracker.setVisibility(parsed.data.subscriptionId, namespace, parsed.data.visibility)
+        if (!updated) {
+            return c.json({ error: 'Subscription not found' }, 404)
+        }
+
+        return c.json({ ok: true })
     })
 
     return app

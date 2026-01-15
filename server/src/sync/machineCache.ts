@@ -69,12 +69,12 @@ export class MachineCache {
     }
 
     getOrCreateMachine(id: string, metadata: unknown, daemonState: unknown, namespace: string): Machine {
-        const stored = this.store.getOrCreateMachine(id, metadata, daemonState, namespace)
+        const stored = this.store.machines.getOrCreateMachine(id, metadata, daemonState, namespace)
         return this.refreshMachine(stored.id) ?? (() => { throw new Error('Failed to load machine') })()
     }
 
     refreshMachine(machineId: string): Machine | null {
-        const stored = this.store.getMachine(machineId)
+        const stored = this.store.machines.getMachine(machineId)
         if (!stored) {
             const existed = this.machines.delete(machineId)
             if (existed) {
@@ -120,7 +120,7 @@ export class MachineCache {
     }
 
     reloadAll(): void {
-        const machines = this.store.getMachines()
+        const machines = this.store.machines.getMachines()
         for (const machine of machines) {
             this.refreshMachine(machine.id)
         }

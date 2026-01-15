@@ -14,6 +14,7 @@ export type AgentEvent =
     | { type: 'title-changed'; title: string }
     | { type: 'limit-reached'; endsAt: number }
     | { type: 'ready' }
+    | { type: 'api-error'; retryAttempt: number; maxRetries: number; error: unknown }
     | ({ type: string } & Record<string, unknown>)
 
 export type ToolResultPermission = {

@@ -5,6 +5,7 @@
  * Supports filtering by:
  * - Message count: Delete sessions with fewer than N messages
  * - Path pattern: Delete sessions matching a glob pattern
+ * - Message pattern: Delete sessions whose first message contains a pattern
  * - Orphaned: Delete sessions whose path no longer exists
  *
  * Usage:
@@ -13,6 +14,7 @@
  * Options:
  *   --min-messages=N   Delete sessions with fewer than N messages (default: 5)
  *   --path=PATTERN     Delete sessions matching path pattern (glob supported)
+ *   --message=PATTERN  Delete sessions whose first message contains PATTERN (case-insensitive)
  *   --orphaned         Delete sessions whose path no longer exists
  *   --force            Skip confirmation prompt
  *   --help             Show this help message
@@ -21,6 +23,7 @@
  *   bun run server/scripts/cleanup-sessions.ts
  *   bun run server/scripts/cleanup-sessions.ts --min-messages=3
  *   bun run server/scripts/cleanup-sessions.ts --path="/tmp/*"
+ *   bun run server/scripts/cleanup-sessions.ts --message="hello"
  *   bun run server/scripts/cleanup-sessions.ts --orphaned
  *   bun run server/scripts/cleanup-sessions.ts --orphaned --min-messages=5 --force
  */
@@ -30,11 +33,48 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { existsSync } from 'node:fs'
 
+// Format timestamp as human-readable date
+function formatDate(timestamp: number): string {
+    const date = new Date(timestamp)
+    return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric'
+    })
+}
+
+// Truncate string to max length with ellipsis
+function truncate(str: string, maxLen: number): string {
+    if (str.length <= maxLen) return str
+    return str.slice(0, maxLen - 3) + '...'
+}
+
+// Extract text from user message content
+function extractUserText(content: unknown): string | null {
+    if (!content || typeof content !== 'object') return null
+    const c = content as Record<string, unknown>
+    if (c.role !== 'user') return null
+    const inner = c.content
+    // Handle { content: { type: 'text', text: '...' } }
+    if (inner && typeof inner === 'object') {
+        const textObj = inner as Record<string, unknown>
+        if (textObj.type === 'text' && typeof textObj.text === 'string') {
+            return textObj.text
+        }
+    }
+    // Handle { content: '...' } (string)
+    if (typeof inner === 'string') {
+        return inner
+    }
+    return null
+}
+
 // Parse command line arguments
-function parseArgs(): { minMessages: number | null; pathPattern: string | null; orphaned: boolean; force: boolean; help: boolean } {
+function parseArgs(): { minMessages: number | null; pathPattern: string | null; messagePattern: string | null; orphaned: boolean; force: boolean; help: boolean } {
     const args = process.argv.slice(2)
     let minMessages: number | null = null
     let pathPattern: string | null = null
+    let messagePattern: string | null = null
     let orphaned = false
     let force = false
     let help = false
@@ -55,6 +95,8 @@ function parseArgs(): { minMessages: number | null; pathPattern: string | null; 
             minMessages = value
         } else if (arg.startsWith('--path=')) {
             pathPattern = arg.split('=').slice(1).join('=') // Handle paths with '='
+        } else if (arg.startsWith('--message=')) {
+            messagePattern = arg.split('=').slice(1).join('=').toLowerCase()
         } else {
             console.error(`Unknown argument: ${arg}`)
             console.error('Use --help for usage information')
@@ -63,11 +105,11 @@ function parseArgs(): { minMessages: number | null; pathPattern: string | null; 
     }
 
     // Default behavior: if no filters specified, use min-messages=5
-    if (minMessages === null && pathPattern === null && !orphaned) {
+    if (minMessages === null && pathPattern === null && messagePattern === null && !orphaned) {
         minMessages = 5
     }
 
-    return { minMessages, pathPattern, orphaned, force, help }
+    return { minMessages, pathPattern, messagePattern, orphaned, force, help }
 }
 
 // Get database path (same logic as configuration.ts)
@@ -84,41 +126,87 @@ function getDbPath(): string {
 // Session info for display
 interface SessionInfo {
     id: string
-    tag: string | null
+    title: string | null
+    firstUserMessage: string | null
     path: string | null
+    updatedAt: number
     messageCount: number
 }
 
 // Query sessions with message counts
 function querySessions(db: Database): SessionInfo[] {
-    const rows = db.query<
-        { id: string; tag: string | null; metadata: string | null; message_count: number },
+    // Get basic session info
+    const sessionRows = db.query<
+        { id: string; metadata: string | null; updated_at: number; message_count: number },
         []
     >(`
         SELECT
             s.id,
-            s.tag,
             s.metadata,
+            s.updated_at,
             COUNT(m.id) as message_count
         FROM sessions s
         LEFT JOIN messages m ON m.session_id = s.id
         GROUP BY s.id
     `).all()
 
-    return rows.map(row => {
+    // Get all messages for processing
+    const messageRows = db.query<
+        { session_id: string; content: string; seq: number },
+        []
+    >(`
+        SELECT session_id, content, seq
+        FROM messages
+        ORDER BY session_id, seq
+    `).all()
+
+    // Group messages by session
+    const messagesBySession = new Map<string, { content: string; seq: number }[]>()
+    for (const msg of messageRows) {
+        const list = messagesBySession.get(msg.session_id) ?? []
+        list.push({ content: msg.content, seq: msg.seq })
+        messagesBySession.set(msg.session_id, list)
+    }
+
+    return sessionRows.map(row => {
         let path: string | null = null
+        let title: string | null = null
         if (row.metadata) {
             try {
                 const metadata = JSON.parse(row.metadata)
                 path = metadata.path ?? null
+                // Get title from metadata.summary.text
+                if (metadata.summary && typeof metadata.summary.text === 'string') {
+                    title = metadata.summary.text
+                }
             } catch {
                 // Ignore parse errors
             }
         }
+
+        // Extract first user message from session messages
+        let firstUserMessage: string | null = null
+        const messages = messagesBySession.get(row.id) ?? []
+
+        for (const msg of messages) {
+            if (firstUserMessage !== null) break
+            try {
+                const content = JSON.parse(msg.content)
+                const userText = extractUserText(content)
+                if (userText) {
+                    firstUserMessage = userText
+                }
+            } catch {
+                // Ignore parse errors
+            }
+        }
+
         return {
             id: row.id,
-            tag: row.tag,
+            title,
+            firstUserMessage,
             path,
+            updatedAt: row.updated_at,
             messageCount: row.message_count,
         }
     })
@@ -129,6 +217,7 @@ function filterSessions(
     sessions: SessionInfo[],
     minMessages: number | null,
     pathPattern: string | null,
+    messagePattern: string | null,
     orphaned: boolean
 ): SessionInfo[] {
     let filtered = sessions
@@ -144,6 +233,14 @@ function filterSessions(
         filtered = filtered.filter(s => {
             if (!s.path) return false
             return glob.match(s.path)
+        })
+    }
+
+    // Filter by first message pattern (case-insensitive fuzzy match)
+    if (messagePattern !== null) {
+        filtered = filtered.filter(s => {
+            if (!s.firstUserMessage) return false
+            return s.firstUserMessage.toLowerCase().includes(messagePattern)
         })
     }
 
@@ -165,29 +262,37 @@ function displaySessions(sessions: SessionInfo[]): void {
         return
     }
 
-    // Calculate column widths
-    const idWidth = Math.max(8, ...sessions.map(s => s.id.length))
-    const tagWidth = Math.max(3, ...sessions.map(s => (s.tag ?? '').length))
-    const pathWidth = Math.max(4, ...sessions.map(s => (s.path ?? '').length))
-    const countWidth = 5
+    // Fixed column widths for readability
+    const dateWidth = 12
+    const countWidth = 4
+    const titleWidth = 25
+    const messageWidth = 30
+    const pathWidth = 30
 
     // Header
     const header = [
-        'ID'.padEnd(idWidth),
-        'Tag'.padEnd(tagWidth),
-        'Path'.padEnd(pathWidth),
+        'Updated'.padEnd(dateWidth),
         'Msgs'.padStart(countWidth),
+        'Title'.padEnd(titleWidth),
+        'First Message'.padEnd(messageWidth),
+        'Path'.padEnd(pathWidth),
     ].join(' | ')
     console.log(header)
     console.log('-'.repeat(header.length))
 
     // Rows
     for (const s of sessions) {
+        const updated = formatDate(s.updatedAt)
+        const title = truncate(s.title ?? '(no title)', titleWidth)
+        const firstMsg = truncate(s.firstUserMessage ?? '(no message)', messageWidth)
+        const path = truncate(s.path ?? '', pathWidth)
+
         console.log([
-            s.id.padEnd(idWidth),
-            (s.tag ?? '').padEnd(tagWidth),
-            (s.path ?? '').padEnd(pathWidth),
+            updated.padEnd(dateWidth),
             s.messageCount.toString().padStart(countWidth),
+            title.padEnd(titleWidth),
+            firstMsg.padEnd(messageWidth),
+            path.padEnd(pathWidth),
         ].join(' | '))
     }
 }
@@ -207,13 +312,13 @@ function deleteSessions(db: Database, ids: string[]): number {
     if (ids.length === 0) return 0
 
     const placeholders = ids.map(() => '?').join(', ')
-    const result = db.run(`DELETE FROM sessions WHERE id IN (${placeholders})`, ids)
-    return result.changes
+    db.run(`DELETE FROM sessions WHERE id IN (${placeholders})`, ids)
+    return ids.length
 }
 
 // Main function
 async function main(): Promise<void> {
-    const { minMessages, pathPattern, orphaned, force, help } = parseArgs()
+    const { minMessages, pathPattern, messagePattern, orphaned, force, help } = parseArgs()
 
     if (help) {
         console.log(`
@@ -222,6 +327,7 @@ Usage: bun run server/scripts/cleanup-sessions.ts [options]
 Options:
   --min-messages=N   Delete sessions with fewer than N messages (default: 5)
   --path=PATTERN     Delete sessions matching path pattern (glob supported)
+  --message=PATTERN  Delete sessions whose first message contains PATTERN (case-insensitive)
   --orphaned         Delete sessions whose path no longer exists
   --force            Skip confirmation prompt
   --help             Show this help message
@@ -229,6 +335,7 @@ Options:
 Filtering logic:
   - Only --min-messages: Delete sessions with message count < N
   - Only --path: Delete ALL sessions matching the path pattern
+  - Only --message: Delete sessions whose first user message contains the pattern
   - Only --orphaned: Delete sessions whose path does not exist on filesystem
   - Multiple filters: Delete sessions matching ALL conditions (AND)
 
@@ -236,6 +343,7 @@ Examples:
   bun run server/scripts/cleanup-sessions.ts
   bun run server/scripts/cleanup-sessions.ts --min-messages=3
   bun run server/scripts/cleanup-sessions.ts --path="/tmp/*"
+  bun run server/scripts/cleanup-sessions.ts --message="hello"
   bun run server/scripts/cleanup-sessions.ts --orphaned
   bun run server/scripts/cleanup-sessions.ts --orphaned --min-messages=5 --force
 `)
@@ -261,7 +369,7 @@ Examples:
         console.log(`Total sessions: ${allSessions.length}`)
 
         // Apply filters
-        const toDelete = filterSessions(allSessions, minMessages, pathPattern, orphaned)
+        const toDelete = filterSessions(allSessions, minMessages, pathPattern, messagePattern, orphaned)
 
         // Display filter criteria
         const criteria: string[] = []
@@ -270,6 +378,9 @@ Examples:
         }
         if (pathPattern !== null) {
             criteria.push(`path matches "${pathPattern}"`)
+        }
+        if (messagePattern !== null) {
+            criteria.push(`first message contains "${messagePattern}"`)
         }
         if (orphaned) {
             criteria.push('path does not exist')

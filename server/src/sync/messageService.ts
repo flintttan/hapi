@@ -20,7 +20,7 @@ export class MessageService {
             hasMore: boolean
         }
     } {
-        const stored = this.store.getMessages(sessionId, options.limit, options.beforeSeq ?? undefined)
+        const stored = this.store.messages.getMessages(sessionId, options.limit, options.beforeSeq ?? undefined)
         const messages: DecryptedMessage[] = stored.map((message) => ({
             id: message.id,
             seq: message.seq,
@@ -38,7 +38,8 @@ export class MessageService {
         }
 
         const nextBeforeSeq = oldestSeq
-        const hasMore = nextBeforeSeq !== null && this.store.getMessages(sessionId, 1, nextBeforeSeq).length > 0
+        const hasMore = nextBeforeSeq !== null
+            && this.store.messages.getMessages(sessionId, 1, nextBeforeSeq).length > 0
 
         return {
             messages,
@@ -52,7 +53,7 @@ export class MessageService {
     }
 
     getMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number }): DecryptedMessage[] {
-        const stored = this.store.getMessagesAfter(sessionId, options.afterSeq, options.limit)
+        const stored = this.store.messages.getMessagesAfter(sessionId, options.afterSeq, options.limit)
         return stored.map((message) => ({
             id: message.id,
             seq: message.seq,
@@ -79,11 +80,11 @@ export class MessageService {
             }
         }
 
-        const msg = this.store.addMessage(sessionId, content, payload.localId ?? undefined)
+        const msg = this.store.messages.addMessage(sessionId, content, payload.localId ?? undefined)
 
         const update = {
             id: msg.id,
-            seq: Date.now(),
+            seq: msg.seq,
             createdAt: msg.createdAt,
             body: {
                 t: 'new-message' as const,
