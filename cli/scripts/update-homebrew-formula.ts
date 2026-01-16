@@ -14,7 +14,7 @@
  *   bun run scripts/update-homebrew-formula.ts --version 0.1.0 --push
  *
  * Environment:
- *   HOMEBREW_TAP_REPO - Git URL of the tap repository (default: https://github.com/tiann/homebrew-tap.git)
+ *   HOMEBREW_TAP_REPO - Git URL of the tap repository (default: https://github.com/flintttan/homebrew-tap.git)
  */
 
 import { execSync } from 'node:child_process';
@@ -68,26 +68,26 @@ function generateFormula(version: string, shas: PlatformSha): string {
 
 class Hapi < Formula
   desc "App for agentic coding - access coding agent anywhere"
-  homepage "https://github.com/tiann/hapi"
+  homepage "https://github.com/flintttan/hapi"
   version "${version}"
   license "MIT"
 
   on_macos do
     if Hardware::CPU.arm?
-      url "https://github.com/tiann/hapi/releases/download/v#{version}/hapi-darwin-arm64.tar.gz"
+      url "https://github.com/flintttan/hapi/releases/download/v#{version}/hapi-darwin-arm64.tar.gz"
       sha256 "${shas.darwinArm64}"
     else
-      url "https://github.com/tiann/hapi/releases/download/v#{version}/hapi-darwin-x64.tar.gz"
+      url "https://github.com/flintttan/hapi/releases/download/v#{version}/hapi-darwin-x64.tar.gz"
       sha256 "${shas.darwinX64}"
     end
   end
 
   on_linux do
     if Hardware::CPU.arm?
-      url "https://github.com/tiann/hapi/releases/download/v#{version}/hapi-linux-arm64.tar.gz"
+      url "https://github.com/flintttan/hapi/releases/download/v#{version}/hapi-linux-arm64.tar.gz"
       sha256 "${shas.linuxArm64}"
     else
-      url "https://github.com/tiann/hapi/releases/download/v#{version}/hapi-linux-x64.tar.gz"
+      url "https://github.com/flintttan/hapi/releases/download/v#{version}/hapi-linux-x64.tar.gz"
       sha256 "${shas.linuxX64}"
     end
   end
@@ -138,7 +138,7 @@ async function main(): Promise<void> {
 
     const version = args[versionIdx + 1];
     const shouldPush = args.includes('--push');
-    const tapRepo = process.env.HOMEBREW_TAP_REPO || 'https://github.com/tiann/homebrew-tap.git';
+    const tapRepo = process.env.HOMEBREW_TAP_REPO || 'https://github.com/flintttan/homebrew-tap.git';
     const checksumsPath = join(projectRoot, 'release-artifacts', 'checksums.txt');
 
     if (!existsSync(checksumsPath)) {
