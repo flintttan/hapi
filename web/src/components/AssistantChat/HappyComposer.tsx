@@ -318,16 +318,6 @@ export function HappyComposer(props: {
         setShowContinueHint(false)
     }, [])
 
-    const handleManualSend = useCallback(() => {
-        if (!canSend) return
-        // Manually trigger send by calling the API's send method
-        const text = composerText.trim()
-        if (text) {
-            api.composer().send()
-            setShowContinueHint(false)
-        }
-    }, [canSend, composerText, api])
-
     const handlePermissionChange = useCallback((mode: PermissionMode) => {
         if (!onPermissionModeChange || controlsDisabled) return
         onPermissionModeChange(mode)
@@ -514,7 +504,6 @@ export function HappyComposer(props: {
                             switchDisabled={switchDisabled}
                             isSwitching={isSwitching}
                             onSwitch={handleSwitch}
-                            onSend={handleManualSend}
                         />
                     </div>
                 </ComposerPrimitive.Root>
