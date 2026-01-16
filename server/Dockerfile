@@ -12,7 +12,7 @@ COPY website ./website
 COPY docs ./docs
 
 # Install dependencies
-RUN bun install --frozen-lockfile
+RUN bun install
 
 # Build web assets
 WORKDIR /app/web
