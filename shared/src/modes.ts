@@ -4,6 +4,9 @@ export type ClaudePermissionMode = typeof CLAUDE_PERMISSION_MODES[number]
 export const CODEX_PERMISSION_MODES = ['default', 'read-only', 'safe-yolo', 'yolo'] as const
 export type CodexPermissionMode = typeof CODEX_PERMISSION_MODES[number]
 
+export const GEMINI_PERMISSION_MODES = ['default', 'read-only', 'safe-yolo', 'yolo'] as const
+export type GeminiPermissionMode = typeof GEMINI_PERMISSION_MODES[number]
+
 export const PERMISSION_MODES = [
     'default',
     'acceptEdits',
@@ -67,7 +70,7 @@ export function getPermissionModesForFlavor(flavor?: string | null): readonly Pe
         return CODEX_PERMISSION_MODES
     }
     if (flavor === 'gemini') {
-        return []
+        return GEMINI_PERMISSION_MODES
     }
     return CLAUDE_PERMISSION_MODES
 }
