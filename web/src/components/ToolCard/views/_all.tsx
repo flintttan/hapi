@@ -5,6 +5,7 @@ import { CodexDiffCompactView, CodexDiffFullView } from '@/components/ToolCard/v
 import { CodexPatchView } from '@/components/ToolCard/views/CodexPatchView'
 import { EditView } from '@/components/ToolCard/views/EditView'
 import { AskUserQuestionView } from '@/components/ToolCard/views/AskUserQuestionView'
+import { RequestUserInputView } from '@/components/ToolCard/views/RequestUserInputView'
 import { ExitPlanModeView } from '@/components/ToolCard/views/ExitPlanModeView'
 import { MultiEditFullView, MultiEditView } from '@/components/ToolCard/views/MultiEditView'
 import { TodoWriteView } from '@/components/ToolCard/views/TodoWriteView'
@@ -26,7 +27,8 @@ export const toolViewRegistry: Record<string, ToolViewComponent> = {
     AskUserQuestion: AskUserQuestionView,
     ExitPlanMode: ExitPlanModeView,
     ask_user_question: AskUserQuestionView,
-    exit_plan_mode: ExitPlanModeView
+    exit_plan_mode: ExitPlanModeView,
+    request_user_input: RequestUserInputView
 }
 
 export const toolFullViewRegistry: Record<string, ToolViewComponent> = {
@@ -38,7 +40,8 @@ export const toolFullViewRegistry: Record<string, ToolViewComponent> = {
     AskUserQuestion: AskUserQuestionView,
     ExitPlanMode: ExitPlanModeView,
     ask_user_question: AskUserQuestionView,
-    exit_plan_mode: ExitPlanModeView
+    exit_plan_mode: ExitPlanModeView,
+    request_user_input: RequestUserInputView
 }
 
 export function getToolViewComponent(toolName: string): ToolViewComponent | null {

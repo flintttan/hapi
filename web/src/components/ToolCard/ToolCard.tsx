@@ -10,7 +10,9 @@ import { DiffView } from '@/components/DiffView'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import { PermissionFooter } from '@/components/ToolCard/PermissionFooter'
 import { AskUserQuestionFooter } from '@/components/ToolCard/AskUserQuestionFooter'
+import { RequestUserInputFooter } from '@/components/ToolCard/RequestUserInputFooter'
 import { isAskUserQuestionToolName } from '@/components/ToolCard/askUserQuestion'
+import { isRequestUserInputToolName } from '@/components/ToolCard/requestUserInput'
 import { getToolPresentation } from '@/components/ToolCard/knownTools'
 import { getToolFullViewComponent, getToolViewComponent } from '@/components/ToolCard/views/_all'
 import { getToolResultViewComponent } from '@/components/ToolCard/views/_results'
@@ -328,6 +330,8 @@ function ToolCardInner(props: ToolCardProps) {
     const ResultToolView = getToolResultViewComponent(toolName)
     const permission = props.block.tool.permission
     const isAskUserQuestion = isAskUserQuestionToolName(toolName)
+    const isRequestUserInput = isRequestUserInputToolName(toolName)
+    const isQuestionTool = isAskUserQuestion || isRequestUserInput
     const showsPermissionFooter = Boolean(permission && (
         permission.status === 'pending'
         || ((permission.status === 'denied' || permission.status === 'canceled') && Boolean(permission.reason))
@@ -390,7 +394,7 @@ function ToolCardInner(props: ToolCardProps) {
                             <DialogTitle>{toolTitle}</DialogTitle>
                         </DialogHeader>
                         {(() => {
-                            const isAskUserQuestionWithAnswers = isAskUserQuestion
+                            const isQuestionToolWithAnswers = isQuestionTool
                                 && permission?.answers
                                 && Object.keys(permission.answers).length > 0
 
@@ -398,7 +402,7 @@ function ToolCardInner(props: ToolCardProps) {
                                 <div className="mt-3 flex max-h-[75vh] flex-col gap-4 overflow-auto">
                                     <div>
                                         <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">
-                                            {isAskUserQuestionWithAnswers ? t('tool.questionsAnswers') : t('tool.input')}
+                                            {isQuestionToolWithAnswers ? t('tool.questionsAnswers') : t('tool.input')}
                                         </div>
                                         {FullToolView ? (
                                             <FullToolView block={props.block} metadata={props.metadata} />
@@ -406,7 +410,7 @@ function ToolCardInner(props: ToolCardProps) {
                                             renderToolInput(props.block)
                                         )}
                                     </div>
-                                    {!isAskUserQuestionWithAnswers && (
+                                    {!isQuestionToolWithAnswers && (
                                         <div>
                                             <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">{t('tool.result')}</div>
                                             <ResultToolView block={props.block} metadata={props.metadata} />
@@ -448,6 +452,14 @@ function ToolCardInner(props: ToolCardProps) {
 
                     {isAskUserQuestion && permission?.status === 'pending' ? (
                         <AskUserQuestionFooter
+                            api={props.api}
+                            sessionId={props.sessionId}
+                            tool={props.block.tool}
+                            disabled={props.disabled}
+                            onDone={props.onDone}
+                        />
+                    ) : isRequestUserInput && permission?.status === 'pending' ? (
+                        <RequestUserInputFooter
                             api={props.api}
                             sessionId={props.sessionId}
                             tool={props.block.tool}

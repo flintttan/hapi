@@ -306,7 +306,7 @@ export class ApiClient {
             mode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
             allowTools?: string[]
             decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort'
-            answers?: Record<string, string[]>
+            answers?: Record<string, string[]> | Record<string, { answers: string[] }>
         }
     ): Promise<void> {
         const body = typeof modeOrOptions === 'string' || modeOrOptions === undefined

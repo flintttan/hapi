@@ -367,6 +367,36 @@ export const knownTools: Record<string, {
             return question.length > 0 ? truncate(question, 120) : null
         },
         minimal: true
+    },
+    request_user_input: {
+        icon: () => <QuestionIcon className={DEFAULT_ICON_CLASS} />,
+        title: (opts) => {
+            const questions = isObject(opts.input) && Array.isArray(opts.input.questions)
+                ? opts.input.questions : []
+            const count = questions.length
+            const first = questions[0] ?? null
+            const id = isObject(first) && typeof first.id === 'string'
+                ? first.id.trim() : ''
+
+            if (count > 1) {
+                return `${count} Questions`
+            }
+            return id.length > 0 ? id : 'Question'
+        },
+        subtitle: (opts) => {
+            const questions = isObject(opts.input) && Array.isArray(opts.input.questions)
+                ? opts.input.questions : []
+            const count = questions.length
+            const first = questions[0] ?? null
+            const question = isObject(first) && typeof first.question === 'string'
+                ? first.question.trim() : ''
+
+            if (count > 1 && question.length > 0) {
+                return truncate(question, 100) + ` (+${count - 1} more)`
+            }
+            return question.length > 0 ? truncate(question, 120) : null
+        },
+        minimal: true
     }
 }
 

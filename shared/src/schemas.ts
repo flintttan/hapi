@@ -67,7 +67,12 @@ export const AgentStateCompletedRequestSchema = z.object({
     mode: z.string().optional(),
     decision: z.enum(['approved', 'approved_for_session', 'denied', 'abort']).optional(),
     allowTools: z.array(z.string()).optional(),
-    answers: z.record(z.string(), z.array(z.string())).optional()
+    // Flat format: Record<string, string[]> (AskUserQuestion)
+    // Nested format: Record<string, { answers: string[] }> (request_user_input)
+    answers: z.union([
+        z.record(z.string(), z.array(z.string())),
+        z.record(z.string(), z.object({ answers: z.array(z.string()) }))
+    ]).optional()
 })
 
 export type AgentStateCompletedRequest = z.infer<typeof AgentStateCompletedRequestSchema>

@@ -45,7 +45,7 @@ export type PermissionCompletion = {
     mode?: string;
     decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort';
     allowTools?: string[];
-    answers?: Record<string, string[]>;
+    answers?: Record<string, string[]> | Record<string, { answers: string[] }>;
 };
 
 export type CancelPendingRequestOptions = {

@@ -44,7 +44,7 @@ export class RpcGateway {
         mode?: PermissionMode,
         allowTools?: string[],
         decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort',
-        answers?: Record<string, string[]>
+        answers?: Record<string, string[]> | Record<string, { answers: string[] }>
     ): Promise<void> {
         await this.sessionRpc(sessionId, 'permission', {
             id: requestId,
