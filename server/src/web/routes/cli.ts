@@ -34,15 +34,16 @@ function resolveSessionForNamespace(
     engine: SyncEngine,
     sessionId: string,
     namespace: string
-): { ok: true; session: Session } | { ok: false; status: 403 | 404; error: string } {
-    const session = engine.getSessionByNamespace(sessionId, namespace)
-    if (session) {
-        return { ok: true, session }
+): { ok: true; session: Session; sessionId: string } | { ok: false; status: 403 | 404; error: string } {
+    const access = engine.resolveSessionAccess(sessionId, namespace)
+    if (access.ok) {
+        return { ok: true, session: access.session, sessionId: access.sessionId }
     }
-    if (engine.getSession(sessionId)) {
-        return { ok: false, status: 403, error: 'Session access denied' }
+    return {
+        ok: false,
+        status: access.reason === 'access-denied' ? 403 : 404,
+        error: access.reason === 'access-denied' ? 'Session access denied' : 'Session not found'
     }
-    return { ok: false, status: 404, error: 'Session not found' }
 }
 
 function resolveMachineForNamespace(
@@ -132,7 +133,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null): Hono<Cl
         }
 
         const limit = parsed.data.limit ?? 200
-        const messages = engine.getMessagesAfter(sessionId, { afterSeq: parsed.data.afterSeq, limit })
+        const messages = engine.getMessagesAfter(resolved.sessionId, { afterSeq: parsed.data.afterSeq, limit })
         return c.json({ messages })
     })
 

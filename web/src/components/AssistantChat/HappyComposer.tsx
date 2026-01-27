@@ -40,6 +40,7 @@ export function HappyComposer(props: {
     permissionMode?: PermissionMode
     modelMode?: ModelMode
     active?: boolean
+    allowSendWhenInactive?: boolean
     thinking?: boolean
     agentState?: AgentState | null
     contextSize?: number
@@ -63,6 +64,7 @@ export function HappyComposer(props: {
         permissionMode: rawPermissionMode,
         modelMode: rawModelMode,
         active = true,
+        allowSendWhenInactive = false,
         thinking = false,
         agentState,
         contextSize,
@@ -90,7 +92,7 @@ export function HappyComposer(props: {
     const threadIsRunning = useAssistantState(({ thread }) => thread.isRunning)
     const threadIsDisabled = useAssistantState(({ thread }) => thread.isDisabled)
 
-    const controlsDisabled = disabled || !active || threadIsDisabled
+    const controlsDisabled = disabled || (!active && !allowSendWhenInactive) || threadIsDisabled
     const trimmed = composerText.trim()
     const hasText = trimmed.length > 0
     const hasAttachments = attachments.length > 0

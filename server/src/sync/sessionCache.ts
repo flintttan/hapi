@@ -36,6 +36,21 @@ export class SessionCache {
         return session
     }
 
+    resolveSessionAccess(
+        sessionId: string,
+        namespace: string
+    ): { ok: true; sessionId: string; session: Session } | { ok: false; reason: 'not-found' | 'access-denied' } {
+        const session = this.sessions.get(sessionId) ?? this.refreshSession(sessionId)
+        if (session) {
+            if (session.namespace !== namespace) {
+                return { ok: false, reason: 'access-denied' }
+            }
+            return { ok: true, sessionId, session }
+        }
+
+        return { ok: false, reason: 'not-found' }
+    }
+
     getActiveSessions(): Session[] {
         return this.getSessions().filter((session) => session.active)
     }
@@ -266,5 +281,107 @@ export class SessionCache {
         this.todoBackfillAttemptedSessionIds.delete(sessionId)
 
         this.publisher.emit({ type: 'session-removed', sessionId, namespace: session.namespace })
+    }
+
+    async mergeSessions(oldSessionId: string, newSessionId: string, namespace: string): Promise<void> {
+        if (oldSessionId === newSessionId) {
+            return
+        }
+
+        const oldStored = this.store.sessions.getSessionByNamespace(oldSessionId, namespace)
+        const newStored = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
+        if (!oldStored || !newStored) {
+            throw new Error('Session not found for merge')
+        }
+
+        this.store.messages.mergeSessionMessages(oldSessionId, newSessionId)
+
+        const mergedMetadata = this.mergeSessionMetadata(oldStored.metadata, newStored.metadata)
+        if (mergedMetadata !== null && mergedMetadata !== newStored.metadata) {
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                const latest = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
+                if (!latest) break
+                const result = this.store.sessions.updateSessionMetadata(
+                    newSessionId,
+                    mergedMetadata,
+                    latest.metadataVersion,
+                    namespace,
+                    { touchUpdatedAt: false }
+                )
+                if (result.result === 'success') {
+                    break
+                }
+                if (result.result === 'error') {
+                    break
+                }
+            }
+        }
+
+        if (oldStored.todos !== null && oldStored.todosUpdatedAt !== null) {
+            this.store.sessions.setSessionTodos(
+                newSessionId,
+                oldStored.todos,
+                oldStored.todosUpdatedAt,
+                namespace
+            )
+        }
+
+        const deleted = this.store.sessions.deleteSession(oldSessionId, namespace)
+        if (!deleted) {
+            throw new Error('Failed to delete old session during merge')
+        }
+
+        const existed = this.sessions.delete(oldSessionId)
+        if (existed) {
+            this.publisher.emit({ type: 'session-removed', sessionId: oldSessionId, namespace })
+        }
+        this.lastBroadcastAtBySessionId.delete(oldSessionId)
+        this.todoBackfillAttemptedSessionIds.delete(oldSessionId)
+
+        this.refreshSession(newSessionId)
+    }
+
+    private mergeSessionMetadata(oldMetadata: unknown | null, newMetadata: unknown | null): unknown | null {
+        if (!oldMetadata || typeof oldMetadata !== 'object') {
+            return newMetadata
+        }
+        if (!newMetadata || typeof newMetadata !== 'object') {
+            return oldMetadata
+        }
+
+        const oldObj = oldMetadata as Record<string, unknown>
+        const newObj = newMetadata as Record<string, unknown>
+        const merged: Record<string, unknown> = { ...newObj }
+        let changed = false
+
+        if (typeof oldObj.name === 'string' && typeof newObj.name !== 'string') {
+            merged.name = oldObj.name
+            changed = true
+        }
+
+        const oldSummary = oldObj.summary as { text?: unknown; updatedAt?: unknown } | undefined
+        const newSummary = newObj.summary as { text?: unknown; updatedAt?: unknown } | undefined
+        const oldUpdatedAt = typeof oldSummary?.updatedAt === 'number' ? oldSummary.updatedAt : null
+        const newUpdatedAt = typeof newSummary?.updatedAt === 'number' ? newSummary.updatedAt : null
+        if (oldUpdatedAt !== null && (newUpdatedAt === null || oldUpdatedAt > newUpdatedAt)) {
+            merged.summary = oldSummary
+            changed = true
+        }
+
+        if (oldObj.worktree && !newObj.worktree) {
+            merged.worktree = oldObj.worktree
+            changed = true
+        }
+
+        if (typeof oldObj.path === 'string' && typeof newObj.path !== 'string') {
+            merged.path = oldObj.path
+            changed = true
+        }
+        if (typeof oldObj.host === 'string' && typeof newObj.host !== 'string') {
+            merged.host = oldObj.host
+            changed = true
+        }
+
+        return changed ? merged : newMetadata
     }
 }

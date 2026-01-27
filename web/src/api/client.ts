@@ -253,6 +253,14 @@ export class ApiClient {
         })
     }
 
+    async resumeSession(sessionId: string): Promise<string> {
+        const response = await this.request<{ sessionId: string }>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/resume`,
+            { method: 'POST' }
+        )
+        return response.sessionId
+    }
+
     async sendMessage(sessionId: string, text: string, localId?: string | null, attachments?: AttachmentMetadata[]): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
             method: 'POST',

@@ -1,4 +1,5 @@
 import { useMutation } from '@tanstack/react-query'
+import { useRef, useState } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { AttachmentMetadata, DecryptedMessage } from '@/types/api'
 import { makeClientSideId } from '@/lib/messages'
@@ -17,6 +18,11 @@ type SendMessageInput = {
     attachments?: AttachmentMetadata[]
 }
 
+type UseSendMessageOptions = {
+    resolveSessionId?: (sessionId: string) => Promise<string>
+    onSessionResolved?: (sessionId: string) => void
+}
+
 function findMessageByLocalId(
     sessionId: string,
     localId: string,
@@ -31,12 +37,18 @@ function findMessageByLocalId(
     return null
 }
 
-export function useSendMessage(api: ApiClient | null, sessionId: string | null): {
+export function useSendMessage(
+    api: ApiClient | null,
+    sessionId: string | null,
+    options?: UseSendMessageOptions
+): {
     sendMessage: (text: string, attachments?: AttachmentMetadata[]) => void
     retryMessage: (localId: string) => void
     isSending: boolean
 } {
     const { haptic } = usePlatform()
+    const [isResolving, setIsResolving] = useState(false)
+    const resolveGuardRef = useRef(false)
 
     const mutation = useMutation({
         mutationFn: async (input: SendMessageInput) => {
@@ -77,20 +89,42 @@ export function useSendMessage(api: ApiClient | null, sessionId: string | null):
 
     const sendMessage = (text: string, attachments?: AttachmentMetadata[]) => {
         if (!api || !sessionId) return
-        if (mutation.isPending) return
+        if (mutation.isPending || resolveGuardRef.current) return
         const localId = makeClientSideId('local')
-        mutation.mutate({
-            sessionId,
-            text,
-            localId,
-            createdAt: Date.now(),
-            attachments,
-        })
+        const createdAt = Date.now()
+        void (async () => {
+            let targetSessionId = sessionId
+            if (options?.resolveSessionId) {
+                resolveGuardRef.current = true
+                setIsResolving(true)
+                try {
+                    const resolved = await options.resolveSessionId(sessionId)
+                    if (resolved && resolved !== sessionId) {
+                        options.onSessionResolved?.(resolved)
+                        targetSessionId = resolved
+                    }
+                } catch (error) {
+                    haptic.notification('error')
+                    console.error('Failed to resolve session before send:', error)
+                    return
+                } finally {
+                    resolveGuardRef.current = false
+                    setIsResolving(false)
+                }
+            }
+            mutation.mutate({
+                sessionId: targetSessionId,
+                text,
+                localId,
+                createdAt,
+                attachments,
+            })
+        })()
     }
 
     const retryMessage = (localId: string) => {
         if (!api || !sessionId) return
-        if (mutation.isPending) return
+        if (mutation.isPending || resolveGuardRef.current) return
 
         const message = findMessageByLocalId(sessionId, localId)
         if (!message?.originalText) return
@@ -108,6 +142,6 @@ export function useSendMessage(api: ApiClient | null, sessionId: string | null):
     return {
         sendMessage,
         retryMessage,
-        isSending: mutation.isPending,
+        isSending: mutation.isPending || isResolving,
     }
 }

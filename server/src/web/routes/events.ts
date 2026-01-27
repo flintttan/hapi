@@ -7,6 +7,7 @@ import type { SyncEngine } from '../../sync/syncEngine'
 import type { VisibilityState } from '../../visibility/visibilityTracker'
 import type { VisibilityTracker } from '../../visibility/visibilityTracker'
 import type { WebAppEnv } from '../middleware/auth'
+import { requireSession } from './guards'
 
 function parseOptionalId(value: string | undefined): string | null {
     if (!value) {
@@ -51,6 +52,7 @@ export function createEventsRoutes(
         const subscriptionId = randomUUID()
         const visibility = parseVisibility(query.visibility)
         const namespace = c.get('namespace')
+        let resolvedSessionId = sessionId
 
         if (sessionId || machineId) {
             const engine = getSyncEngine()
@@ -58,13 +60,11 @@ export function createEventsRoutes(
                 return c.json({ error: 'Not connected' }, 503)
             }
             if (sessionId) {
-                const session = engine.getSession(sessionId)
-                if (!session) {
-                    return c.json({ error: 'Session not found' }, 404)
+                const sessionResult = requireSession(c, engine, sessionId)
+                if (sessionResult instanceof Response) {
+                    return sessionResult
                 }
-                if (session.namespace !== namespace) {
-                    return c.json({ error: 'Session access denied' }, 403)
-                }
+                resolvedSessionId = sessionResult.sessionId
             }
             if (machineId) {
                 const machine = engine.getMachine(machineId)
@@ -82,7 +82,7 @@ export function createEventsRoutes(
                 id: subscriptionId,
                 namespace,
                 all,
-                sessionId,
+                sessionId: resolvedSessionId,
                 machineId,
                 visibility,
                 send: (event) => stream.writeSSE({ data: JSON.stringify(event) }),

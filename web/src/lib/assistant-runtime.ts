@@ -175,6 +175,7 @@ export function useHappyRuntime(props: {
     onSendMessage: (text: string, attachments?: AttachmentMetadata[]) => void
     onAbort: () => Promise<void>
     attachmentAdapter?: AttachmentAdapter
+    allowSendWhenInactive?: boolean
 }) {
     // Use cached message converter for performance optimization
     // This prevents re-converting all messages on every render
@@ -197,7 +198,7 @@ export function useHappyRuntime(props: {
     // Memoize the adapter to avoid recreating on every render
     // useExternalStoreRuntime may use adapter identity for subscriptions
     const adapter = useMemo(() => ({
-        isDisabled: !props.session.active || props.isSending,
+        isDisabled: props.isSending || (!props.session.active && !props.allowSendWhenInactive),
         isRunning: props.session.thinking,
         messages: convertedMessages,
         onNew,
@@ -207,6 +208,7 @@ export function useHappyRuntime(props: {
     }), [
         props.session.active,
         props.isSending,
+        props.allowSendWhenInactive,
         props.session.thinking,
         convertedMessages,
         onNew,

@@ -328,11 +328,15 @@ export async function startRunner(): Promise<void> {
           : agent === 'gemini'
             ? 'gemini'
             : 'claude';
-        const args = [
-          agentCommand,
-          '--hapi-starting-mode', 'remote',
-          '--started-by', 'runner'
-        ];
+        const args = [agentCommand];
+        if (options.resumeSessionId) {
+            if (agent === 'codex') {
+                args.push('resume', options.resumeSessionId);
+            } else {
+                args.push('--resume', options.resumeSessionId);
+            }
+        }
+        args.push('--hapi-starting-mode', 'remote', '--started-by', 'runner');
         if (options.model) {
           args.push('--model', options.model);
         }
@@ -340,8 +344,7 @@ export async function startRunner(): Promise<void> {
           args.push('--yolo');
         }
 
-        // TODO: In future, sessionId could be used with --resume to continue existing sessions
-        // For now, we ignore it - each spawn creates a new session
+        // sessionId reserved for future use
         const MAX_TAIL_CHARS = 4000;
         let stderrTail = '';
         const appendTail = (current: string, chunk: Buffer | string): string => {

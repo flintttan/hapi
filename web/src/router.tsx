@@ -24,7 +24,9 @@ import { useSlashCommands } from '@/hooks/queries/useSlashCommands'
 import { useSkills } from '@/hooks/queries/useSkills'
 import { useSendMessage } from '@/hooks/mutations/useSendMessage'
 import { queryKeys } from '@/lib/query-keys'
+import { useToast } from '@/lib/toast-context'
 import { useTranslation } from '@/lib/use-translation'
+import { fetchLatestMessages, seedMessageWindowFromSession } from '@/lib/message-window-store'
 import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
@@ -154,6 +156,9 @@ function SessionsPage() {
 function SessionPage() {
     const { api } = useAppContext()
     const goBack = useAppGoBack()
+    const navigate = useNavigate()
+    const queryClient = useQueryClient()
+    const { addToast } = useToast()
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
     const {
         session,
@@ -176,7 +181,52 @@ function SessionPage() {
         sendMessage,
         retryMessage,
         isSending,
-    } = useSendMessage(api, sessionId)
+    } = useSendMessage(api, sessionId, {
+        resolveSessionId: async (currentSessionId) => {
+            if (!api || !session || session.active) {
+                return currentSessionId
+            }
+            try {
+                return await api.resumeSession(currentSessionId)
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Resume failed'
+                addToast({
+                    title: 'Resume failed',
+                    body: message,
+                    sessionId: currentSessionId,
+                    url: ''
+                })
+                throw error
+            }
+        },
+        onSessionResolved: (resolvedSessionId) => {
+            void (async () => {
+                if (api) {
+                    if (session && resolvedSessionId !== session.id) {
+                        seedMessageWindowFromSession(session.id, resolvedSessionId)
+                        queryClient.setQueryData(queryKeys.session(resolvedSessionId), {
+                            session: { ...session, id: resolvedSessionId, active: true }
+                        })
+                    }
+                    try {
+                        await Promise.all([
+                            queryClient.prefetchQuery({
+                                queryKey: queryKeys.session(resolvedSessionId),
+                                queryFn: () => api.getSession(resolvedSessionId),
+                            }),
+                            fetchLatestMessages(api, resolvedSessionId),
+                        ])
+                    } catch {
+                    }
+                }
+                navigate({
+                    to: '/sessions/$sessionId',
+                    params: { sessionId: resolvedSessionId },
+                    replace: true
+                })
+            })()
+        }
+    })
 
     // Get agent type from session metadata for slash commands
     const agentType = session?.metadata?.flavor ?? 'claude'

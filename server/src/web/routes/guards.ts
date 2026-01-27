@@ -18,19 +18,18 @@ export function requireSession(
     engine: SyncEngine,
     sessionId: string,
     options?: { requireActive?: boolean }
-): Session | Response {
+): { sessionId: string; session: Session } | Response {
     const namespace = c.get('namespace')
-    const session = engine.getSession(sessionId)
-    if (!session) {
-        return c.json({ error: 'Session not found' }, 404)
+    const access = engine.resolveSessionAccess(sessionId, namespace)
+    if (!access.ok) {
+        const status = access.reason === 'access-denied' ? 403 : 404
+        const error = access.reason === 'access-denied' ? 'Session access denied' : 'Session not found'
+        return c.json({ error }, status)
     }
-    if (session.namespace !== namespace) {
-        return c.json({ error: 'Session access denied' }, 403)
-    }
-    if (options?.requireActive && !session.active) {
+    if (options?.requireActive && !access.session.active) {
         return c.json({ error: 'Session is inactive' }, 409)
     }
-    return session
+    return { sessionId: access.sessionId, session: access.session }
 }
 
 export function requireSessionFromParam(
@@ -40,11 +39,11 @@ export function requireSessionFromParam(
 ): { sessionId: string; session: Session } | Response {
     const paramName = options?.paramName ?? 'id'
     const sessionId = c.req.param(paramName)
-    const session = requireSession(c, engine, sessionId, { requireActive: options?.requireActive })
-    if (session instanceof Response) {
-        return session
+    const result = requireSession(c, engine, sessionId, { requireActive: options?.requireActive })
+    if (result instanceof Response) {
+        return result
     }
-    return { sessionId, session }
+    return result
 }
 
 export function requireMachine(

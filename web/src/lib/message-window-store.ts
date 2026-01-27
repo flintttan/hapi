@@ -297,6 +297,26 @@ export function clearMessageWindow(sessionId: string): void {
     setState(sessionId, createState(sessionId))
 }
 
+export function seedMessageWindowFromSession(fromSessionId: string, toSessionId: string): void {
+    if (!fromSessionId || !toSessionId || fromSessionId === toSessionId) {
+        return
+    }
+    const source = getState(fromSessionId)
+    const base = createState(toSessionId)
+    const next = buildState(base, {
+        messages: [...source.messages],
+        pending: [...source.pending],
+        pendingOverflowCount: source.pendingOverflowCount,
+        pendingOverflowVisibleCount: source.pendingOverflowVisibleCount,
+        hasMore: source.hasMore,
+        warning: source.warning,
+        atBottom: source.atBottom,
+        isLoading: false,
+        isLoadingMore: false,
+    })
+    setState(toSessionId, next)
+}
+
 export async function fetchLatestMessages(api: ApiClient, sessionId: string): Promise<void> {
     const initial = getState(sessionId)
     if (initial.isLoading) {

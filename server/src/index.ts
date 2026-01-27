@@ -170,7 +170,12 @@ async function main() {
         store,
         jwtSecret,
         corsOrigins,
-        getSession: (sessionId) => syncEngine?.getSession(sessionId) ?? store.sessions.getSession(sessionId),
+        getSession: (sessionId) => {
+            if (syncEngine) {
+                return syncEngine.getSession(sessionId) ?? null
+            }
+            return store.sessions.getSession(sessionId)
+        },
         onWebappEvent: (event: SyncEvent) => syncEngine?.handleRealtimeEvent(event),
         onSessionAlive: (payload) => syncEngine?.handleSessionAlive(payload),
         onSessionEnd: (payload) => syncEngine?.handleSessionEnd(payload),

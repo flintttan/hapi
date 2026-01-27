@@ -266,6 +266,8 @@ export function HappyThread(props: {
         prevLoadingMoreRef.current = props.isLoadingMoreMessages
     }, [props.isLoadingMoreMessages])
 
+    const showSkeleton = props.isLoadingMessages && props.rawMessagesCount === 0 && props.pendingCount === 0
+
     return (
         <HappyChatProvider value={{
             api: props.api,
@@ -280,7 +282,7 @@ export function HappyThread(props: {
                     <div ref={viewportRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
                         <div className="mx-auto w-full max-w-content min-w-0 p-3">
                             <div ref={topSentinelRef} className="h-px w-full" aria-hidden="true" />
-                            {props.isLoadingMessages ? (
+                            {showSkeleton ? (
                                 <MessageSkeleton />
                             ) : (
                                 <>

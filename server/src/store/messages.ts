@@ -105,3 +105,59 @@ export function getMessagesAfter(
 
     return rows.map(toStoredMessage)
 }
+
+export function getMaxSeq(db: Database, sessionId: string): number {
+    const row = db.prepare(
+        'SELECT COALESCE(MAX(seq), 0) AS maxSeq FROM messages WHERE session_id = ?'
+    ).get(sessionId) as { maxSeq: number } | undefined
+    return row?.maxSeq ?? 0
+}
+
+export function mergeSessionMessages(
+    db: Database,
+    fromSessionId: string,
+    toSessionId: string
+): { moved: number; oldMaxSeq: number; newMaxSeq: number } {
+    if (fromSessionId === toSessionId) {
+        return { moved: 0, oldMaxSeq: 0, newMaxSeq: 0 }
+    }
+
+    const oldMaxSeq = getMaxSeq(db, fromSessionId)
+    const newMaxSeq = getMaxSeq(db, toSessionId)
+
+    try {
+        db.exec('BEGIN')
+
+        if (newMaxSeq > 0 && oldMaxSeq > 0) {
+            db.prepare(
+                'UPDATE messages SET seq = seq + ? WHERE session_id = ?'
+            ).run(oldMaxSeq, toSessionId)
+        }
+
+        const collisions = db.prepare(`
+            SELECT local_id FROM messages
+            WHERE session_id = ? AND local_id IS NOT NULL
+            INTERSECT
+            SELECT local_id FROM messages
+            WHERE session_id = ? AND local_id IS NOT NULL
+        `).all(toSessionId, fromSessionId) as Array<{ local_id: string }>
+
+        if (collisions.length > 0) {
+            const localIds = collisions.map((row) => row.local_id)
+            const placeholders = localIds.map(() => '?').join(', ')
+            db.prepare(
+                `UPDATE messages SET local_id = NULL WHERE session_id = ? AND local_id IN (${placeholders})`
+            ).run(fromSessionId, ...localIds)
+        }
+
+        const result = db.prepare(
+            'UPDATE messages SET session_id = ? WHERE session_id = ?'
+        ).run(toSessionId, fromSessionId)
+
+        db.exec('COMMIT')
+        return { moved: result.changes, oldMaxSeq, newMaxSeq }
+    } catch (error) {
+        db.exec('ROLLBACK')
+        throw error
+    }
+}

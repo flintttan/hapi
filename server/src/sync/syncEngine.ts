@@ -23,6 +23,10 @@ export type { Machine } from './machineCache'
 export type { SyncEventListener } from './eventPublisher'
 export type { RpcCommandResponse, RpcPathExistsResponse, RpcReadFileResponse, RpcUploadFileResponse, RpcDeleteUploadResponse } from './rpcGateway'
 
+export type ResumeSessionResult =
+    | { type: 'success'; sessionId: string }
+    | { type: 'error'; message: string; code: 'session_not_found' | 'access_denied' | 'no_machine_online' | 'resume_unavailable' | 'resume_failed' }
+
 export class SyncEngine {
     private readonly eventPublisher: EventPublisher
     private readonly sessionCache: SessionCache
@@ -62,7 +66,7 @@ export class SyncEngine {
             return event.namespace
         }
         if ('sessionId' in event) {
-            return this.sessionCache.getSession(event.sessionId)?.namespace
+            return this.getSession(event.sessionId)?.namespace
         }
         if ('machineId' in event) {
             return this.machineCache.getMachine(event.machineId)?.namespace
@@ -79,11 +83,23 @@ export class SyncEngine {
     }
 
     getSession(sessionId: string): Session | undefined {
-        return this.sessionCache.getSession(sessionId)
+        return this.sessionCache.getSession(sessionId) ?? this.sessionCache.refreshSession(sessionId) ?? undefined
     }
 
     getSessionByNamespace(sessionId: string, namespace: string): Session | undefined {
-        return this.sessionCache.getSessionByNamespace(sessionId, namespace)
+        const session = this.sessionCache.getSessionByNamespace(sessionId, namespace)
+            ?? this.sessionCache.refreshSession(sessionId)
+        if (!session || session.namespace !== namespace) {
+            return undefined
+        }
+        return session
+    }
+
+    resolveSessionAccess(
+        sessionId: string,
+        namespace: string
+    ): { ok: true; sessionId: string; session: Session } | { ok: false; reason: 'not-found' | 'access-denied' } {
+        return this.sessionCache.resolveSessionAccess(sessionId, namespace)
     }
 
     getActiveSessions(): Session[] {
@@ -142,7 +158,7 @@ export class SyncEngine {
         }
 
         if (event.type === 'message-received' && event.sessionId) {
-            if (!this.sessionCache.getSession(event.sessionId)) {
+            if (!this.getSession(event.sessionId)) {
                 this.sessionCache.refreshSession(event.sessionId)
             }
         }
@@ -273,9 +289,108 @@ export class SyncEngine {
         model?: string,
         yolo?: boolean,
         sessionType?: 'simple' | 'worktree',
-        worktreeName?: string
+        worktreeName?: string,
+        resumeSessionId?: string
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
-        return await this.rpcGateway.spawnSession(machineId, directory, agent, model, yolo, sessionType, worktreeName)
+        return await this.rpcGateway.spawnSession(machineId, directory, agent, model, yolo, sessionType, worktreeName, resumeSessionId)
+    }
+
+    async resumeSession(sessionId: string, namespace: string): Promise<ResumeSessionResult> {
+        const access = this.sessionCache.resolveSessionAccess(sessionId, namespace)
+        if (!access.ok) {
+            return {
+                type: 'error',
+                message: access.reason === 'access-denied' ? 'Session access denied' : 'Session not found',
+                code: access.reason === 'access-denied' ? 'access_denied' : 'session_not_found'
+            }
+        }
+
+        const session = access.session
+        if (session.active) {
+            return { type: 'success', sessionId: access.sessionId }
+        }
+
+        const metadata = session.metadata
+        if (!metadata || typeof metadata.path !== 'string') {
+            return { type: 'error', message: 'Session metadata missing path', code: 'resume_unavailable' }
+        }
+
+        const flavor = metadata.flavor === 'codex' || metadata.flavor === 'gemini'
+            ? metadata.flavor
+            : 'claude'
+        const resumeToken = flavor === 'codex'
+            ? metadata.codexSessionId
+            : flavor === 'gemini'
+                ? metadata.geminiSessionId
+                : metadata.claudeSessionId
+
+        if (!resumeToken) {
+            return { type: 'error', message: 'Resume session ID unavailable', code: 'resume_unavailable' }
+        }
+
+        const onlineMachines = this.machineCache.getOnlineMachinesByNamespace(namespace)
+        if (onlineMachines.length === 0) {
+            return { type: 'error', message: 'No machine online', code: 'no_machine_online' }
+        }
+
+        const targetMachine = (() => {
+            if (metadata.machineId) {
+                const exact = onlineMachines.find((machine) => machine.id === metadata.machineId)
+                if (exact) return exact
+            }
+            if (metadata.host) {
+                const hostMatch = onlineMachines.find((machine) => machine.metadata?.host === metadata.host)
+                if (hostMatch) return hostMatch
+            }
+            return null
+        })()
+
+        if (!targetMachine) {
+            return { type: 'error', message: 'No machine online', code: 'no_machine_online' }
+        }
+
+        const spawnResult = await this.rpcGateway.spawnSession(
+            targetMachine.id,
+            metadata.path,
+            flavor,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            resumeToken
+        )
+
+        if (spawnResult.type !== 'success') {
+            return { type: 'error', message: spawnResult.message, code: 'resume_failed' }
+        }
+
+        const becameActive = await this.waitForSessionActive(spawnResult.sessionId)
+        if (!becameActive) {
+            return { type: 'error', message: 'Session failed to become active', code: 'resume_failed' }
+        }
+
+        if (spawnResult.sessionId !== access.sessionId) {
+            try {
+                await this.sessionCache.mergeSessions(access.sessionId, spawnResult.sessionId, namespace)
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Failed to merge resumed session'
+                return { type: 'error', message, code: 'resume_failed' }
+            }
+        }
+
+        return { type: 'success', sessionId: spawnResult.sessionId }
+    }
+
+    async waitForSessionActive(sessionId: string, timeoutMs: number = 15_000): Promise<boolean> {
+        const start = Date.now()
+        while (Date.now() - start < timeoutMs) {
+            const session = this.getSession(sessionId)
+            if (session?.active) {
+                return true
+            }
+            await new Promise((resolve) => setTimeout(resolve, 250))
+        }
+        return false
     }
 
     async checkPathsExist(machineId: string, paths: string[]): Promise<Record<string, boolean>> {

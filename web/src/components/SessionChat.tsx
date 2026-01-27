@@ -40,7 +40,7 @@ export function SessionChat(props: {
 }) {
     const { haptic } = usePlatform()
     const navigate = useNavigate()
-    const controlsDisabled = !props.session.active
+    const sessionInactive = !props.session.active
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const [forceScrollToken, setForceScrollToken] = useState(0)
@@ -250,7 +250,8 @@ export function SessionChat(props: {
         isSending: props.isSending,
         onSendMessage: handleSend,
         onAbort: handleAbort,
-        attachmentAdapter
+        attachmentAdapter,
+        allowSendWhenInactive: true
     })
 
     return (
@@ -263,10 +264,10 @@ export function SessionChat(props: {
                 onSessionDeleted={props.onBack}
             />
 
-            {controlsDisabled ? (
+            {sessionInactive ? (
                 <div className="px-3 pt-3">
                     <div className="mx-auto w-full max-w-content rounded-md bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
-                        Session is inactive. Controls are disabled.
+                        Session is inactive. Sending will resume it automatically.
                     </div>
                 </div>
             ) : null}
@@ -278,7 +279,7 @@ export function SessionChat(props: {
                         api={props.api}
                         sessionId={props.session.id}
                         metadata={props.session.metadata}
-                        disabled={controlsDisabled}
+                        disabled={sessionInactive}
                         onRefresh={props.onRefresh}
                         onRetryMessage={props.onRetryMessage}
                         onFlushPending={props.onFlushPending}
@@ -296,11 +297,12 @@ export function SessionChat(props: {
                     />
 
                     <HappyComposer
-                        disabled={props.isSending || controlsDisabled}
+                        disabled={props.isSending}
                         permissionMode={props.session.permissionMode}
                         modelMode={props.session.modelMode}
                         agentFlavor={agentFlavor}
                         active={props.session.active}
+                        allowSendWhenInactive
                         thinking={props.session.thinking}
                         agentState={props.session.agentState}
                         contextSize={reduced.latestUsage?.contextSize}

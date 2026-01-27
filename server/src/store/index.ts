@@ -22,7 +22,7 @@ export { PushStore } from './pushStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
 
-const SCHEMA_VERSION = 2
+const SCHEMA_VERSION: number = 3
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -88,6 +88,7 @@ export class Store {
         if (currentVersion === 0) {
             if (this.hasAnyUserTables()) {
                 this.migrateLegacySchemaIfNeeded()
+                this.createSchema()
                 this.setUserVersion(SCHEMA_VERSION)
                 return
             }
@@ -99,6 +100,12 @@ export class Store {
 
         if (currentVersion === 1 && SCHEMA_VERSION === 2) {
             this.migrateFromV1ToV2()
+            this.setUserVersion(SCHEMA_VERSION)
+            return
+        }
+
+        if (currentVersion === 2 && SCHEMA_VERSION === 3) {
+            this.migrateFromV2ToV3()
             this.setUserVersion(SCHEMA_VERSION)
             return
         }
@@ -267,6 +274,10 @@ export class Store {
             const message = error instanceof Error ? error.message : String(error)
             throw new Error(`SQLite schema migration v1->v2 failed: ${message}`)
         }
+    }
+
+    private migrateFromV2ToV3(): void {
+        return
     }
 
     private getMachineColumnNames(): Set<string> {

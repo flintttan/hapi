@@ -90,6 +90,7 @@ export function useSSE(options: {
     }, [options.onToast])
 
     const subscription = options.subscription ?? {}
+
     const subscriptionKey = useMemo(() => {
         return `${subscription.all ? '1' : '0'}|${subscription.sessionId ?? ''}|${subscription.machineId ?? ''}`
     }, [subscription.all, subscription.sessionId, subscription.machineId])
@@ -103,7 +104,10 @@ export function useSSE(options: {
         }
 
         setSubscriptionId(null)
-        const url = buildEventsUrl(options.baseUrl, options.token, subscription, getVisibilityState())
+        const url = buildEventsUrl(options.baseUrl, options.token, {
+            ...subscription,
+            sessionId: subscription.sessionId ?? undefined
+        }, getVisibilityState())
         const eventSource = new EventSource(url)
         eventSourceRef.current = eventSource
 

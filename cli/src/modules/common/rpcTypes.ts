@@ -2,6 +2,7 @@ export interface SpawnSessionOptions {
     machineId?: string
     directory: string
     sessionId?: string
+    resumeSessionId?: string
     approvedNewDirectoryCreation?: boolean
     agent?: 'claude' | 'codex' | 'gemini'
     model?: string
