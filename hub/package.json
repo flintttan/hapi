@@ -1,7 +1,7 @@
 {
   "name": "hapi-hub",
   "private": true,
-  "version": "0.5.40",
+  "version": "0.5.41",
   "description": "Telegram Bot client for HAPI - control Claude Code sessions",
   "author": "weishu",
   "license": "AGPL-3.0-only",
