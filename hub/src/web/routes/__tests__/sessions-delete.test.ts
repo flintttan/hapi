@@ -32,7 +32,18 @@ describe('Sessions routes - delete', () => {
         const engine = {
             getSession: (sessionId: string) => (sessionId === 's1' ? session : null),
             getSessionByNamespace: (sessionId: string, namespace: string) => sessionId === 's1' && namespace === 'user-1' ? session : undefined,
-            deleteSession: () => true
+            resolveSessionAccess: (sessionId: string, namespace: string) => {
+                const scoped = sessionId === 's1' && namespace === 'user-1' ? session : undefined
+                if (scoped) {
+                    return { ok: true, sessionId, session: scoped }
+                }
+                const anySession = sessionId === 's1' ? session : null
+                if (anySession) {
+                    return { ok: false, reason: 'access-denied' as const }
+                }
+                return { ok: false, reason: 'not-found' as const }
+            },
+            deleteSession: async () => {}
         } as any
 
         app.route('/', createSessionsRoutes(() => engine))
@@ -70,9 +81,19 @@ describe('Sessions routes - delete', () => {
         const engine = {
             getSession: (sessionId: string) => (sessionId === 's1' ? session : null),
             getSessionByNamespace: (sessionId: string, namespace: string) => sessionId === 's1' && namespace === 'user-1' ? session : undefined,
-            deleteSession: (sessionId: string) => {
+            resolveSessionAccess: (sessionId: string, namespace: string) => {
+                const scoped = sessionId === 's1' && namespace === 'user-1' ? session : undefined
+                if (scoped) {
+                    return { ok: true, sessionId, session: scoped }
+                }
+                const anySession = sessionId === 's1' ? session : null
+                if (anySession) {
+                    return { ok: false, reason: 'access-denied' as const }
+                }
+                return { ok: false, reason: 'not-found' as const }
+            },
+            deleteSession: async (sessionId: string) => {
                 deletedSessionId = sessionId
-                return true
             }
         } as any
 

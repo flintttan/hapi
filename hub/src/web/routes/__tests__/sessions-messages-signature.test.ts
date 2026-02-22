@@ -57,6 +57,17 @@ describe('Web routes call SyncEngine with userId', () => {
         const engine = {
             getSession: (sessionId: string) => (sessionId === 's1' ? session : null),
             getSessionByNamespace: (sessionId: string, namespace: string) => (sessionId === 's1' && namespace === 'user-1' ? session : undefined),
+            resolveSessionAccess: (sessionId: string, namespace: string) => {
+                const scoped = sessionId === 's1' && namespace === 'user-1' ? session : undefined
+                if (scoped) {
+                    return { ok: true, sessionId, session: scoped }
+                }
+                const anySession = sessionId === 's1' ? session : null
+                if (anySession) {
+                    return { ok: false, reason: 'access-denied' as const }
+                }
+                return { ok: false, reason: 'not-found' as const }
+            },
             getMessagesPage: (sessionId: string, options: { limit: number; beforeSeq: number | null }) => {
                 calls.push({ method: 'getMessagesPage', sessionId, options })
                 return {

@@ -394,6 +394,9 @@ export class SyncEngine {
         )
 
         if (spawnResult.type !== 'success') {
+            if (spawnResult.type === 'requestToApproveDirectoryCreation') {
+                return { type: 'error', message: 'Directory creation requires approval', code: 'resume_failed' }
+            }
             return { type: 'error', message: spawnResult.message, code: 'resume_failed' }
         }
 

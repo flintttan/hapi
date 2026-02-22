@@ -69,7 +69,9 @@ export default defineConfig({
                 ]
             },
             injectManifest: {
-                globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}']
+                globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+                // Our JS bundles can exceed Workbox's default 2 MiB precache limit.
+                maximumFileSizeToCacheInBytes: 5 * 1024 * 1024
             },
             devOptions: {
                 enabled: true,
