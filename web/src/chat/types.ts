@@ -1,4 +1,4 @@
-import type { MessageStatus } from '@/types/api'
+import type { AttachmentMetadata, MessageStatus } from '@/types/api'
 
 export type UsageData = {
     input_tokens: number
@@ -15,6 +15,9 @@ export type AgentEvent =
     | { type: 'limit-reached'; endsAt: number }
     | { type: 'ready' }
     | { type: 'api-error'; retryAttempt: number; maxRetries: number; error: unknown }
+    | { type: 'turn-duration'; durationMs: number }
+    | { type: 'microcompact'; trigger: string; preTokens: number; tokensSaved: number }
+    | { type: 'compact'; trigger: string; preTokens: number }
     | ({ type: string } & Record<string, unknown>)
 
 export type ToolResultPermission = {
@@ -65,7 +68,7 @@ export type NormalizedAgentContent =
 
 export type NormalizedMessage = ({
     role: 'user'
-    content: { type: 'text'; text: string }
+    content: { type: 'text'; text: string; attachments?: AttachmentMetadata[] }
 } | {
     role: 'agent'
     content: NormalizedAgentContent[]
@@ -90,7 +93,7 @@ export type ToolPermission = {
     mode?: string
     allowedTools?: string[]
     decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort'
-    answers?: Record<string, string[]>
+    answers?: Record<string, string[]> | Record<string, { answers: string[] }>
     date?: number
     createdAt?: number | null
     completedAt?: number | null
@@ -115,6 +118,7 @@ export type UserTextBlock = {
     localId: string | null
     createdAt: number
     text: string
+    attachments?: AttachmentMetadata[]
     status?: MessageStatus
     originalText?: string
     meta?: unknown

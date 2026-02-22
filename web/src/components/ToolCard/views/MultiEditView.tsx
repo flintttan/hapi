@@ -1,9 +1,6 @@
 import type { ToolViewProps } from '@/components/ToolCard/views/_all'
+import { isObject } from '@hapi/protocol'
 import { DiffView } from '@/components/DiffView'
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object'
-}
 
 type Edit = { old_string: string; new_string: string }
 

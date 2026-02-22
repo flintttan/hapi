@@ -1,9 +1,6 @@
 import type { ToolViewProps } from '@/components/ToolCard/views/_all'
+import { isObject } from '@hapi/protocol'
 import { basename, resolveDisplayPath } from '@/utils/path'
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object'
-}
 
 export function CodexPatchView(props: ToolViewProps) {
     const input = props.block.tool.input
@@ -25,4 +22,3 @@ export function CodexPatchView(props: ToolViewProps) {
         </div>
     )
 }
-

@@ -28,6 +28,14 @@ interface JsonRpcResponse {
 
 type RequestHandler = (params: unknown, requestId: string | number | null) => Promise<unknown>;
 
+export type AcpStderrErrorType = 'rate_limit' | 'model_not_found' | 'authentication' | 'quota_exceeded' | 'unknown';
+
+export type AcpStderrError = {
+    type: AcpStderrErrorType;
+    message: string;
+    raw: string;
+};
+
 export class AcpStdioTransport {
     private readonly process: ChildProcessWithoutNullStreams;
     private readonly pending = new Map<string | number, {
@@ -36,6 +44,7 @@ export class AcpStdioTransport {
     }>();
     private readonly requestHandlers = new Map<string, RequestHandler>();
     private notificationHandler: ((method: string, params: unknown) => void) | null = null;
+    private stderrErrorHandler: ((error: AcpStderrError) => void) | null = null;
     private buffer = '';
     private nextId = 1;
     private protocolError: Error | null = null;
@@ -56,7 +65,9 @@ export class AcpStdioTransport {
 
         this.process.stderr.setEncoding('utf8');
         this.process.stderr.on('data', (chunk) => {
-            logger.debug(`[ACP][stderr] ${chunk.toString().trim()}`);
+            const text = chunk.toString().trim();
+            logger.debug(`[ACP][stderr] ${text}`);
+            this.parseStderrError(text);
         });
 
         this.process.on('exit', (code, signal) => {
@@ -79,11 +90,18 @@ export class AcpStdioTransport {
         this.notificationHandler = handler;
     }
 
+    onStderrError(handler: ((error: AcpStderrError) => void) | null): void {
+        this.stderrErrorHandler = handler;
+    }
+
     registerRequestHandler(method: string, handler: RequestHandler): void {
         this.requestHandlers.set(method, handler);
     }
 
-    async sendRequest(method: string, params?: unknown): Promise<unknown> {
+    /** Default timeout for requests in milliseconds (2 minutes) */
+    static readonly DEFAULT_TIMEOUT_MS = 120_000;
+
+    async sendRequest(method: string, params?: unknown, options?: { timeoutMs?: number }): Promise<unknown> {
         const id = this.nextId++;
         const payload: JsonRpcRequest = {
             jsonrpc: '2.0',
@@ -92,8 +110,36 @@ export class AcpStdioTransport {
             params
         };
 
+        const timeoutMs = options?.timeoutMs ?? AcpStdioTransport.DEFAULT_TIMEOUT_MS;
+
+        // Skip timeout for infinite/no-timeout requests (e.g., long-running prompts)
+        if (!Number.isFinite(timeoutMs)) {
+            return new Promise<unknown>((resolve, reject) => {
+                this.pending.set(id, { resolve, reject });
+                this.writePayload(payload);
+            });
+        }
+
         return new Promise<unknown>((resolve, reject) => {
-            this.pending.set(id, { resolve, reject });
+            const timer = setTimeout(() => {
+                if (this.pending.has(id)) {
+                    this.pending.delete(id);
+                    reject(new Error(`ACP request '${method}' timed out after ${timeoutMs}ms`));
+                }
+            }, timeoutMs);
+            // Don't let timer keep Node alive if process wants to exit
+            timer.unref();
+
+            this.pending.set(id, {
+                resolve: (value) => {
+                    clearTimeout(timer);
+                    resolve(value);
+                },
+                reject: (error) => {
+                    clearTimeout(timer);
+                    reject(error);
+                }
+            });
             this.writePayload(payload);
         });
     }
@@ -135,7 +181,14 @@ export class AcpStdioTransport {
         }
         let message: JsonRpcRequest | JsonRpcResponse | JsonRpcNotification | null = null;
         try {
-            message = JSON.parse(line) as JsonRpcRequest | JsonRpcResponse | JsonRpcNotification;
+            const parsed = JSON.parse(line);
+            // Validate JSON is an object (not primitive types like numbers/strings/booleans)
+            // Gemini CLI may output non-JSON-RPC data (e.g., numeric IDs) that would break protocol
+            if (typeof parsed !== 'object' || parsed === null) {
+                logger.debug('[ACP] Ignoring non-object JSON from stdout', { line });
+                return;
+            }
+            message = parsed as JsonRpcRequest | JsonRpcResponse | JsonRpcNotification;
         } catch (error) {
             const protocolError = new Error('Failed to parse JSON-RPC from ACP agent');
             this.protocolError = protocolError;
@@ -227,5 +280,64 @@ export class AcpStdioTransport {
             reject(error);
         }
         this.pending.clear();
+    }
+
+    private parseStderrError(text: string): void {
+        if (!this.stderrErrorHandler) {
+            return;
+        }
+
+        const lowerText = text.toLowerCase();
+
+        // Rate limit errors (429)
+        if (lowerText.includes('status 429') || lowerText.includes('ratelimitexceeded') || lowerText.includes('rate limit')) {
+            this.stderrErrorHandler({
+                type: 'rate_limit',
+                message: 'Rate limit exceeded. Please wait before sending more requests.',
+                raw: text
+            });
+            return;
+        }
+
+        // Model not found errors (404)
+        if (lowerText.includes('status 404') || lowerText.includes('model not found') || lowerText.includes('not_found')) {
+            this.stderrErrorHandler({
+                type: 'model_not_found',
+                message: 'Model not found. Available models: gemini-2.5-pro, gemini-2.5-flash, gemini-2.0-flash',
+                raw: text
+            });
+            return;
+        }
+
+        // Authentication errors (401/403)
+        if (lowerText.includes('status 401') || lowerText.includes('status 403') ||
+            lowerText.includes('unauthenticated') || lowerText.includes('permission denied') ||
+            lowerText.includes('authentication')) {
+            this.stderrErrorHandler({
+                type: 'authentication',
+                message: 'Authentication failed. Please check your credentials or run "gemini auth login".',
+                raw: text
+            });
+            return;
+        }
+
+        // Quota exceeded
+        if (lowerText.includes('quota') || lowerText.includes('resource exhausted') || lowerText.includes('resourceexhausted')) {
+            this.stderrErrorHandler({
+                type: 'quota_exceeded',
+                message: 'API quota exceeded. Please check your billing or wait for quota reset.',
+                raw: text
+            });
+            return;
+        }
+
+        // Only report as unknown if it looks like an actual error
+        if (lowerText.includes('error') || lowerText.includes('failed') || lowerText.includes('exception')) {
+            this.stderrErrorHandler({
+                type: 'unknown',
+                message: text,
+                raw: text
+            });
+        }
     }
 }

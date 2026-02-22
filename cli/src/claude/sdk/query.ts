@@ -25,6 +25,7 @@ import {
 import { getDefaultClaudeCodePath, logDebug, streamToStdin } from './utils'
 import { withBunRuntimeEnv } from '@/utils/bunRuntime'
 import { killProcessByChildProcess } from '@/utils/process'
+import { stripNewlinesForWindowsShellArg } from '@/utils/shellEscape'
 import type { Writable } from 'node:stream'
 import { logger } from '@/ui/logger'
 import { appendMcpConfigArg } from '../utils/mcpConfig'
@@ -260,6 +261,7 @@ export function query(config: {
     const {
         prompt,
         options: {
+            additionalDirectories = [],
             allowedTools = [],
             appendSystemPrompt,
             customSystemPrompt,
@@ -288,8 +290,8 @@ export function query(config: {
     const args = ['--output-format', 'stream-json', '--verbose']
     let cleanupMcpConfig: (() => void) | null = null
 
-    if (customSystemPrompt) args.push('--system-prompt', customSystemPrompt)
-    if (appendSystemPrompt) args.push('--append-system-prompt', appendSystemPrompt)
+    if (customSystemPrompt) args.push('--system-prompt', stripNewlinesForWindowsShellArg(customSystemPrompt))
+    if (appendSystemPrompt) args.push('--append-system-prompt', stripNewlinesForWindowsShellArg(appendSystemPrompt))
     if (maxTurns) args.push('--max-turns', maxTurns.toString())
     if (model) args.push('--model', model)
     if (canCallTool) {
@@ -303,6 +305,7 @@ export function query(config: {
     if (settingsPath) args.push('--settings', settingsPath)
     if (allowedTools.length > 0) args.push('--allowedTools', allowedTools.join(','))
     if (disallowedTools.length > 0) args.push('--disallowedTools', disallowedTools.join(','))
+    if (additionalDirectories.length > 0) args.push('--add-dir', ...additionalDirectories)
     if (strictMcpConfig) args.push('--strict-mcp-config')
     if (permissionMode) args.push('--permission-mode', permissionMode)
 
@@ -315,7 +318,7 @@ export function query(config: {
 
     // Handle prompt input
     if (typeof prompt === 'string') {
-        args.push('--print', prompt.trim())
+        args.push('--print', stripNewlinesForWindowsShellArg(prompt.trim()))
     } else {
         args.push('--input-format', 'stream-json')
     }
@@ -344,8 +347,9 @@ export function query(config: {
         stdio: ['pipe', 'pipe', 'pipe'],
         signal: config.options?.abort,
         env: spawnEnv,
-        // Use shell on Windows for command resolution
-        shell: process.platform === 'win32'
+        // Use shell: false with absolute path from getDefaultClaudeCodePath()
+        // This avoids cmd.exe resolution issues on Windows
+        shell: false
     }) as ChildProcessWithoutNullStreams
 
     // Handle stdin

@@ -64,6 +64,7 @@ export function reduceTimeline(
                 localId: msg.localId,
                 createdAt: msg.createdAt,
                 text: msg.content.text,
+                attachments: msg.content.attachments,
                 status: msg.status,
                 originalText: msg.originalText,
                 meta: msg.meta

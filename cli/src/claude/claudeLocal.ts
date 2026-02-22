@@ -7,6 +7,9 @@ import { appendMcpConfigArg } from "./utils/mcpConfig";
 import { systemPrompt } from "./utils/systemPrompt";
 import { withBunRuntimeEnv } from "@/utils/bunRuntime";
 import { spawnWithAbort } from "@/utils/spawnWithAbort";
+import { getHapiBlobsDir } from "@/constants/uploadPaths";
+import { stripNewlinesForWindowsShellArg } from "@/utils/shellEscape";
+import { getDefaultClaudeCodePath } from "./sdk/utils";
 
 export async function claudeLocal(opts: {
     abort: AbortSignal,
@@ -49,7 +52,7 @@ export async function claudeLocal(opts: {
         args.push('--resume', startFrom);
     }
 
-    args.push('--append-system-prompt', systemPrompt);
+    args.push('--append-system-prompt', stripNewlinesForWindowsShellArg(systemPrompt));
 
     const cleanupMcpConfig = appendMcpConfigArg(args, opts.mcpServers, {
         baseDir: projectDir
@@ -68,6 +71,10 @@ export async function claudeLocal(opts: {
     args.push('--settings', opts.hookSettingsPath);
     logger.debug(`[ClaudeLocal] Using hook settings: ${opts.hookSettingsPath}`);
 
+    // Add blobs directory for file upload access
+    args.push('--add-dir', getHapiBlobsDir());
+    logger.debug(`[ClaudeLocal] Adding blobs directory: ${getHapiBlobsDir()}`);
+
     // Prepare environment variables
     // Note: Local mode uses global Claude installation
     const env = {
@@ -78,11 +85,15 @@ export async function claudeLocal(opts: {
 
     logger.debug(`[ClaudeLocal] Spawning claude with args: ${JSON.stringify(args)}`);
 
+    // Get Claude executable path (absolute path on Windows for shell: false)
+    const claudeCommand = getDefaultClaudeCodePath();
+    logger.debug(`[ClaudeLocal] Using claude executable: ${claudeCommand}`);
+
     // Spawn the process
     try {
         process.stdin.pause();
         await spawnWithAbort({
-            command: 'claude',
+            command: claudeCommand,
             args,
             cwd: opts.path,
             env: withBunRuntimeEnv(env, { allowBunBeBun: false }),
@@ -92,7 +103,7 @@ export async function claudeLocal(opts: {
             installHint: 'Claude CLI',
             includeCause: true,
             logExit: true,
-            shell: process.platform === 'win32'
+            shell: false  // Use absolute path, no shell needed
         });
     } finally {
         cleanupMcpConfig?.();

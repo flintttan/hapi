@@ -1,5 +1,5 @@
 import type { AgentEvent, NormalizedAgentContent, NormalizedMessage, ToolResultPermission } from '@/chat/types'
-import { asNumber, asString, isObject } from '@/chat/normalizeUtils'
+import { asNumber, asString, isObject } from '@hapi/protocol'
 
 function normalizeToolResultPermissions(value: unknown): ToolResultPermission | undefined {
     if (!isObject(value)) return undefined
@@ -227,6 +227,53 @@ export function normalizeAgentRecord(
                     retryAttempt: asNumber(data.retryAttempt) ?? 0,
                     maxRetries: asNumber(data.maxRetries) ?? 0,
                     error: data.error
+                },
+                isSidechain: false,
+                meta
+            }
+        }
+        if (data.type === 'system' && data.subtype === 'turn_duration') {
+            return {
+                id: messageId,
+                localId,
+                createdAt,
+                role: 'event',
+                content: {
+                    type: 'turn-duration',
+                    durationMs: asNumber(data.durationMs) ?? 0
+                },
+                isSidechain: false,
+                meta
+            }
+        }
+        if (data.type === 'system' && data.subtype === 'microcompact_boundary') {
+            const metadata = isObject(data.microcompactMetadata) ? data.microcompactMetadata : null
+            return {
+                id: messageId,
+                localId,
+                createdAt,
+                role: 'event',
+                content: {
+                    type: 'microcompact',
+                    trigger: asString(metadata?.trigger) ?? 'auto',
+                    preTokens: asNumber(metadata?.preTokens) ?? 0,
+                    tokensSaved: asNumber(metadata?.tokensSaved) ?? 0
+                },
+                isSidechain: false,
+                meta
+            }
+        }
+        if (data.type === 'system' && data.subtype === 'compact_boundary') {
+            const metadata = isObject(data.compactMetadata) ? data.compactMetadata : null
+            return {
+                id: messageId,
+                localId,
+                createdAt,
+                role: 'event',
+                content: {
+                    type: 'compact',
+                    trigger: asString(metadata?.trigger) ?? 'auto',
+                    preTokens: asNumber(metadata?.preTokens) ?? 0
                 },
                 isSidechain: false,
                 meta

@@ -2,42 +2,42 @@
 
 [Happy](https://github.com/slopus/happy) is an excellent project. So why build HAPI?
 
-**The short answer**: Happy is designed for cloud hosting with multiple users. HAPI is designed for self-hosting with a single user or small team. These different goals lead to fundamentally different architectures.
+**The short answer**: Happy uses a centralized server that stores your encrypted data. HAPI is decentralized — each user runs their own hub, and the relay server only forwards encrypted traffic without storing anything. These different goals lead to fundamentally different architectures.
 
 ## TL;DR
 
 | Aspect | Happy | HAPI |
 |--------|-------|------|
-| **Design** | Cloud-first | Local-first |
-| **Users** | Multi-user | Single user / small teams |
-| **Data** | Encrypted on server | Never leaves your machine |
-| **Deployment** | Multiple services | Single binary |
-| **Complexity** | High (E2EE, scaling) | Low (one command) |
+| **Architecture** | Centralized (cloud server stores encrypted data) | Decentralized (each user runs own hub) |
+| **Users** | Multi-user on shared server | Any number (each runs own hub) |
+| **Data** | Encrypted on server (server cannot read) | Stays on your machine |
+| **Encryption** | Application-layer E2EE (client encrypts before sending) | WireGuard + TLS via relay; or none needed if self-hosted |
+| **Deployment** | Multiple services (PostgreSQL, Redis, app server) | Single binary |
+| **Complexity** | High (E2EE, key management, scaling) | Low (one command) |
 
-**Choose HAPI if**: You want personal or small team use, data sovereignty, and minimal setup.
+**Choose HAPI if**: You want data sovereignty, self-hosting, and minimal setup.
 
-**Choose Happy if**: You need large-scale multi-user collaboration or enterprise features.
+**Choose Happy if**: You need a managed cloud service with multi-user collaboration.
 
 ## Architecture Comparison
 
-### Happy: Cloud-First
+### Happy: Centralized Cloud
 
-Happy's cloud design requires:
+Happy's centralized design requires:
 
-- **End-to-end encryption** - Because you don't trust the server
-- **Distributed database + cache** - Because you need to scale
-- **Complex deployment** - Docker, multiple services, config files
+- **Application-layer E2EE** — Clients encrypt before sending; the server stores encrypted blobs it cannot read
+- **Distributed database + cache** — PostgreSQL + Redis for multi-user scaling
+- **Complex deployment** — Docker, multiple services, config files
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
 │                             PUBLIC INTERNET                             │
 │                                                                         │
 │   ┌─────────────┐                    ┌─────────────────────────────────┐│
-│   │             │                    │                                 ││
-│   │  Mobile App │◄───── E2EE ───────►│        Cloud Server             ││
-│   │             │                    │                                 ││
-│   └─────────────┘                    │  ┌─────────────────────────────┐││
-│                                      │  │   Encrypted Database        │││
+│   │             │                    │        Cloud Server             ││
+│   │  Mobile App │◄───── E2EE ───────►│                                 ││
+│   │             │                    │  ┌─────────────────────────────┐││
+│   └─────────────┘                    │  │   Encrypted Database        │││
 │                                      │  │   (server cannot read)      │││
 │                                      │  └─────────────────────────────┘││
 │                                      └────────────────┬────────────────┘│
@@ -50,23 +50,30 @@ Happy's cloud design requires:
                                              └───────────────────┘
 ```
 
-### HAPI: Local-First
+The server stores encrypted data — it never sees plaintext, but it does hold your data.
 
-HAPI's local design simplifies everything:
+### HAPI: Decentralized
 
-- **No E2EE needed** - Your data never leaves your machine
-- **Single embedded database** - No scaling required
-- **One-command deployment** - Single binary, zero config
+Each user runs their own hub. HAPI offers two modes of remote access:
+
+- **Self-hosted** (own server / Cloudflare Tunnel / Tailscale) — You control the full network path, no E2EE needed
+- **Public relay** (`hapi hub --relay`) — E2E encrypted via tunwg (WireGuard + TLS); the relay only forwards opaque packets
+- **Single embedded database** — SQLite, no external services
+- **One-command deployment** — Single binary, zero config
+
+#### Mode 1: Self-Hosted (own server or tunnel)
+
+You control the entire path. No encryption beyond standard HTTPS is needed.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
-│                          PRIVATE NETWORK                               │
+│                       YOUR NETWORK / TUNNEL                            │
 │                                                                        │
 │   ┌────────────────────────────────────────────────────────────────┐   │
 │   │                   Single Process / Binary                      │   │
 │   │                                                                │   │
 │   │  ┌──────────┐    ┌──────────┐    ┌──────────┐                  │   │
-│   │  │   CLI    │◄──►│  Server  │◄──►│ Web App  │                  │   │
+│   │  │   CLI    │◄──►│   Hub    │◄──►│ Web App  │                  │   │
 │   │  └──────────┘    └────┬─────┘    └──────────┘                  │   │
 │   │                       │                                        │   │
 │   │                       ▼                                        │   │
@@ -76,12 +83,48 @@ HAPI's local design simplifies everything:
 │   │              └────────────────┘                                │   │
 │   └────────────────────────────────────────────────────────────────┘   │
 │                            │                                           │
-│                            ▼ localhost                                 │
+│                            ▼ HTTPS                                     │
+│               ┌────────────────────────┐                               │
+│               │ Cloudflare / Tailscale │                               │
+│               │ / Public IP / etc.     │                               │
+│               └────────────────────────┘                               │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Mode 2: Public Relay (E2E encrypted)
+
+The relay server only forwards encrypted packets — it cannot read your data.
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                       YOUR MACHINE                                     │
+│                                                                        │
+│   ┌────────────────────────────────────────────────────────────────┐   │
+│   │                   Single Process / Binary                      │   │
+│   │                                                                │   │
+│   │  ┌──────────┐    ┌──────────┐    ┌──────────┐                  │   │
+│   │  │   CLI    │◄──►│   Hub    │◄──►│ Web App  │                  │   │
+│   │  └──────────┘    └────┬─────┘    └──────────┘                  │   │
+│   │                       │                                        │   │
+│   │                       ▼                                        │   │
+│   │              ┌────────────────┐                                │   │
+│   │              │ Local Database │                                │   │
+│   │              │  (plaintext)   │                                │   │
+│   │              └────────────────┘                                │   │
+│   └────────────────────────────────────────────────────────────────┘   │
+│                            │                                           │
+│                            ▼ tunwg (WireGuard + TLS)                   │
 └────────────────────────────┼───────────────────────────────────────────┘
-                             │
+                             │ E2E encrypted
                     ┌────────▼────────┐
-                    │ Tunnel (Optional)│
-                    │ for remote access│
+                    │  Relay Server   │
+                    │  (forwards only,│
+                    │  cannot read)   │
+                    └────────┬────────┘
+                             │ E2E encrypted
+                    ┌────────▼────────┐
+                    │  Your Phone /   │
+                    │  Browser        │
                     └─────────────────┘
 ```
 
@@ -91,9 +134,10 @@ HAPI's local design simplifies everything:
 
 | Aspect | Happy | HAPI |
 |--------|-------|------|
-| **Where data lives** | Cloud server | Your local machine |
-| **Who can access** | Server stores encrypted blobs | Only you |
-| **Trust model** | Don't trust server → E2EE | Trust local → TLS sufficient |
+| **Where data lives** | Cloud server (encrypted blobs) | Your own machine |
+| **Who stores it** | Central server holds encrypted data | Only your hub, locally |
+| **Data at rest** | Encrypted (server cannot read) | Plaintext (protected by OS) |
+| **Server's role** | Stores encrypted data + syncs devices | Relay only forwards (or no server at all if self-hosted) |
 
 ### Deployment Model
 
@@ -105,6 +149,7 @@ HAPI's local design simplifies everything:
 │                                                                   │
 │   ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐          │
 │   │ Database │  │  Cache   │  │ Storage  │  │  Server  │          │
+│   │(Postgres)│  │ (Redis)  │  │ (Files)  │  │(Node.js) │          │
 │   └──────────┘  └──────────┘  └──────────┘  └──────────┘          │
 │                                                                   │
 │   Requires: Container orchestration, multiple config files        │
@@ -118,7 +163,7 @@ HAPI's local design simplifies everything:
 │   Single Binary (everything bundled)                              │
 │                                                                   │
 │   ┌─────────────────────────────────────────────────────────────┐ │
-│   │  CLI + Server + Web App + Database (embedded)               │ │
+│   │  CLI + Hub + Web App + Database (SQLite, embedded)          │ │
 │   └─────────────────────────────────────────────────────────────┘ │
 │                                                                   │
 │   Requires: One command to run                                    │
@@ -127,66 +172,70 @@ HAPI's local design simplifies everything:
 
 ### Security Approach
 
-| Aspect | Happy | HAPI |
-|--------|-------|------|
-| **Problem** | Data on untrusted server | External access to local data |
-| **Solution** | End-to-end encryption | Tunnel with TLS |
-| **Complexity** | High (key management) | Low (tunnel setup) |
-| **Data at rest** | Encrypted | Plaintext (protected by OS) |
+| Aspect | Happy | HAPI (self-hosted) | HAPI (relay) |
+|--------|-------|-------------------|--------------|
+| **Problem** | Data on untrusted server | Remote access to local hub | Remote access via third-party relay |
+| **Solution** | Application-layer E2EE | HTTPS (you control the path) | WireGuard + TLS (tunwg) |
+| **Key management** | Client holds keys; server never sees plaintext | Not needed | Handled by tunwg automatically |
+| **Data at rest** | Encrypted on server | Plaintext on your machine | Plaintext on your machine |
 
 ## Why Different Architectures?
 
-### Happy's Constraints
+### Happy: Centralized
 
 ```
 Goal: Multi-user cloud platform
          │
-         ├──► Users don't trust your server
-         │         └──► Must encrypt everything (E2EE)
+         ├──► Server stores user data
+         │         └──► Must encrypt everything (application-layer E2EE)
          │
-         ├──► Many concurrent users
-         │         └──► Must scale horizontally
+         ├──► Many concurrent users on one server
+         │         └──► Must scale horizontally (PostgreSQL, Redis)
          │
          └──► Multiple devices per user
-                   └──► Must sync state across devices
+                   └──► Must sync encrypted state across devices
 ```
 
-**Result**: Sophisticated but complex architecture
+**Result**: Sophisticated infrastructure with zero-knowledge server
 
-### HAPI's Simplifications
+### HAPI: Decentralized
 
 ```
-Goal: Self-hosted tool for individuals or small teams
+Goal: Self-hosted tool — each user runs their own hub
          │
-         ├──► Data stays on your machine
-         │         └──► No E2EE needed
+         ├──► Data never leaves your machine
+         │         └──► No application-layer E2EE needed
          │
-         ├──► Limited users (via namespaces)
-         │         └──► No horizontal scaling needed
+         ├──► Each user has their own hub
+         │         └──► No horizontal scaling needed; unlimited users in aggregate
          │
-         └──► One primary device
-                   └──► Minimal sync logic
+         ├──► Self-hosted access (own server/tunnel)
+         │         └──► You control the full path — HTTPS sufficient
+         │
+         └──► Public relay access
+                   └──► WireGuard + TLS (tunwg) — relay forwards only
 ```
 
-**Result**: Simple and portable architecture
+**Result**: Simple, portable, one-command deployment
 
 ## Summary
 
 | Dimension | Happy | HAPI |
 |-----------|-------|------|
-| **Philosophy** | Cloud-first | Local-first |
-| **Data location** | Server (encrypted) | Local (plaintext) |
-| **Deployment** | Multiple services | Single binary |
-| **Scaling** | Horizontal | None needed |
-| **Encryption** | Application-layer E2EE | Transport-layer TLS |
-| **Target user** | Teams, cloud users | Individuals, small teams, self-hosters |
+| **Architecture** | Centralized cloud server | Decentralized (each user runs own hub) |
+| **Server's role** | Stores encrypted data | Relay only forwards (or none if self-hosted) |
+| **Data location** | Server (encrypted, zero-knowledge) | Local (plaintext, your machine) |
+| **Deployment** | Multiple services (PostgreSQL, Redis, Node.js) | Single binary (embedded SQLite) |
+| **Encryption** | Application-layer E2EE (client-side) | WireGuard + TLS (relay) or HTTPS (self-hosted) |
+| **Scaling** | Horizontal (multi-user on shared server) | Per-user (each runs own hub) |
+| **Target user** | Managed cloud service users | Self-hosters who want data sovereignty |
 
 ## Conclusion
 
-The architectural differences stem from fundamentally different goals:
+The architectural differences stem from a centralized vs decentralized design:
 
-- **Happy**: Built for multi-user cloud scenarios. Solves the "untrusted server" problem with E2EE, at the cost of deployment complexity.
+- **Happy**: Centralized cloud server that stores your encrypted data. The server never sees plaintext (zero-knowledge), but it does hold your data. This requires application-layer E2EE, key management, and distributed infrastructure (PostgreSQL, Redis, scaling).
 
-- **HAPI**: Built for individuals or small teams who self-host. Solves the "remote access" problem with simple networking, achieving one-command deployment.
+- **HAPI**: Decentralized — each user runs their own hub. Your data stays on your machine. For remote access, you can self-host (own server or tunnel — no E2EE needed since you control the path) or use the public relay (WireGuard + TLS via tunwg — the relay only forwards encrypted packets it cannot read). This achieves one-command deployment with zero external dependencies.
 
-If you want to self-host for personal or small team use, HAPI removes all the complexity that Happy needs for its cloud service.
+The core tradeoff: Happy solves the "untrusted server" problem with sophisticated encryption. HAPI avoids the problem entirely by keeping your data on your own machine.

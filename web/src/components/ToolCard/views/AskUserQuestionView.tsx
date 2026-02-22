@@ -3,6 +3,24 @@ import type { ToolViewProps } from '@/components/ToolCard/views/_all'
 import { parseAskUserQuestionInput } from '@/components/ToolCard/askUserQuestion'
 import { cn } from '@/lib/utils'
 
+type AnswersFormat = Record<string, string[]> | Record<string, { answers: string[] }>
+
+/**
+ * Normalize answers to flat format: Record<string, string[]>
+ */
+function normalizeAnswers(answers: AnswersFormat | undefined): Record<string, string[]> | undefined {
+    if (!answers) return undefined
+    const result: Record<string, string[]> = {}
+    for (const [key, value] of Object.entries(answers)) {
+        if (Array.isArray(value)) {
+            result[key] = value
+        } else if (value && typeof value === 'object' && 'answers' in value) {
+            result[key] = value.answers
+        }
+    }
+    return result
+}
+
 function isAnswerSelected(
     answers: Record<string, string[]> | undefined,
     questionIdx: number,
@@ -95,7 +113,8 @@ function renderFreeformAnswers(
 export function AskUserQuestionView(props: ToolViewProps) {
     const parsed = parseAskUserQuestionInput(props.block.tool.input)
     const questions = parsed.questions
-    const answers = props.block.tool.permission?.answers ?? undefined
+    const rawAnswers = props.block.tool.permission?.answers ?? undefined
+    const answers = normalizeAnswers(rawAnswers)
     const hasAnswers = answers && Object.keys(answers).length > 0
 
     // When questions array is empty but answers exist (fallback path),

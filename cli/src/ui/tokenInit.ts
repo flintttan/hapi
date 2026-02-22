@@ -12,15 +12,15 @@ import { stdin as input, stdout as output } from 'node:process'
 import chalk from 'chalk'
 import { configuration } from '@/configuration'
 import { readSettings, updateSettings } from '@/persistence'
-import { initializeServerUrl } from '@/ui/serverUrlInit'
+import { initializeApiUrl } from '@/ui/apiUrlInit'
 
 /**
  * Initialize CLI API token
  * Must be called before any API operations
  */
 export async function initializeToken(): Promise<void> {
-    // Initialize server URL first (env > settings.json > default)
-    await initializeServerUrl()
+    // Initialize API URL first (env > settings.json > default)
+    await initializeApiUrl()
 
     // 1. Environment variable has highest priority (allows temporary override)
     if (configuration.cliApiToken) {

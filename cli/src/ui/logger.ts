@@ -10,7 +10,7 @@ import { appendFileSync } from 'fs'
 import { configuration } from '@/configuration'
 import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join, basename } from 'node:path'
-import { readDaemonState } from '@/persistence'
+import { readRunnerState } from '@/persistence'
 
 /**
  * Consistent date/time formatting functions
@@ -40,7 +40,7 @@ function createTimestampForLogEntry(date: Date = new Date()): string {
 
 function getSessionLogPath(): string {
   const timestamp = createTimestampForFilename()
-  const filename = configuration.isDaemonProcess ? `${timestamp}-daemon.log` : `${timestamp}.log`
+  const filename = configuration.isRunnerProcess ? `${timestamp}-runner.log` : `${timestamp}.log`
   return join(configuration.logsDir, filename)
 }
 
@@ -50,10 +50,10 @@ class Logger {
   constructor(
     public readonly logFilePath = getSessionLogPath()
   ) {
-    // Remote logging enabled only when explicitly set with server URL
+    // Remote logging enabled only when explicitly set with API URL
     if (process.env.DANGEROUSLY_LOG_TO_SERVER_FOR_AI_AUTO_DEBUGGING
-      && process.env.HAPI_SERVER_URL) {
-      this.dangerouslyUnencryptedServerLoggingUrl = process.env.HAPI_SERVER_URL
+      && process.env.HAPI_API_URL) {
+      this.dangerouslyUnencryptedServerLoggingUrl = process.env.HAPI_API_URL
       console.log(chalk.yellow('[REMOTE LOGGING] Sending logs to server for AI debugging'))
     }
   }
@@ -243,10 +243,10 @@ export type LogFileInfo = {
 };
 
 /**
- * List daemon log files in descending modification time order.
+ * List runner log files in descending modification time order.
  * Returns up to `limit` entries; empty array if none.
  */
-export async function listDaemonLogFiles(limit: number = 50): Promise<LogFileInfo[]> {
+export async function listRunnerLogFiles(limit: number = 50): Promise<LogFileInfo[]> {
   try {
     const logsDir = configuration.logsDir;
     if (!existsSync(logsDir)) {
@@ -254,7 +254,7 @@ export async function listDaemonLogFiles(limit: number = 50): Promise<LogFileInf
     }
 
     const logs = readdirSync(logsDir)
-      .filter(file => file.endsWith('-daemon.log'))
+      .filter(file => file.endsWith('-runner.log'))
       .map(file => {
         const fullPath = join(logsDir, file);
         const stats = statSync(fullPath);
@@ -262,19 +262,19 @@ export async function listDaemonLogFiles(limit: number = 50): Promise<LogFileInf
       })
       .sort((a, b) => b.modified.getTime() - a.modified.getTime());
 
-    // Prefer the path persisted by the daemon if present (return 0th element if present)
+    // Prefer the path persisted by the runner if present (return 0th element if present)
     try {
-      const state = await readDaemonState();
+      const state = await readRunnerState();
 
       if (!state) {
         return logs;
       }
 
-      if (state.daemonLogPath && existsSync(state.daemonLogPath)) {
-        const stats = statSync(state.daemonLogPath);
+      if (state.runnerLogPath && existsSync(state.runnerLogPath)) {
+        const stats = statSync(state.runnerLogPath);
         const persisted: LogFileInfo = {
-          file: basename(state.daemonLogPath),
-          path: state.daemonLogPath,
+          file: basename(state.runnerLogPath),
+          path: state.runnerLogPath,
           modified: stats.mtime
         };
         const idx = logs.findIndex(l => l.path === persisted.path);
@@ -286,7 +286,7 @@ export async function listDaemonLogFiles(limit: number = 50): Promise<LogFileInf
         }
       }
     } catch {
-      // Ignore errors reading daemon state; fall back to directory listing
+      // Ignore errors reading runner state; fall back to directory listing
     }
 
     return logs.slice(0, Math.max(0, limit));
@@ -296,9 +296,9 @@ export async function listDaemonLogFiles(limit: number = 50): Promise<LogFileInf
 }
 
 /**
- * Get the most recent daemon log file, or null if none exist.
+ * Get the most recent runner log file, or null if none exist.
  */
-export async function getLatestDaemonLog(): Promise<LogFileInfo | null> {
-  const [latest] = await listDaemonLogFiles(1);
+export async function getLatestRunnerLog(): Promise<LogFileInfo | null> {
+  const [latest] = await listRunnerLogFiles(1);
   return latest || null;
 }

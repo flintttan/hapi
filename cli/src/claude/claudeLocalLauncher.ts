@@ -1,9 +1,7 @@
-import { logger } from "@/ui/logger";
 import { claudeLocal } from "./claudeLocal";
 import { Session } from "./session";
-import { Future } from "@/utils/future";
 import { createSessionScanner } from "./utils/sessionScanner";
-import { getLocalLaunchExitReason } from "@/agent/localLaunchPolicy";
+import { BaseLocalLauncher } from "@/modules/common/launcher/BaseLocalLauncher";
 
 export async function claudeLocalLauncher(session: Session): Promise<'switch' | 'exit'> {
 
@@ -25,126 +23,42 @@ export async function claudeLocalLauncher(session: Session): Promise<'switch' | 
     session.addSessionFoundCallback(handleSessionFound);
 
 
-    // Handle abort
-    let exitReason: 'switch' | 'exit' | null = null;
-    const processAbortController = new AbortController();
-    const exitFuture = new Future<void>();
+    const launcher = new BaseLocalLauncher({
+        label: 'local',
+        failureLabel: 'Local Claude process failed',
+        queue: session.queue,
+        rpcHandlerManager: session.client.rpcHandlerManager,
+        startedBy: session.startedBy,
+        startingMode: session.startingMode,
+        launch: async (abortSignal) => {
+            await claudeLocal({
+                path: session.path,
+                sessionId: session.sessionId,
+                abort: abortSignal,
+                claudeEnvVars: session.claudeEnvVars,
+                claudeArgs: session.claudeArgs,
+                mcpServers: session.mcpServers,
+                allowedTools: session.allowedTools,
+                hookSettingsPath: session.hookSettingsPath,
+            });
+        },
+        onLaunchSuccess: () => {
+            session.consumeOneTimeFlags();
+        },
+        sendFailureMessage: (message) => {
+            session.client.sendSessionEvent({ type: 'message', message });
+        },
+        recordLocalLaunchFailure: (message, exitReason) => {
+            session.recordLocalLaunchFailure(message, exitReason);
+        },
+        abortLogMessage: 'doAbort',
+        switchLogMessage: 'doSwitch'
+    });
     try {
-        async function abort() {
-
-            // Send abort signal
-            if (!processAbortController.signal.aborted) {
-                processAbortController.abort();
-            }
-
-            // Await full exit
-            await exitFuture.promise;
-        }
-
-        async function doAbort() {
-            logger.debug('[local]: doAbort');
-
-            // Switching to remote mode
-            if (!exitReason) {
-                exitReason = 'switch';
-            }
-
-            // Reset sent messages
-            session.queue.reset();
-
-            // Abort
-            await abort();
-        }
-
-        async function doSwitch() {
-            logger.debug('[local]: doSwitch');
-
-            // Switching to remote mode
-            if (!exitReason) {
-                exitReason = 'switch';
-            }
-
-            // Abort
-            await abort();
-        }
-
-        // When to abort
-        session.client.rpcHandlerManager.registerHandler('abort', doAbort); // Abort current process, clean queue and switch to remote mode
-        session.client.rpcHandlerManager.registerHandler('switch', doSwitch); // When user wants to switch to remote mode
-        session.queue.setOnMessage((message: string, mode) => {
-            // Switch to remote mode when message received
-            doSwitch();
-        }); // When any message is received, abort current process, clean queue and switch to remote mode
-
-        // Exit if there are messages in the queue
-        if (session.queue.size() > 0) {
-            return 'switch';
-        }
-
-        // Run local mode
-        while (true) {
-            // If we already have an exit reason, return it
-            if (exitReason) {
-                return exitReason;
-            }
-
-            // Launch
-            logger.debug('[local]: launch');
-            try {
-                await claudeLocal({
-                    path: session.path,
-                    sessionId: session.sessionId,
-                    abort: processAbortController.signal,
-                    claudeEnvVars: session.claudeEnvVars,
-                    claudeArgs: session.claudeArgs,
-                    mcpServers: session.mcpServers,
-                    allowedTools: session.allowedTools,
-                    hookSettingsPath: session.hookSettingsPath,
-                });
-
-                // Consume one-time Claude flags after spawn
-                // For example we don't want to pass --resume flag after first spawn
-                session.consumeOneTimeFlags();
-
-                // Normal exit
-                if (!exitReason) {
-                    exitReason = 'exit';
-                    break;
-                }
-            } catch (e) {
-                logger.debug('[local]: launch error', e);
-                const message = e instanceof Error ? e.message : String(e);
-                session.client.sendSessionEvent({ type: 'message', message: `Local Claude process failed: ${message}` });
-                const failureExitReason = exitReason ?? getLocalLaunchExitReason({
-                    startedBy: session.startedBy,
-                    startingMode: session.startingMode
-                });
-                session.recordLocalLaunchFailure(message, failureExitReason);
-                if (!exitReason) {
-                    exitReason = failureExitReason;
-                }
-                if (failureExitReason === 'exit') {
-                    logger.warn(`[local]: Local Claude process failed: ${message}`);
-                }
-                break;
-            }
-            logger.debug('[local]: launch done');
-        }
+        return await launcher.run();
     } finally {
-
-        // Resolve future
-        exitFuture.resolve(undefined);
-
-        // Set handlers to no-op
-        session.client.rpcHandlerManager.registerHandler('abort', async () => { });
-        session.client.rpcHandlerManager.registerHandler('switch', async () => { });
-        session.queue.setOnMessage(null);
-
         // Cleanup
         session.removeSessionFoundCallback(handleSessionFound);
         await scanner.cleanup();
     }
-
-    // Return
-    return exitReason || 'exit';
 }

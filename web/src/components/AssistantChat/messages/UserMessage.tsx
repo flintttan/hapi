@@ -3,6 +3,7 @@ import { LazyRainbowText } from '@/components/LazyRainbowText'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 import { MessageStatusIndicator } from '@/components/AssistantChat/messages/MessageStatusIndicator'
+import { MessageAttachments } from '@/components/AssistantChat/messages/MessageAttachments'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 
 export function HappyUserMessage() {
@@ -21,6 +22,11 @@ export function HappyUserMessage() {
         if (message.role !== 'user') return null
         const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         return custom?.localId ?? null
+    })
+    const attachments = useAssistantState(({ message }) => {
+        if (message.role !== 'user') return undefined
+        const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
+        return custom?.attachments
     })
     const isCliOutput = useAssistantState(({ message }) => {
         const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
@@ -48,11 +54,15 @@ export function HappyUserMessage() {
         )
     }
 
+    const hasText = text.length > 0
+    const hasAttachments = attachments && attachments.length > 0
+
     return (
         <MessagePrimitive.Root className={userBubbleClass}>
             <div className="flex items-end gap-2">
                 <div className="flex-1 min-w-0">
-                    <LazyRainbowText text={text} />
+                    {hasText && <LazyRainbowText text={text} />}
+                    {hasAttachments && <MessageAttachments attachments={attachments} />}
                 </div>
                 {status ? (
                     <div className="shrink-0 self-end pb-0.5">

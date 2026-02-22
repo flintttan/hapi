@@ -1,4 +1,4 @@
-import { killRunawayHappyProcesses } from '@/daemon/doctor'
+import { killRunawayHappyProcesses } from '@/runner/doctor'
 import { runDoctorCommand } from '@/ui/doctor'
 import type { CommandDefinition } from './types'
 

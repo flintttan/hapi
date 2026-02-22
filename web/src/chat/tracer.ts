@@ -1,4 +1,5 @@
 import type { NormalizedMessage } from '@/chat/types'
+import { isObject } from '@hapi/protocol'
 
 export type TracedMessage = NormalizedMessage & {
     sidechainId?: string
@@ -8,10 +9,6 @@ type TracerState = {
     promptToTaskId: Map<string, string>
     uuidToSidechainId: Map<string, string>
     orphanMessages: Map<string, NormalizedMessage[]>
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object'
 }
 
 function getMessageUuid(message: NormalizedMessage): string | null {
@@ -124,4 +121,3 @@ export function traceMessages(messages: NormalizedMessage[]): TracedMessage[] {
 
     return results
 }
-

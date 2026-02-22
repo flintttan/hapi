@@ -1,7 +1,9 @@
 import type { ReactNode } from 'react'
 import type { SessionMetadataSummary } from '@/types/api'
+import { isObject } from '@hapi/protocol'
 import { BulbIcon, ClipboardIcon, EyeIcon, FileDiffIcon, GlobeIcon, PuzzleIcon, QuestionIcon, RocketIcon, SearchIcon, TerminalIcon, WrenchIcon } from '@/components/ToolCard/icons'
 import { basename, resolveDisplayPath } from '@/utils/path'
+import { getInputStringAny, truncate } from '@/lib/toolInputUtils'
 
 const DEFAULT_ICON_CLASS = 'h-3.5 w-3.5'
 // Tool presentation registry for `hapi/web` (aligned with `hapi-app`).
@@ -11,24 +13,6 @@ export type ToolPresentation = {
     title: string
     subtitle: string | null
     minimal: boolean
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object'
-}
-
-function getInputStringAny(input: unknown, keys: string[]): string | null {
-    if (!isObject(input)) return null
-    for (const key of keys) {
-        const value = input[key]
-        if (typeof value === 'string' && value.length > 0) return value
-    }
-    return null
-}
-
-function truncate(text: string, maxLen: number): string {
-    if (text.length <= maxLen) return text
-    return text.slice(0, maxLen - 3) + '...'
 }
 
 function countLines(text: string): number {
@@ -357,6 +341,36 @@ export const knownTools: Record<string, {
                 return `${count} Questions`
             }
             return header.length > 0 ? header : 'Question'
+        },
+        subtitle: (opts) => {
+            const questions = isObject(opts.input) && Array.isArray(opts.input.questions)
+                ? opts.input.questions : []
+            const count = questions.length
+            const first = questions[0] ?? null
+            const question = isObject(first) && typeof first.question === 'string'
+                ? first.question.trim() : ''
+
+            if (count > 1 && question.length > 0) {
+                return truncate(question, 100) + ` (+${count - 1} more)`
+            }
+            return question.length > 0 ? truncate(question, 120) : null
+        },
+        minimal: true
+    },
+    request_user_input: {
+        icon: () => <QuestionIcon className={DEFAULT_ICON_CLASS} />,
+        title: (opts) => {
+            const questions = isObject(opts.input) && Array.isArray(opts.input.questions)
+                ? opts.input.questions : []
+            const count = questions.length
+            const first = questions[0] ?? null
+            const id = isObject(first) && typeof first.id === 'string'
+                ? first.id.trim() : ''
+
+            if (count > 1) {
+                return `${count} Questions`
+            }
+            return id.length > 0 ? id : 'Question'
         },
         subtitle: (opts) => {
             const questions = isObject(opts.input) && Array.isArray(opts.input.questions)

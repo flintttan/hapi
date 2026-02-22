@@ -43,9 +43,12 @@ export async function spawnWithAbort(options: SpawnWithAbortOptions): Promise<vo
     };
 
     await new Promise<void>((resolve, reject) => {
+        // Note: We intentionally do NOT pass signal to spawn() because Node.js's
+        // built-in abort handling only kills the direct child, not grandchildren.
+        // Instead, we handle abort ourselves using killProcessByChildProcess which
+        // kills the entire process tree to prevent orphan processes.
         const child = spawn(options.command, options.args, {
             stdio,
-            signal: options.signal,
             cwd: options.cwd,
             env: options.env,
             shell: options.shell
@@ -57,6 +60,14 @@ export async function spawnWithAbort(options: SpawnWithAbortOptions): Promise<vo
             if (abortKillTimeout) {
                 return;
             }
+            // First, try graceful termination of entire process tree
+            if (child.exitCode === null && !child.killed) {
+                logDebug(`Abort signal received, killing process tree (pid=${child.pid}) with SIGTERM`);
+                // Note: We don't await here because we're in a sync callback,
+                // but killProcessByChildProcess now waits for processes to die internally
+                void killProcessByChildProcess(child, false);
+            }
+            // Set timeout for forceful kill if graceful doesn't work
             abortKillTimeout = setTimeout(() => {
                 if (child.exitCode === null && !child.killed) {
                     logDebug('Abort timeout reached, sending SIGKILL');

@@ -1,14 +1,11 @@
 import type { ToolViewProps } from '@/components/ToolCard/views/_all'
+import { isObject } from '@hapi/protocol'
 
 type TodoItem = {
     id?: string
     content?: string
     status?: 'pending' | 'in_progress' | 'completed'
     priority?: 'high' | 'medium' | 'low'
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object'
 }
 
 function extractTodos(input: unknown, result: unknown): TodoItem[] {
@@ -63,4 +60,3 @@ export function TodoWriteView(props: ToolViewProps) {
         </div>
     )
 }
-

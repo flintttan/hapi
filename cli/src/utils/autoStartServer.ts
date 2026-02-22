@@ -1,10 +1,10 @@
 /**
- * Auto-start server module
+ * Auto-start hub module
  *
- * Automatically starts the HAPI server when CLI is launched
+ * Automatically starts the HAPI hub when CLI is launched
  * if specific conditions are met:
- * 1. HAPI_SERVER_URL is not set (using default localhost:3006)
- * 2. cliApiToken exists in settings.json (server was previously started)
+ * 1. HAPI_API_URL is not set (using default localhost:3006)
+ * 2. cliApiToken exists in settings.json (hub was previously started)
  * 3. Port 3006 is not currently listening
  */
 
@@ -52,7 +52,7 @@ async function checkPortListening(port: number, host: string = '127.0.0.1'): Pro
 }
 
 /**
- * Check if server is ready via health endpoint
+ * Check if hub is ready via health endpoint
  */
 async function checkServerHealth(url: string): Promise<boolean> {
     try {
@@ -66,7 +66,7 @@ async function checkServerHealth(url: string): Promise<boolean> {
 }
 
 /**
- * Wait for server to become ready
+ * Wait for hub to become ready
  */
 async function waitForServerReady(
     url: string,
@@ -87,25 +87,25 @@ async function waitForServerReady(
 }
 
 /**
- * Determine if server should be auto-started
+ * Determine if hub should be auto-started
  */
 async function shouldAutoStartServer(): Promise<boolean> {
-    // Condition 1: HAPI_SERVER_URL not set (using default localhost:3006)
-    if (process.env.HAPI_SERVER_URL) {
-        logger.debug('[AUTO-START] HAPI_SERVER_URL is set, skipping auto-start')
+    // Condition 1: HAPI_API_URL not set (using default localhost:3006)
+    if (process.env.HAPI_API_URL) {
+        logger.debug('[AUTO-START] HAPI_API_URL is set, skipping auto-start')
         return false
     }
 
     // Condition 2: Check settings.json
     const settings = await readSettings()
 
-    // 2a: serverUrl is set in settings.json (user configured a specific server)
-    if (settings.serverUrl) {
-        logger.debug('[AUTO-START] serverUrl is set in settings.json, skipping auto-start')
+    // 2a: apiUrl is set in settings.json (user configured a specific hub)
+    if (settings.apiUrl || settings.serverUrl) {
+        logger.debug('[AUTO-START] apiUrl is set in settings.json, skipping auto-start')
         return false
     }
 
-    // 2b: cliApiToken exists in settings.json (server was previously started)
+    // 2b: cliApiToken exists in settings.json (hub was previously started)
     if (!settings.cliApiToken) {
         logger.debug('[AUTO-START] No cliApiToken in settings, skipping auto-start')
         return false
@@ -122,25 +122,25 @@ async function shouldAutoStartServer(): Promise<boolean> {
 }
 
 /**
- * Start server as a child process (will exit when CLI exits)
+ * Start hub as a child process (will exit when CLI exits)
  */
 function startServerAsChild(): void {
-    const serverProcess = spawnHappyCLI(['server'], {
+    const serverProcess = spawnHappyCLI(['hub'], {
         detached: false,
         stdio: 'ignore',
         env: process.env
     })
 
-    logger.debug(`[AUTO-START] Server process spawned with PID ${serverProcess.pid}`)
+    logger.debug(`[AUTO-START] Hub process spawned with PID ${serverProcess.pid}`)
 
-    // Ensure server is killed when CLI exits
+    // Ensure hub is killed when CLI exits
     process.on('exit', () => {
         serverProcess.kill()
     })
 }
 
 /**
- * Main entry point: auto-start server if conditions are met
+ * Main entry point: auto-start hub if conditions are met
  */
 export async function maybeAutoStartServer(): Promise<void> {
     try {
@@ -149,23 +149,23 @@ export async function maybeAutoStartServer(): Promise<void> {
             return
         }
 
-        logger.debug('[AUTO-START] Starting server automatically...')
-        console.log(chalk.gray('Starting HAPI server in background...'))
+        logger.debug('[AUTO-START] Starting hub automatically...')
+        console.log(chalk.gray('Starting HAPI hub in background...'))
 
         startServerAsChild()
 
-        const isReady = await waitForServerReady(configuration.serverUrl)
+        const isReady = await waitForServerReady(configuration.apiUrl)
 
         if (!isReady) {
-            console.log(chalk.yellow('Warning: Server did not start within expected time'))
-            console.log(chalk.gray('  Try running `hapi server` manually to see errors'))
+            console.log(chalk.yellow('Warning: Hub did not start within expected time'))
+            console.log(chalk.gray('  Try running `hapi hub` manually to see errors'))
             return
         }
 
-        console.log(chalk.green('HAPI server started'))
+        console.log(chalk.green('HAPI hub started'))
     } catch (error) {
-        logger.debug('[AUTO-START] Error during server auto-start', error)
-        console.log(chalk.yellow('Warning: Failed to auto-start server'))
+        logger.debug('[AUTO-START] Error during hub auto-start', error)
+        console.log(chalk.yellow('Warning: Failed to auto-start hub'))
         if (error instanceof Error) {
             console.log(chalk.gray(`  Error: ${error.message}`))
         }

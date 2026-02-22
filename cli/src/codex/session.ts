@@ -13,7 +13,7 @@ type LocalLaunchFailure = {
 export class CodexSession extends AgentSessionBase<EnhancedMode> {
     readonly codexArgs?: string[];
     readonly codexCliOverrides?: CodexCliOverrides;
-    readonly startedBy: 'daemon' | 'terminal';
+    readonly startedBy: 'runner' | 'terminal';
     readonly startingMode: 'local' | 'remote';
     localLaunchFailure: LocalLaunchFailure | null = null;
 
@@ -26,7 +26,7 @@ export class CodexSession extends AgentSessionBase<EnhancedMode> {
         messageQueue: MessageQueue2<EnhancedMode>;
         onModeChange: (mode: 'local' | 'remote') => void;
         mode?: 'local' | 'remote';
-        startedBy: 'daemon' | 'terminal';
+        startedBy: 'runner' | 'terminal';
         startingMode: 'local' | 'remote';
         codexArgs?: string[];
         codexCliOverrides?: CodexCliOverrides;

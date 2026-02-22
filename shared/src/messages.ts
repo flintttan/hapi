@@ -1,11 +1,9 @@
+import { isObject } from './utils'
+
 type RoleWrappedRecord = {
     role: string
     content: unknown
     meta?: unknown
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object'
 }
 
 export function isRoleWrappedRecord(value: unknown): value is RoleWrappedRecord {

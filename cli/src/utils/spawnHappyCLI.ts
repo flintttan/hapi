@@ -20,7 +20,7 @@
  *
  * ## Cross-Platform Support
  *
- * This utility handles spawning HAPI CLI subprocesses (for daemon processes)
+ * This utility handles spawning HAPI CLI subprocesses (for runner processes)
  * in a cross-platform way, detecting the current runtime mode and using
  * the appropriate command and arguments.
  */

@@ -26,12 +26,12 @@ export async function handleAuthCommand(args: string[]): Promise<void> {
         const settingsToken = settings.cliApiToken
         const hasToken = Boolean(envToken || settingsToken)
         const tokenSource = envToken ? 'environment' : (settingsToken ? 'settings file' : 'none')
-        console.log(chalk.bold.white('\nDirect Connect Status\n'))
-        console.log(chalk.dim(`  HAPI_SERVER_URL: ${configuration.serverUrl}`))
-        console.log(chalk.dim(`  CLI_API_TOKEN: ${hasToken ? 'set' : 'missing'}`))
-        console.log(chalk.dim(`  Token Source: ${tokenSource}`))
-        console.log(chalk.dim(`  Machine ID: ${settings.machineId ?? 'not set'}`))
-        console.log(chalk.dim(`  Host: ${os.hostname()}`))
+        console.log(chalk.bold('\nDirect Connect Status\n'))
+        console.log(chalk.gray(`  HAPI_API_URL: ${configuration.apiUrl}`))
+        console.log(chalk.gray(`  CLI_API_TOKEN: ${hasToken ? 'set' : 'missing'}`))
+        console.log(chalk.gray(`  Token Source: ${tokenSource}`))
+        console.log(chalk.gray(`  Machine ID: ${settings.machineId ?? 'not set'}`))
+        console.log(chalk.gray(`  Host: ${os.hostname()}`))
 
         if (!hasToken) {
             console.log('')
@@ -101,7 +101,7 @@ export async function handleAuthCommand(args: string[]): Promise<void> {
 async function handleSetup(): Promise<void> {
     if (!process.stdin.isTTY) {
         console.error(chalk.red('Cannot run setup in non-TTY environment.'))
-        console.error(chalk.dim('Set HAPI_SERVER_URL and CLI_API_TOKEN environment variables instead.'))
+        console.error(chalk.dim('Set HAPI_API_URL and CLI_API_TOKEN environment variables instead.'))
         process.exit(1)
     }
 
@@ -114,7 +114,7 @@ async function handleSetup(): Promise<void> {
         // Step 1: Server URL
         console.log(chalk.bold.white('Step 1: Server Configuration'))
         console.log(chalk.dim('Enter your HAPI server URL (e.g., https://hapi.example.com)'))
-        const currentServerUrl = process.env.HAPI_SERVER_URL || configuration.serverUrl
+        const currentServerUrl = process.env.HAPI_API_URL || configuration.apiUrl
         const serverUrl = await rl.question(chalk.cyan(`Server URL [${currentServerUrl}]: `))
         const finalServerUrl = serverUrl.trim() || currentServerUrl
 
@@ -149,8 +149,9 @@ async function handleSetup(): Promise<void> {
         await updateSettings(current => ({
             ...current,
             cliApiToken: token.trim(),
-            serverUrl: finalServerUrl
+            apiUrl: finalServerUrl
         }))
+        configuration._setApiUrl(finalServerUrl)
 
         console.log(chalk.green(`\n✅ Configuration saved to ${configuration.settingsFile}`))
         console.log('')
@@ -162,7 +163,7 @@ async function handleSetup(): Promise<void> {
         console.log('')
         console.log(chalk.dim('You can now run:'))
         console.log(chalk.cyan('  hapi            ') + chalk.dim('- Start a Claude Code session'))
-        console.log(chalk.cyan('  hapi daemon start') + chalk.dim(' - Start background daemon'))
+        console.log(chalk.cyan('  hapi runner start') + chalk.dim(' - Start background runner'))
         console.log(chalk.cyan('  hapi doctor     ') + chalk.dim('- Check connection status'))
         console.log('')
     } finally {
@@ -188,7 +189,7 @@ async function handleAutoLogin(): Promise<void> {
 
     try {
         // Get server URL
-        const currentServerUrl = process.env.HAPI_SERVER_URL || configuration.serverUrl
+        const currentServerUrl = process.env.HAPI_API_URL || configuration.apiUrl
         console.log(chalk.bold.white('Step 1: Server Configuration'))
         const serverUrl = await rl.question(chalk.cyan(`Server URL [${currentServerUrl}]: `))
         const finalServerUrl = (serverUrl.trim() || currentServerUrl).replace(/\/$/, '')
@@ -281,9 +282,10 @@ async function handleAutoLogin(): Promise<void> {
         await updateSettings(current => ({
             ...current,
             cliApiToken: cliToken,
-            serverUrl: finalServerUrl
+            apiUrl: finalServerUrl
         }))
         configuration._setCliApiToken(cliToken)
+        configuration._setApiUrl(finalServerUrl)
 
         console.log(chalk.green(`\n✅ Configuration saved to ${configuration.settingsFile}`))
         console.log('')
@@ -298,7 +300,7 @@ async function handleAutoLogin(): Promise<void> {
         console.log('')
         console.log(chalk.dim('You can now run:'))
         console.log(chalk.cyan('  hapi            ') + chalk.dim('- Start a Claude Code session'))
-        console.log(chalk.cyan('  hapi daemon start') + chalk.dim(' - Start background daemon'))
+        console.log(chalk.cyan('  hapi runner start') + chalk.dim(' - Start background runner'))
         console.log(chalk.cyan('  hapi doctor     ') + chalk.dim('- Check connection status'))
         console.log('')
     } finally {

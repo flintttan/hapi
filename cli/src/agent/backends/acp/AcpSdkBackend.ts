@@ -1,8 +1,9 @@
 import type { AgentBackend, AgentMessage, AgentSessionConfig, PermissionRequest, PermissionResponse, PromptContent } from '@/agent/types';
-import { asString, isObject } from '@/agent/utils';
-import { AcpStdioTransport } from './AcpStdioTransport';
+import { asString, isObject } from '@hapi/protocol';
+import { AcpStdioTransport, type AcpStderrError } from './AcpStdioTransport';
 import { AcpMessageHandler } from './AcpMessageHandler';
 import { logger } from '@/ui/logger';
+import { withRetry } from '@/utils/time';
 import packageJson from '../../../../package.json';
 
 type PendingPermission = {
@@ -12,9 +13,19 @@ type PendingPermission = {
 export class AcpSdkBackend implements AgentBackend {
     private transport: AcpStdioTransport | null = null;
     private permissionHandler: ((request: PermissionRequest) => void) | null = null;
+    private stderrErrorHandler: ((error: AcpStderrError) => void) | null = null;
     private readonly pendingPermissions = new Map<string, PendingPermission>();
     private messageHandler: AcpMessageHandler | null = null;
     private activeSessionId: string | null = null;
+    private isProcessingMessage = false;
+    private responseCompleteResolvers: Array<() => void> = [];
+
+    /** Retry configuration for ACP initialization */
+    private static readonly INIT_RETRY_OPTIONS = {
+        maxAttempts: 3,
+        minDelay: 1000,
+        maxDelay: 5000
+    };
 
     constructor(private readonly options: { command: string; args?: string[]; env?: Record<string, string> }) {}
 
@@ -33,21 +44,33 @@ export class AcpSdkBackend implements AgentBackend {
             }
         });
 
+        this.transport.onStderrError((error) => {
+            this.stderrErrorHandler?.(error);
+        });
+
         this.transport.registerRequestHandler('session/request_permission', async (params, requestId) => {
             return await this.handlePermissionRequest(params, requestId);
         });
 
-        const response = await this.transport.sendRequest('initialize', {
-            protocolVersion: 1,
-            clientCapabilities: {
-                fs: { readTextFile: false, writeTextFile: false },
-                terminal: false
-            },
-            clientInfo: {
-                name: 'hapi',
-                version: packageJson.version
+        const response = await withRetry(
+            () => this.transport!.sendRequest('initialize', {
+                protocolVersion: 1,
+                clientCapabilities: {
+                    fs: { readTextFile: false, writeTextFile: false },
+                    terminal: false
+                },
+                clientInfo: {
+                    name: 'hapi',
+                    version: packageJson.version
+                }
+            }),
+            {
+                ...AcpSdkBackend.INIT_RETRY_OPTIONS,
+                onRetry: (error, attempt, nextDelayMs) => {
+                    logger.debug(`[ACP] Initialize attempt ${attempt} failed, retrying in ${nextDelayMs}ms`, error);
+                }
             }
-        });
+        );
 
         if (!isObject(response) || typeof response.protocolVersion !== 'number') {
             throw new Error('Invalid initialize response from ACP agent');
@@ -61,16 +84,49 @@ export class AcpSdkBackend implements AgentBackend {
             throw new Error('ACP transport not initialized');
         }
 
-        const response = await this.transport.sendRequest('session/new', {
-            cwd: config.cwd,
-            mcpServers: config.mcpServers
-        });
+        const response = await withRetry(
+            () => this.transport!.sendRequest('session/new', {
+                cwd: config.cwd,
+                mcpServers: config.mcpServers
+            }),
+            {
+                ...AcpSdkBackend.INIT_RETRY_OPTIONS,
+                onRetry: (error, attempt, nextDelayMs) => {
+                    logger.debug(`[ACP] session/new attempt ${attempt} failed, retrying in ${nextDelayMs}ms`, error);
+                }
+            }
+        );
 
         const sessionId = isObject(response) ? asString(response.sessionId) : null;
         if (!sessionId) {
             throw new Error('Invalid session/new response from ACP agent');
         }
 
+        this.activeSessionId = sessionId;
+        return sessionId;
+    }
+
+    async loadSession(config: AgentSessionConfig & { sessionId: string }): Promise<string> {
+        if (!this.transport) {
+            throw new Error('ACP transport not initialized');
+        }
+
+        const response = await withRetry(
+            () => this.transport!.sendRequest('session/load', {
+                sessionId: config.sessionId,
+                cwd: config.cwd,
+                mcpServers: config.mcpServers
+            }),
+            {
+                ...AcpSdkBackend.INIT_RETRY_OPTIONS,
+                onRetry: (error, attempt, nextDelayMs) => {
+                    logger.debug(`[ACP] session/load attempt ${attempt} failed, retrying in ${nextDelayMs}ms`, error);
+                }
+            }
+        );
+
+        const loadedSessionId = isObject(response) ? asString(response.sessionId) : null;
+        const sessionId = loadedSessionId ?? config.sessionId;
         this.activeSessionId = sessionId;
         return sessionId;
     }
@@ -86,19 +142,26 @@ export class AcpSdkBackend implements AgentBackend {
 
         this.activeSessionId = sessionId;
         this.messageHandler = new AcpMessageHandler(onUpdate);
+        this.isProcessingMessage = true;
 
         try {
+            // No timeout for prompt requests - they can run for extended periods
+            // during complex tasks, tool-heavy operations, or slow model responses
             const response = await this.transport.sendRequest('session/prompt', {
                 sessionId,
                 prompt: content
-            });
+            }, { timeoutMs: Infinity });
 
             const stopReason = isObject(response) ? asString(response.stopReason) : null;
             if (stopReason) {
+                this.messageHandler?.flushText();
                 onUpdate({ type: 'turn_complete', stopReason });
             }
         } finally {
+            this.messageHandler?.flushText();
             this.messageHandler = null;
+            this.isProcessingMessage = false;
+            this.notifyResponseComplete();
         }
     }
 
@@ -138,6 +201,33 @@ export class AcpSdkBackend implements AgentBackend {
 
     onPermissionRequest(handler: (request: PermissionRequest) => void): void {
         this.permissionHandler = handler;
+    }
+
+    onStderrError(handler: (error: AcpStderrError) => void): void {
+        this.stderrErrorHandler = handler;
+    }
+
+    /**
+     * Returns true if currently processing a message (prompt in progress).
+     * Useful for checking if it's safe to perform session operations.
+     */
+    get processingMessage(): boolean {
+        return this.isProcessingMessage;
+    }
+
+    /**
+     * Wait for any in-progress response to complete.
+     * Resolves immediately if no response is being processed.
+     * Use this before performing operations that require the response to be complete,
+     * like session swap or sending task_complete.
+     */
+    async waitForResponseComplete(): Promise<void> {
+        if (!this.isProcessingMessage) {
+            return;
+        }
+        return new Promise<void>((resolve) => {
+            this.responseCompleteResolvers.push(resolve);
+        });
     }
 
     async disconnect(): Promise<void> {
@@ -200,5 +290,13 @@ export class AcpSdkBackend implements AgentBackend {
         return await new Promise((resolve) => {
             this.pendingPermissions.set(toolCallId, { resolve });
         });
+    }
+
+    private notifyResponseComplete(): void {
+        const resolvers = this.responseCompleteResolvers;
+        this.responseCompleteResolvers = [];
+        for (const resolve of resolvers) {
+            resolve();
+        }
     }
 }

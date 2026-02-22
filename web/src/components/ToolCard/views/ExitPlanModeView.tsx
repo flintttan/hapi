@@ -1,9 +1,6 @@
 import type { ToolViewProps } from '@/components/ToolCard/views/_all'
+import { isObject } from '@hapi/protocol'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object'
-}
 
 export function ExitPlanModeView(props: ToolViewProps) {
     const input = props.block.tool.input
@@ -12,4 +9,3 @@ export function ExitPlanModeView(props: ToolViewProps) {
     if (!plan) return null
     return <MarkdownRenderer content={plan} />
 }
-

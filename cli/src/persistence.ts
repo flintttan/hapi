@@ -1,7 +1,7 @@
 /**
  * Minimal persistence functions for HAPI CLI
  * 
- * Handles settings, encryption key, and daemon state storage in ~/.hapi/ (or HAPI_HOME override)
+ * Handles settings, encryption key, and runner state storage in ~/.hapi/ (or HAPI_HOME override)
  */
 
 import { FileHandle } from 'node:fs/promises'
@@ -15,26 +15,28 @@ interface Settings {
   // All machine operations use this ID
   machineId?: string
   machineIdConfirmedByServer?: boolean
-  daemonAutoStartWhenRunningHappy?: boolean
+  runnerAutoStartWhenRunningHappy?: boolean
   cliApiToken?: string
-  // Server URL for API connections (priority: env HAPI_SERVER_URL > this > default)
+  // API URL for server connections (priority: env HAPI_API_URL > this > default)
+  apiUrl?: string
+  // Legacy field name (for migration, read-only)
   serverUrl?: string
 }
 
 const defaultSettings: Settings = {}
 
 /**
- * Daemon state persisted locally (different from API DaemonState)
- * This is written to disk by the daemon to track its local process state
+ * Runner state persisted locally (different from API RunnerState)
+ * This is written to disk by the runner to track its local process state
  */
-export interface DaemonLocallyPersistedState {
+export interface RunnerLocallyPersistedState {
   pid: number;
   httpPort: number;
   startTime: string;
   startedWithCliVersion: string;
   startedWithCliMtimeMs?: number;
   lastHeartbeat?: string;
-  daemonLogPath?: string;
+  runnerLogPath?: string;
 }
 
 export async function readSettings(): Promise<Settings> {
@@ -156,59 +158,59 @@ export async function clearMachineId(): Promise<void> {
 }
 
 /**
- * Read daemon state from local file
+ * Read runner state from local file
  */
-export async function readDaemonState(): Promise<DaemonLocallyPersistedState | null> {
+export async function readRunnerState(): Promise<RunnerLocallyPersistedState | null> {
   try {
-    if (!existsSync(configuration.daemonStateFile)) {
+    if (!existsSync(configuration.runnerStateFile)) {
       return null;
     }
-    const content = await readFile(configuration.daemonStateFile, 'utf-8');
-    return JSON.parse(content) as DaemonLocallyPersistedState;
+    const content = await readFile(configuration.runnerStateFile, 'utf-8');
+    return JSON.parse(content) as RunnerLocallyPersistedState;
   } catch (error) {
     // State corrupted somehow :(
-    console.error(`[PERSISTENCE] Daemon state file corrupted: ${configuration.daemonStateFile}`, error);
+    console.error(`[PERSISTENCE] Runner state file corrupted: ${configuration.runnerStateFile}`, error);
     return null;
   }
 }
 
 /**
- * Write daemon state to local file (synchronously for atomic operation)
+ * Write runner state to local file (synchronously for atomic operation)
  */
-export function writeDaemonState(state: DaemonLocallyPersistedState): void {
-  writeFileSync(configuration.daemonStateFile, JSON.stringify(state, null, 2), 'utf-8');
+export function writeRunnerState(state: RunnerLocallyPersistedState): void {
+  writeFileSync(configuration.runnerStateFile, JSON.stringify(state, null, 2), 'utf-8');
 }
 
 /**
- * Clean up daemon state file and lock file
+ * Clean up runner state file and lock file
  */
-export async function clearDaemonState(): Promise<void> {
-  if (existsSync(configuration.daemonStateFile)) {
-    await unlink(configuration.daemonStateFile);
+export async function clearRunnerState(): Promise<void> {
+  if (existsSync(configuration.runnerStateFile)) {
+    await unlink(configuration.runnerStateFile);
   }
   // Also clean up lock file if it exists (for stale cleanup)
-  if (existsSync(configuration.daemonLockFile)) {
+  if (existsSync(configuration.runnerLockFile)) {
     try {
-      await unlink(configuration.daemonLockFile);
+      await unlink(configuration.runnerLockFile);
     } catch {
-      // Lock file might be held by running daemon, ignore error
+      // Lock file might be held by running runner, ignore error
     }
   }
 }
 
 /**
- * Acquire an exclusive lock file for the daemon.
- * The lock file proves the daemon is running and prevents multiple instances.
- * Returns the file handle to hold for the daemon's lifetime, or null if locked.
+ * Acquire an exclusive lock file for the runner.
+ * The lock file proves the runner is running and prevents multiple instances.
+ * Returns the file handle to hold for the runner's lifetime, or null if locked.
  */
-export async function acquireDaemonLock(
+export async function acquireRunnerLock(
   maxAttempts: number = 5,
   delayIncrementMs: number = 200
 ): Promise<FileHandle | null> {
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
       // 'wx' ensures we only create if it doesn't exist (atomic lock acquisition)
-      const fileHandle = await open(configuration.daemonLockFile, 'wx');
+      const fileHandle = await open(configuration.runnerLockFile, 'wx');
       // Write PID to lock file for debugging
       await fileHandle.writeFile(String(process.pid));
       return fileHandle;
@@ -216,11 +218,11 @@ export async function acquireDaemonLock(
       if (error.code === 'EEXIST') {
         // Lock file exists, check if process is still running
         try {
-          const lockPid = readFileSync(configuration.daemonLockFile, 'utf-8').trim();
+          const lockPid = readFileSync(configuration.runnerLockFile, 'utf-8').trim();
           if (lockPid && !isNaN(Number(lockPid))) {
             if (!isProcessAlive(Number(lockPid))) {
               // Process doesn't exist, remove stale lock
-              unlinkSync(configuration.daemonLockFile);
+              unlinkSync(configuration.runnerLockFile);
               continue; // Retry acquisition
             }
           }
@@ -240,16 +242,16 @@ export async function acquireDaemonLock(
 }
 
 /**
- * Release daemon lock by closing handle and deleting lock file
+ * Release runner lock by closing handle and deleting lock file
  */
-export async function releaseDaemonLock(lockHandle: FileHandle): Promise<void> {
+export async function releaseRunnerLock(lockHandle: FileHandle): Promise<void> {
   try {
     await lockHandle.close();
   } catch { }
 
   try {
-    if (existsSync(configuration.daemonLockFile)) {
-      unlinkSync(configuration.daemonLockFile);
+    if (existsSync(configuration.runnerLockFile)) {
+      unlinkSync(configuration.runnerLockFile);
     }
   } catch { }
 }

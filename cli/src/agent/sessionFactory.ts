@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 import { ApiClient } from '@/api/api'
 import type { ApiSessionClient } from '@/api/apiSession'
 import type { AgentState, MachineMetadata, Metadata, Session } from '@/api/types'
-import { notifyDaemonSessionStarted } from '@/daemon/controlClient'
+import { notifyRunnerSessionStarted } from '@/runner/controlClient'
 import { readSettings } from '@/persistence'
 import { configuration } from '@/configuration'
 import { logger } from '@/ui/logger'
@@ -13,7 +13,7 @@ import { runtimePath } from '@/projectPath'
 import { readWorktreeEnv } from '@/utils/worktreeEnv'
 import packageJson from '../../package.json'
 
-export type SessionStartedBy = 'daemon' | 'terminal'
+export type SessionStartedBy = 'runner' | 'terminal'
 
 export type SessionBootstrapOptions = {
     flavor: string
@@ -35,7 +35,7 @@ export type SessionBootstrapResult = {
 
 export function buildMachineMetadata(): MachineMetadata {
     return {
-        host: os.hostname(),
+        host: process.env.HAPI_HOSTNAME || os.hostname(),
         platform: os.platform(),
         happyCliVersion: packageJson.version,
         homeDir: os.homedir(),
@@ -65,7 +65,7 @@ export function buildSessionMetadata(options: {
         happyHomeDir: configuration.happyHomeDir,
         happyLibDir,
         happyToolsDir: resolve(happyLibDir, 'tools', 'unpacked'),
-        startedFromDaemon: options.startedBy === 'daemon',
+        startedFromRunner: options.startedBy === 'runner',
         hostPid: process.pid,
         startedBy: options.startedBy,
         lifecycleState: 'running',
@@ -88,15 +88,15 @@ async function getMachineIdOrExit(): Promise<string> {
 
 async function reportSessionStarted(sessionId: string, metadata: Metadata): Promise<void> {
     try {
-        logger.debug(`[START] Reporting session ${sessionId} to daemon`)
-        const result = await notifyDaemonSessionStarted(sessionId, metadata)
+        logger.debug(`[START] Reporting session ${sessionId} to runner`)
+        const result = await notifyRunnerSessionStarted(sessionId, metadata)
         if (result?.error) {
-            logger.debug(`[START] Failed to report to daemon (may not be running):`, result.error)
+            logger.debug(`[START] Failed to report to runner (may not be running):`, result.error)
         } else {
-            logger.debug(`[START] Reported session ${sessionId} to daemon`)
+            logger.debug(`[START] Reported session ${sessionId} to runner`)
         }
     } catch (error) {
-        logger.debug('[START] Failed to report to daemon (may not be running):', error)
+        logger.debug('[START] Failed to report to runner (may not be running):', error)
     }
 }
 

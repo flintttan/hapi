@@ -1,4 +1,5 @@
 import type { AgentState } from "@/api/types";
+import type { PermissionMode } from "@hapi/protocol/types";
 
 type RpcHandlerManagerLike = {
     registerHandler<TRequest = unknown, TResponse = unknown>(
@@ -6,6 +7,26 @@ type RpcHandlerManagerLike = {
         handler: (params: TRequest) => Promise<TResponse> | TResponse
     ): void;
 };
+
+export type AutoApprovalDecision = 'approved' | 'approved_for_session';
+
+type AutoApprovalRuleSet = {
+    alwaysToolNameHints?: string[];
+    alwaysToolIdHints?: string[];
+    writeToolNameHints?: string[];
+};
+
+const AUTO_APPROVE_TOOL_NAME_HINTS = [
+    'change_title',
+    'happy__change_title',
+    'hapi_change_title',  // OpenCode MCP tool pattern
+    'geminireasoning',
+    'codexreasoning',
+    'think',
+    'save_memory'
+];
+const AUTO_APPROVE_TOOL_ID_HINTS = ['change_title', 'save_memory'];
+const AUTO_APPROVE_WRITE_TOOL_HINTS = ['write', 'edit', 'create', 'delete', 'patch', 'fs-edit'];
 
 export type PermissionHandlerClient = {
     rpcHandlerManager: RpcHandlerManagerLike;
@@ -25,12 +46,13 @@ export type PermissionCompletion = {
     mode?: string;
     decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort';
     allowTools?: string[];
-    answers?: Record<string, string[]>;
+    answers?: Record<string, string[]> | Record<string, { answers: string[] }>;
 };
 
 export type CancelPendingRequestOptions = {
     completedReason: string;
     rejectMessage: string;
+    decision?: PermissionCompletion['decision'];
 };
 
 export abstract class BasePermissionHandler<TResponse extends { id: string }, TResult> {
@@ -45,7 +67,7 @@ export abstract class BasePermissionHandler<TResponse extends { id: string }, TR
     protected abstract handlePermissionResponse(
         response: TResponse,
         pending: PendingPermissionRequest<TResult>
-    ): PermissionCompletion;
+    ): Promise<PermissionCompletion>;
 
     protected abstract handleMissingPendingResponse(response: TResponse): void;
 
@@ -53,6 +75,46 @@ export abstract class BasePermissionHandler<TResponse extends { id: string }, TR
     }
 
     protected onResponseReceived(_response: TResponse): void {
+    }
+
+    protected resolveAutoApprovalDecision(
+        mode: PermissionMode | undefined,
+        toolName: string,
+        toolCallId: string,
+        ruleOverrides?: AutoApprovalRuleSet
+    ): AutoApprovalDecision | null {
+        const rules = {
+            alwaysToolNameHints: ruleOverrides?.alwaysToolNameHints ?? AUTO_APPROVE_TOOL_NAME_HINTS,
+            alwaysToolIdHints: ruleOverrides?.alwaysToolIdHints ?? AUTO_APPROVE_TOOL_ID_HINTS,
+            writeToolNameHints: ruleOverrides?.writeToolNameHints ?? AUTO_APPROVE_WRITE_TOOL_HINTS
+        };
+
+        const lowerTool = toolName.toLowerCase();
+        const lowerId = toolCallId.toLowerCase();
+        const decisionForMode: AutoApprovalDecision = mode === 'yolo' ? 'approved_for_session' : 'approved';
+
+        if (rules.alwaysToolNameHints.some((name) => lowerTool.includes(name))) {
+            return decisionForMode;
+        }
+
+        if (rules.alwaysToolIdHints.some((name) => lowerId.includes(name))) {
+            return decisionForMode;
+        }
+
+        if (mode === 'yolo') {
+            return 'approved_for_session';
+        }
+
+        if (mode === 'safe-yolo') {
+            return 'approved';
+        }
+
+        if (mode === 'read-only') {
+            const isWriteTool = rules.writeToolNameHints.some((name) => lowerTool.includes(name));
+            return isWriteTool ? null : 'approved';
+        }
+
+        return null;
     }
 
     protected addPendingRequest(
@@ -119,7 +181,8 @@ export abstract class BasePermissionHandler<TResponse extends { id: string }, TR
                     ...request,
                     completedAt: Date.now(),
                     status: 'canceled',
-                    reason: options.completedReason
+                    reason: options.completedReason,
+                    decision: options.decision
                 };
             }
 
@@ -143,7 +206,7 @@ export abstract class BasePermissionHandler<TResponse extends { id: string }, TR
             this.onResponseReceived(response);
             this.pendingRequests.delete(response.id);
 
-            const completion = this.handlePermissionResponse(response, pending);
+            const completion = await this.handlePermissionResponse(response, pending);
             this.finalizeRequest(response.id, completion);
         });
     }

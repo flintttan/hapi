@@ -3,9 +3,9 @@ import type {
     TerminalErrorPayload,
     TerminalExitPayload,
     TerminalOutputPayload,
-    TerminalReadyPayload,
-    TerminalSession
-} from './types'
+    TerminalReadyPayload
+} from '@hapi/protocol'
+import type { TerminalSession } from './types'
 
 type TerminalRuntime = TerminalSession & {
     proc: Bun.Subprocess
@@ -28,7 +28,7 @@ const DEFAULT_IDLE_TIMEOUT_MS = 15 * 60_000
 const DEFAULT_MAX_TERMINALS = 4
 const SENSITIVE_ENV_KEYS = new Set([
     'CLI_API_TOKEN',
-    'HAPI_SERVER_URL',
+    'HAPI_API_URL',
     'HAPI_HTTP_MCP_URL',
     'TELEGRAM_BOT_TOKEN',
     'OPENAI_API_KEY',

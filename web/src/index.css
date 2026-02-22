@@ -42,6 +42,8 @@
     --app-badge-error-bg: rgba(239, 68, 68, 0.18);
     --app-badge-error-text: #b91c1c;
     --app-badge-error-border: rgba(239, 68, 68, 0.3);
+
+    --app-font-scale: 1;
 }
 
 [data-theme="dark"] {
@@ -87,6 +89,10 @@
     --app-badge-error-border: rgba(248, 113, 113, 0.35);
 }
 
+html {
+    font-size: calc(100% * var(--app-font-scale, 1));
+}
+
 html,
 body {
     height: 100vh;
@@ -99,6 +105,7 @@ body {
 }
 
 body {
+    font-size: 1rem;
     background: var(--app-bg);
     color: var(--app-fg);
 }
@@ -139,6 +146,17 @@ body {
     }
 }
 
+/* Desktop-only: move the sidebar scrollbar to the left without flipping content. */
+@media (min-width: 1024px) {
+    .desktop-scrollbar-left {
+        direction: rtl;
+    }
+
+    .desktop-scrollbar-left > * {
+        direction: ltr;
+    }
+}
+
 /* Markdown styles */
 .markdown-content a { color: var(--app-link); text-decoration: underline; }
 .markdown-content code { background: var(--app-inline-code-bg); padding: 0.1em 0.3em; border-radius: 4px; font-size: 0.9em; }
@@ -151,7 +169,7 @@ body {
     margin: 0;
     padding: 0.5rem;
     background-color: transparent !important;
-    font-size: 0.75rem;
+    font-size: 0.875rem;
 }
 
 .aui-md-codeblock pre.shiki code {
@@ -270,4 +288,10 @@ html[data-theme="dark"] .shiki span {
 
 .animate-bounce-in {
   animation: bounce-in 0.3s ease-out;
+}
+
+/* ReactQueryDevtools button - move to middle-right to avoid blocking UI */
+.tsqd-open-btn-container {
+  bottom: 50% !important;
+  transform: translateY(50%);
 }

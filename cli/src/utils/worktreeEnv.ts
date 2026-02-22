@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { realpathSync, statSync } from 'node:fs';
 import { basename, dirname, isAbsolute, resolve } from 'node:path';
 
-import type { WorktreeInfo } from '@/daemon/worktree';
+import type { WorktreeInfo } from '@/runner/worktree';
 import { logger } from '@/ui/logger';
 
 export function readWorktreeEnv(): WorktreeInfo | null {

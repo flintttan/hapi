@@ -26,7 +26,7 @@ interface LoopOptions {
     model?: string
     permissionMode?: PermissionMode
     startingMode?: 'local' | 'remote'
-    startedBy?: 'daemon' | 'terminal'
+    startedBy?: 'runner' | 'terminal'
     onModeChange: (mode: 'local' | 'remote') => void
     mcpServers: Record<string, any>
     session: ApiSessionClient

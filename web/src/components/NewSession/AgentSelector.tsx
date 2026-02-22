@@ -14,7 +14,7 @@ export function AgentSelector(props: {
                 {t('newSession.agent')}
             </label>
             <div className="flex gap-3">
-                {(['claude', 'codex', 'gemini'] as const).map((agentType) => (
+                {(['claude', 'codex', 'gemini', 'opencode'] as const).map((agentType) => (
                     <label
                         key={agentType}
                         className="flex items-center gap-1.5 cursor-pointer"

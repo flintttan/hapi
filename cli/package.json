@@ -33,6 +33,7 @@
     "@flintttan/hapi-win32-x64": "0.5.39"
   },
   "scripts": {
+    "postinstall": "node -e \"try{require('fs').chmodSync(require('path').join(__dirname,'bin','hapi.cjs'),0o755)}catch(e){}\"",
     "typecheck": "tsc --noEmit",
     "build:exe": "bun run scripts/build-executable.ts",
     "build:exe:all": "bun run scripts/build-executable.ts --all",

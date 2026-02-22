@@ -177,8 +177,8 @@ export function getTunwgPath(): string {
         return join(runtimePath(), 'tools', 'tunwg', tunwgBinary);
     }
 
-    // Development mode: use downloaded binary from server/tools/tunwg
+    // Development mode: use downloaded binary from hub/tools/tunwg
     const platformDir = getPlatformDir();
     const devBinaryName = isWin ? `tunwg-${platformDir}.exe` : `tunwg-${platformDir}`;
-    return join(__dirname, '..', '..', '..', 'server', 'tools', 'tunwg', devBinaryName);
+    return join(__dirname, '..', '..', '..', 'hub', 'tools', 'tunwg', devBinaryName);
 }

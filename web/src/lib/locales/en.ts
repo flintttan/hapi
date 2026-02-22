@@ -25,14 +25,15 @@ export default {
   'login.help': 'Needs help?',
   'login.server.default': '(Default)',
   'login.server.custom': '(Custom)',
-  'login.server.title': 'Server URL',
-  'login.server.description': 'Set hapi server origin for API and live updates.',
+  'login.server.title': 'Hub URL',
+  'login.server.description': 'Set hapi hub origin for API and live updates.',
   'login.server.current': 'Current:',
-  'login.server.origin': 'Server origin',
+  'login.server.origin': 'Hub origin',
   'login.server.placeholder': 'https://hapi.example.com',
   'login.server.hint': 'Use http(s) only. Any path is ignored.',
+  'login.server.required': 'Hub URL required. Please set it before signing in.',
   'login.server.useSameOrigin': 'Use same origin',
-  'login.server.save': 'Save server',
+  'login.server.save': 'Save hub',
   'login.footer': 'Designed with',
   'login.footer.for': 'for Vibe Coding',
   'login.footer.copyright': '©',
@@ -87,6 +88,7 @@ export default {
   'button.close': 'Close',
   'button.dismiss': 'Dismiss',
   'button.copy': 'Copy',
+  'button.paste': 'Paste',
 
   // New session form
   'newSession.machine': 'Machine',
@@ -100,6 +102,8 @@ export default {
   'newSession.type.worktree.desc': 'Create a new worktree next to repo',
   'newSession.type.worktree.placeholder': 'feature-x (default 1228-xxxx)',
   'newSession.agent': 'Agent',
+  'newSession.model': 'Model',
+  'newSession.model.optional': 'optional',
   'newSession.yolo': 'YOLO mode',
   'newSession.yolo.title': 'Bypass approvals and sandbox',
   'newSession.yolo.desc': 'Uses dangerous agent flags when spawning.',
@@ -133,6 +137,9 @@ export default {
   'terminal.commandArgs': 'Command args',
   'terminal.stdout': 'Stdout',
   'terminal.stderr': 'Stderr',
+  'terminal.paste.fallbackTitle': 'Paste input',
+  'terminal.paste.fallbackDescription': 'Clipboard read is unavailable. Paste your text below.',
+  'terminal.paste.placeholder': 'Paste terminal input here…',
 
   // Code block
   'code.copy': 'Copy',
@@ -182,19 +189,46 @@ export default {
   'tool.askUserQuestion.fallback': 'AskUserQuestion payload is not in the expected format. Type your answer:',
   'tool.askUserQuestion.placeholder': 'Type your answer…',
   'tool.askUserQuestion.otherPlaceholder': 'Or type your own answer…',
+  'tool.requestUserInput.textPlaceholder': 'Type your answer…',
+  'tool.requestUserInput.noteLabel': 'Additional note (optional)',
+  'tool.requestUserInput.notePlaceholder': 'Add a note…',
 
   // Composer buttons
   'composer.settings': 'Settings',
   'composer.terminal': 'Terminal',
   'composer.abort': 'Abort',
   'composer.switchRemote': 'Switch to remote mode',
+  'composer.attach': 'Attach file',
   'composer.send': 'Send',
+  'composer.stop': 'Stop',
+  'composer.voice': 'Voice assistant',
+
+  // Voice assistant
+  'voice.connecting': 'Connecting...',
+  'voice.active': 'Active',
+  'voice.muted': 'Muted',
+  'voice.error': 'Error',
+  'voice.mute': 'Mute',
+  'voice.unmute': 'Unmute',
+  'voice.end': 'End',
+  'voice.error.micPermission': 'Microphone permission denied',
+  'voice.error.network': 'Network error',
+  'voice.error.notInitialized': 'Voice session not initialized',
+  'voice.error.startFailed': 'Failed to start voice session',
+  'voice.error.notAllowed': 'Voice not allowed',
+  'voice.error.connection': 'Connection error',
+  'voice.dismiss': 'Dismiss',
 
   // Banners
   'offline.title': 'Offline',
   'offline.message': 'You are currently offline. Some features may be limited.',
   'syncing.title': 'Syncing…',
   'syncing.message': 'Your data is being synchronized.',
+  'reconnecting.message': 'Reconnecting...',
+
+  // Send blocked
+  'send.blocked.title': 'Cannot send message',
+  'send.blocked.noConnection': 'Not connected to server',
 
   // Install prompt
   'install.title': 'Install HAPI',
@@ -205,6 +239,20 @@ export default {
   'language.title': 'Language',
   'language.english': 'English',
   'language.chinese': '简体中文',
+
+  // Settings page
+  'settings.title': 'Settings',
+  'settings.language.title': 'Language',
+  'settings.language.label': 'Language',
+  'settings.display.title': 'Display',
+  'settings.display.fontSize': 'Font Size',
+  'settings.voice.title': 'Voice Assistant',
+  'settings.voice.language': 'Voice Language',
+  'settings.voice.autoDetect': 'Auto-detect',
+  'settings.about.title': 'About',
+  'settings.about.website': 'Website',
+  'settings.about.appVersion': 'App Version',
+  'settings.about.protocolVersion': 'Protocol Version',
 
   // Misc
   'misc.noMachines': 'No machines available',

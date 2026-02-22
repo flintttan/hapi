@@ -4,6 +4,7 @@ import type { ApiClient } from '@/api/client'
 import type { ModelMode, PermissionMode } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 import { clearMessageWindow } from '@/lib/message-window-store'
+import { isKnownFlavor } from '@/lib/agentFlavorUtils'
 
 export function useSessionActions(
     api: ApiClient | null,
@@ -62,8 +63,7 @@ export function useSessionActions(
             if (!api || !sessionId) {
                 throw new Error('Session unavailable')
             }
-            const isKnownFlavor = agentFlavor === 'claude' || agentFlavor === 'codex' || agentFlavor === 'gemini'
-            if (isKnownFlavor && !isPermissionModeAllowedForFlavor(mode, agentFlavor)) {
+            if (isKnownFlavor(agentFlavor) && !isPermissionModeAllowedForFlavor(mode, agentFlavor)) {
                 throw new Error('Invalid permission mode for session flavor')
             }
             await api.setPermissionMode(sessionId, mode)

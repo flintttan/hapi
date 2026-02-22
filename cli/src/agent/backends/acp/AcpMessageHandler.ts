@@ -1,5 +1,6 @@
 import type { AgentMessage, PlanItem } from '@/agent/types';
-import { asString, deriveToolName, isObject } from '@/agent/utils';
+import { asString, isObject } from '@hapi/protocol';
+import { deriveToolName } from '@/agent/utils';
 import { ACP_SESSION_UPDATE_TYPES } from './constants';
 
 function normalizeStatus(status: unknown): 'pending' | 'in_progress' | 'completed' | 'failed' {
@@ -46,8 +47,38 @@ function normalizePlanEntries(entries: unknown): PlanItem[] {
 
 export class AcpMessageHandler {
     private readonly toolCalls = new Map<string, { name: string; input: unknown }>();
+    private bufferedText = '';
 
     constructor(private readonly onMessage: (message: AgentMessage) => void) {}
+
+    flushText(): void {
+        if (!this.bufferedText) {
+            return;
+        }
+        this.onMessage({ type: 'text', text: this.bufferedText });
+        this.bufferedText = '';
+    }
+
+    private appendTextChunk(text: string): void {
+        if (!text) {
+            return;
+        }
+        if (!this.bufferedText) {
+            this.bufferedText = text;
+            return;
+        }
+        if (text === this.bufferedText) {
+            return;
+        }
+        if (text.startsWith(this.bufferedText)) {
+            this.bufferedText = text;
+            return;
+        }
+        if (this.bufferedText.startsWith(text)) {
+            return;
+        }
+        this.bufferedText += text;
+    }
 
     handleUpdate(update: unknown): void {
         if (!isObject(update)) return;
@@ -58,7 +89,7 @@ export class AcpMessageHandler {
             const content = update.content;
             const text = extractTextContent(content);
             if (text) {
-                this.onMessage({ type: 'text', text });
+                this.appendTextChunk(text);
             }
             return;
         }
@@ -68,16 +99,19 @@ export class AcpMessageHandler {
         }
 
         if (updateType === ACP_SESSION_UPDATE_TYPES.toolCall) {
+            this.flushText();
             this.handleToolCall(update);
             return;
         }
 
         if (updateType === ACP_SESSION_UPDATE_TYPES.toolCallUpdate) {
+            this.flushText();
             this.handleToolCallUpdate(update);
             return;
         }
 
         if (updateType === ACP_SESSION_UPDATE_TYPES.plan) {
+            this.flushText();
             const items = normalizePlanEntries(update.entries);
             if (items.length > 0) {
                 this.onMessage({ type: 'plan', items });

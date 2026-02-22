@@ -81,10 +81,10 @@ export class CodexPermissionHandler extends BasePermissionHandler<PermissionResp
     /**
      * Handle permission responses
      */
-    protected handlePermissionResponse(
+    protected async handlePermissionResponse(
         response: PermissionResponse,
         pending: PendingPermissionRequest<PermissionResult>
-    ): PermissionCompletion {
+    ): Promise<PermissionCompletion> {
         const reason = typeof response.reason === 'string' ? response.reason : undefined;
         const result: PermissionResult = response.approved
             ? {

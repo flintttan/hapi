@@ -1,10 +1,4 @@
-export function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object';
-}
-
-export function asString(value: unknown): string | null {
-    return typeof value === 'string' ? value : null;
-}
+import { isObject } from '@hapi/protocol';
 
 export function deriveToolName(input: {
     title?: string | null;

@@ -15,7 +15,7 @@ export const WorktreeMetadataSchema = z.object({
     name: z.string(),
     worktreePath: z.string().optional(),
     createdAt: z.number().optional()
-}).passthrough()
+})
 
 export type WorktreeMetadata = z.infer<typeof WorktreeMetadataSchema>
 
@@ -29,22 +29,24 @@ export const MetadataSchema = z.object({
     machineId: z.string().optional(),
     claudeSessionId: z.string().optional(),
     codexSessionId: z.string().optional(),
+    geminiSessionId: z.string().optional(),
+    opencodeSessionId: z.string().optional(),
     tools: z.array(z.string()).optional(),
     slashCommands: z.array(z.string()).optional(),
     homeDir: z.string().optional(),
     happyHomeDir: z.string().optional(),
     happyLibDir: z.string().optional(),
     happyToolsDir: z.string().optional(),
-    startedFromDaemon: z.boolean().optional(),
+    startedFromRunner: z.boolean().optional(),
     hostPid: z.number().optional(),
-    startedBy: z.enum(['daemon', 'terminal']).optional(),
+    startedBy: z.enum(['runner', 'terminal']).optional(),
     lifecycleState: z.string().optional(),
     lifecycleStateSince: z.number().optional(),
     archivedBy: z.string().optional(),
     archiveReason: z.string().optional(),
     flavor: z.string().nullish(),
     worktree: WorktreeMetadataSchema.optional()
-}).passthrough()
+})
 
 export type Metadata = z.infer<typeof MetadataSchema>
 
@@ -52,7 +54,7 @@ export const AgentStateRequestSchema = z.object({
     tool: z.string(),
     arguments: z.unknown(),
     createdAt: z.number().nullish()
-}).passthrough()
+})
 
 export type AgentStateRequest = z.infer<typeof AgentStateRequestSchema>
 
@@ -66,8 +68,13 @@ export const AgentStateCompletedRequestSchema = z.object({
     mode: z.string().optional(),
     decision: z.enum(['approved', 'approved_for_session', 'denied', 'abort']).optional(),
     allowTools: z.array(z.string()).optional(),
-    answers: z.record(z.string(), z.array(z.string())).optional()
-}).passthrough()
+    // Flat format: Record<string, string[]> (AskUserQuestion)
+    // Nested format: Record<string, { answers: string[] }> (request_user_input)
+    answers: z.union([
+        z.record(z.string(), z.array(z.string())),
+        z.record(z.string(), z.object({ answers: z.array(z.string()) }))
+    ]).optional()
+})
 
 export type AgentStateCompletedRequest = z.infer<typeof AgentStateCompletedRequestSchema>
 
@@ -75,7 +82,7 @@ export const AgentStateSchema = z.object({
     controlledByUser: z.boolean().nullish(),
     requests: z.record(z.string(), AgentStateRequestSchema).nullish(),
     completedRequests: z.record(z.string(), AgentStateCompletedRequestSchema).nullish()
-}).passthrough()
+})
 
 export type AgentState = z.infer<typeof AgentStateSchema>
 
@@ -84,11 +91,22 @@ export const TodoItemSchema = z.object({
     status: z.enum(['pending', 'in_progress', 'completed']),
     priority: z.enum(['high', 'medium', 'low']),
     id: z.string()
-}).passthrough()
+})
 
 export type TodoItem = z.infer<typeof TodoItemSchema>
 
 export const TodosSchema = z.array(TodoItemSchema)
+
+export const AttachmentMetadataSchema = z.object({
+    id: z.string(),
+    filename: z.string(),
+    mimeType: z.string(),
+    size: z.number(),
+    path: z.string(),
+    previewUrl: z.string().optional()
+})
+
+export type AttachmentMetadata = z.infer<typeof AttachmentMetadataSchema>
 
 export const DecryptedMessageSchema = z.object({
     id: z.string(),
@@ -96,7 +114,7 @@ export const DecryptedMessageSchema = z.object({
     localId: z.string().nullable(),
     content: z.unknown(),
     createdAt: z.number()
-}).passthrough()
+})
 
 export type DecryptedMessage = z.infer<typeof DecryptedMessageSchema>
 
@@ -117,7 +135,7 @@ export const SessionSchema = z.object({
     todos: TodosSchema.optional(),
     permissionMode: PermissionModeSchema.optional(),
     modelMode: ModelModeSchema.optional()
-}).passthrough()
+})
 
 export type Session = z.infer<typeof SessionSchema>
 

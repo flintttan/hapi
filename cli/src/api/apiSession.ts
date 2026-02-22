@@ -5,32 +5,32 @@ import axios from 'axios'
 import type { ZodType } from 'zod'
 import { logger } from '@/ui/logger'
 import { backoff } from '@/utils/time'
+import { apiValidationError } from '@/utils/errorUtils'
 import { AsyncLock } from '@/utils/lock'
 import type { RawJSONLines } from '@/claude/types'
 import { configuration } from '@/configuration'
-import type {
-    AgentState,
-    ClientToServerEvents,
-    MessageContent,
-    MessageMeta,
-    Metadata,
-    ServerToClientEvents,
-    Session,
-    SessionModelMode,
-    SessionPermissionMode,
-    Update,
-    UserMessage
-} from './types'
-import { AgentStateSchema, CliMessagesResponseSchema, MetadataSchema, UserMessageSchema } from './types'
-import { RpcHandlerManager } from './rpc/RpcHandlerManager'
-import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
-import { TerminalManager } from '@/terminal/TerminalManager'
+import type { ClientToServerEvents, ServerToClientEvents, Update } from '@hapi/protocol'
 import {
     TerminalClosePayloadSchema,
     TerminalOpenPayloadSchema,
     TerminalResizePayloadSchema,
     TerminalWritePayloadSchema
-} from '@/terminal/types'
+} from '@hapi/protocol'
+import type {
+    AgentState,
+    MessageContent,
+    MessageMeta,
+    Metadata,
+    Session,
+    SessionModelMode,
+    SessionPermissionMode,
+    UserMessage
+} from './types'
+import { AgentStateSchema, CliMessagesResponseSchema, MetadataSchema, UserMessageSchema } from './types'
+import { RpcHandlerManager } from './rpc/RpcHandlerManager'
+import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
+import { cleanupUploadDir } from '../modules/common/handlers/uploads'
+import { TerminalManager } from '@/terminal/TerminalManager'
 import { applyVersionedAck } from './versionedUpdate'
 
 export class ApiSessionClient extends EventEmitter {
@@ -70,7 +70,7 @@ export class ApiSessionClient extends EventEmitter {
             registerCommonHandlers(this.rpcHandlerManager, this.metadata.path)
         }
 
-        this.socket = io(`${configuration.serverUrl}/cli`, {
+        this.socket = io(`${configuration.apiUrl}/cli`, {
             auth: {
                 token: this.token,
                 clientType: 'session-scoped' as const,
@@ -269,7 +269,7 @@ export class ApiSessionClient extends EventEmitter {
             let cursor = startSeq
             while (true) {
                 const response = await axios.get(
-                    `${configuration.serverUrl}/cli/sessions/${encodeURIComponent(this.sessionId)}/messages`,
+                    `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(this.sessionId)}/messages`,
                     {
                         params: { afterSeq: cursor, limit },
                         headers: {
@@ -282,7 +282,7 @@ export class ApiSessionClient extends EventEmitter {
 
                 const parsed = CliMessagesResponseSchema.safeParse(response.data)
                 if (!parsed.success) {
-                    throw new Error('Invalid /cli/sessions/:id/messages response')
+                    throw apiValidationError('Invalid /cli/sessions/:id/messages response', response)
                 }
 
                 const messages = parsed.data.messages
@@ -450,6 +450,7 @@ export class ApiSessionClient extends EventEmitter {
     }
 
     sendSessionDeath(): void {
+        void cleanupUploadDir(this.sessionId)
         this.socket.emit('session-end', { sid: this.sessionId, time: Date.now() })
     }
 

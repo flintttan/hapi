@@ -1,20 +1,11 @@
 import { useCallback, useMemo } from 'react'
-import type { AppendMessage, ThreadMessageLike } from '@assistant-ui/react'
+import type { AppendMessage, AttachmentAdapter, ThreadMessageLike } from '@assistant-ui/react'
 import { useExternalMessageConverter, useExternalStoreRuntime } from '@assistant-ui/react'
+import { safeStringify } from '@hapi/protocol'
 import { renderEventLabel } from '@/chat/presentation'
 import type { ChatBlock, CliOutputBlock } from '@/chat/types'
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
-import type { MessageStatus as HappyMessageStatus, Session } from '@/types/api'
-
-function safeStringify(value: unknown): string {
-    if (typeof value === 'string') return value
-    try {
-        const stringified = JSON.stringify(value, null, 2)
-        return typeof stringified === 'string' ? stringified : String(value)
-    } catch {
-        return String(value)
-    }
-}
+import type { AttachmentMetadata, MessageStatus as HappyMessageStatus, Session } from '@/types/api'
 
 export type HappyChatMessageMetadata = {
     kind: 'user' | 'assistant' | 'tool' | 'event' | 'cli-output'
@@ -24,6 +15,7 @@ export type HappyChatMessageMetadata = {
     toolCallId?: string
     event?: AgentEvent
     source?: CliOutputBlock['source']
+    attachments?: AttachmentMetadata[]
 }
 
 function toThreadMessageLike(block: ChatBlock): ThreadMessageLike {
@@ -39,7 +31,8 @@ function toThreadMessageLike(block: ChatBlock): ThreadMessageLike {
                     kind: 'user',
                     status: block.status,
                     localId: block.localId,
-                    originalText: block.originalText
+                    originalText: block.originalText,
+                    attachments: block.attachments
                 } satisfies HappyChatMessageMetadata
             }
         }
@@ -120,25 +113,69 @@ function toThreadMessageLike(block: ChatBlock): ThreadMessageLike {
     }
 }
 
-function getTextFromAppendMessage(message: AppendMessage): string | null {
-    if (message.role !== 'user') return null
+type TextMessagePart = { type: 'text'; text: string }
 
-    const parts = message.content
-    const text = parts
-        .filter((part): part is { type: 'text'; text: string } => part.type === 'text' && typeof part.text === 'string')
+function getTextFromParts(parts: readonly { type: string }[] | undefined): string {
+    if (!parts) return ''
+
+    return parts
+        .filter((part): part is TextMessagePart => part.type === 'text' && typeof (part as TextMessagePart).text === 'string')
         .map((part) => part.text)
         .join('\n')
         .trim()
+}
 
-    return text.length > 0 ? text : null
+type ExtractedAttachmentMetadata = { __attachmentMetadata: AttachmentMetadata }
+
+function isAttachmentMetadataJson(text: string): ExtractedAttachmentMetadata | null {
+    try {
+        const parsed = JSON.parse(text) as unknown
+        if (parsed && typeof parsed === 'object' && '__attachmentMetadata' in parsed) {
+            return parsed as ExtractedAttachmentMetadata
+        }
+        return null
+    } catch {
+        return null
+    }
+}
+
+function extractMessageContent(message: AppendMessage): { text: string; attachments: AttachmentMetadata[] } {
+    if (message.role !== 'user') return { text: '', attachments: [] }
+
+    // Extract attachments from attachment content
+    const attachments: AttachmentMetadata[] = []
+    const otherAttachmentTexts: string[] = []
+
+    const attachmentParts = message.attachments?.flatMap((attachment) => attachment.content ?? []) ?? []
+    for (const part of attachmentParts) {
+        if (part.type === 'text' && typeof (part as TextMessagePart).text === 'string') {
+            const textPart = part as TextMessagePart
+            const extracted = isAttachmentMetadataJson(textPart.text)
+            if (extracted) {
+                attachments.push(extracted.__attachmentMetadata)
+            } else {
+                otherAttachmentTexts.push(textPart.text)
+            }
+        }
+    }
+
+    const contentText = getTextFromParts(message.content)
+    const text = [otherAttachmentTexts.join('\n'), contentText]
+        .filter((value) => value.length > 0)
+        .join('\n\n')
+        .trim()
+
+    return { text, attachments }
 }
 
 export function useHappyRuntime(props: {
     session: Session
     blocks: readonly ChatBlock[]
     isSending: boolean
-    onSendMessage: (text: string) => void
+    onSendMessage: (text: string, attachments?: AttachmentMetadata[]) => void
     onAbort: () => Promise<void>
+    attachmentAdapter?: AttachmentAdapter
+    allowSendWhenInactive?: boolean
 }) {
     // Use cached message converter for performance optimization
     // This prevents re-converting all messages on every render
@@ -149,9 +186,9 @@ export function useHappyRuntime(props: {
     })
 
     const onNew = useCallback(async (message: AppendMessage) => {
-        const text = getTextFromAppendMessage(message)
-        if (!text) return
-        props.onSendMessage(text)
+        const { text, attachments } = extractMessageContent(message)
+        if (!text && attachments.length === 0) return
+        props.onSendMessage(text, attachments.length > 0 ? attachments : undefined)
     }, [props.onSendMessage])
 
     const onCancel = useCallback(async () => {
@@ -161,13 +198,23 @@ export function useHappyRuntime(props: {
     // Memoize the adapter to avoid recreating on every render
     // useExternalStoreRuntime may use adapter identity for subscriptions
     const adapter = useMemo(() => ({
-        isDisabled: !props.session.active || props.isSending,
+        isDisabled: props.isSending || (!props.session.active && !props.allowSendWhenInactive),
         isRunning: props.session.thinking,
         messages: convertedMessages,
         onNew,
         onCancel,
+        adapters: props.attachmentAdapter ? { attachments: props.attachmentAdapter } : undefined,
         unstable_capabilities: { copy: true }
-    }), [props.session.active, props.isSending, props.session.thinking, convertedMessages, onNew, onCancel])
+    }), [
+        props.session.active,
+        props.isSending,
+        props.allowSendWhenInactive,
+        props.session.thinking,
+        convertedMessages,
+        onNew,
+        onCancel,
+        props.attachmentAdapter
+    ])
 
     return useExternalStoreRuntime(adapter)
 }

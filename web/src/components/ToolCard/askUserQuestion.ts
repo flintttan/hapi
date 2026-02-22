@@ -1,3 +1,5 @@
+import { isObject } from '@hapi/protocol'
+
 export type AskUserQuestionOption = {
     label: string
     description: string | null
@@ -13,10 +15,6 @@ export type AskUserQuestionQuestion = {
 export type AskUserQuestionQuestionInfo = {
     header: string | null
     question: string | null
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object'
 }
 
 export function isAskUserQuestionToolName(toolName: string): boolean {
@@ -77,4 +75,3 @@ export function extractAskUserQuestionQuestionsInfo(input: unknown): AskUserQues
     }
     return questions
 }
-

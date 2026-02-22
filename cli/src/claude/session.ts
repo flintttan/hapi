@@ -18,7 +18,7 @@ export class Session extends AgentSessionBase<EnhancedMode> {
     readonly mcpServers: Record<string, any>;
     readonly allowedTools?: string[];
     readonly hookSettingsPath: string;
-    readonly startedBy: 'daemon' | 'terminal';
+    readonly startedBy: 'runner' | 'terminal';
     readonly startingMode: 'local' | 'remote';
     localLaunchFailure: LocalLaunchFailure | null = null;
 
@@ -35,7 +35,7 @@ export class Session extends AgentSessionBase<EnhancedMode> {
         onModeChange: (mode: 'local' | 'remote') => void;
         allowedTools?: string[];
         mode?: 'local' | 'remote';
-        startedBy: 'daemon' | 'terminal';
+        startedBy: 'runner' | 'terminal';
         startingMode: 'local' | 'remote';
         hookSettingsPath: string;
         permissionMode?: PermissionMode;

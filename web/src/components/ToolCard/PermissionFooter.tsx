@@ -4,20 +4,9 @@ import type { SessionMetadataSummary } from '@/types/api'
 import type { ChatToolCall, ToolPermission } from '@/chat/types'
 import { usePlatform } from '@/hooks/usePlatform'
 import { Spinner } from '@/components/Spinner'
+import { isCodexFamilyFlavor } from '@/lib/agentFlavorUtils'
+import { getInputStringAny } from '@/lib/toolInputUtils'
 import { useTranslation } from '@/lib/use-translation'
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object'
-}
-
-function getInputStringAny(input: unknown, keys: string[]): string | null {
-    if (!isObject(input)) return null
-    for (const key of keys) {
-        const value = input[key]
-        if (typeof value === 'string' && value.length > 0) return value
-    }
-    return null
-}
 
 function isToolAllowedForSession(toolName: string, toolInput: unknown, allowedTools: string[] | undefined): boolean {
     if (!allowedTools || allowedTools.length === 0) return false
@@ -34,10 +23,10 @@ function isToolAllowedForSession(toolName: string, toolInput: unknown, allowedTo
 }
 
 function isCodexSession(metadata: SessionMetadataSummary | null, toolName: string): boolean {
-    return metadata?.flavor === 'codex'
-        || metadata?.flavor === 'gemini'
+    return isCodexFamilyFlavor(metadata?.flavor)
         || toolName.startsWith('Codex')
         || toolName.startsWith('Gemini')
+        || toolName.startsWith('OpenCode')
 }
 
 function formatPermissionSummary(permission: ToolPermission, toolName: string, toolInput: unknown, codex: boolean, t: (key: string) => string): string {

@@ -18,7 +18,7 @@ console.log(`Syncing version ${version} to all package.json files...`);
 // Package.json files to update
 const packages = [
   'cli/package.json',
-  'server/package.json',
+  'hub/package.json',
   'web/package.json',
 ];
 

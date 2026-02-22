@@ -31,6 +31,7 @@ export default {
   'login.server.origin': '服务器地址',
   'login.server.placeholder': 'https://hapi.example.com',
   'login.server.hint': '仅使用 http(s) 协议。任何路径将被忽略。',
+  'login.server.required': '必须先填写服务器地址才能登录。',
   'login.server.useSameOrigin': '使用同源',
   'login.server.save': '保存',
   'login.footer': '用',
@@ -89,6 +90,7 @@ export default {
   'button.close': '关闭',
   'button.dismiss': '忽略',
   'button.copy': '复制',
+  'button.paste': '粘贴',
 
   // New session form
   'newSession.machine': '机器',
@@ -102,6 +104,8 @@ export default {
   'newSession.type.worktree.desc': '在仓库旁创建新工作树',
   'newSession.type.worktree.placeholder': 'feature-x (默认 1228-xxxx)',
   'newSession.agent': '代理',
+  'newSession.model': '模型',
+  'newSession.model.optional': '可选',
   'newSession.yolo': 'YOLO 模式',
   'newSession.yolo.title': '跳过审批和沙箱',
   'newSession.yolo.desc': '启动时使用危险的代理标志。',
@@ -135,6 +139,9 @@ export default {
   'terminal.commandArgs': '命令参数',
   'terminal.stdout': '标准输出',
   'terminal.stderr': '标准错误',
+  'terminal.paste.fallbackTitle': '粘贴输入',
+  'terminal.paste.fallbackDescription': '无法读取剪贴板，请在下方粘贴文本。',
+  'terminal.paste.placeholder': '在此粘贴终端输入…',
 
   // Code block
   'code.copy': '复制',
@@ -184,19 +191,46 @@ export default {
   'tool.askUserQuestion.fallback': 'AskUserQuestion 格式不正确。请输入您的答案：',
   'tool.askUserQuestion.placeholder': '输入您的答案…',
   'tool.askUserQuestion.otherPlaceholder': '或输入您自己的答案…',
+  'tool.requestUserInput.textPlaceholder': '输入您的答案…',
+  'tool.requestUserInput.noteLabel': '补充说明（可选）',
+  'tool.requestUserInput.notePlaceholder': '添加备注…',
 
   // Composer buttons
   'composer.settings': '设置',
   'composer.terminal': '终端',
   'composer.abort': '中止',
   'composer.switchRemote': '切换到远程模式',
+  'composer.attach': '添加文件',
   'composer.send': '发送',
+  'composer.stop': '停止',
+  'composer.voice': '语音助手',
+
+  // Voice assistant
+  'voice.connecting': '连接中...',
+  'voice.active': '活跃',
+  'voice.muted': '已静音',
+  'voice.error': '错误',
+  'voice.mute': '静音',
+  'voice.unmute': '取消静音',
+  'voice.end': '结束',
+  'voice.error.micPermission': '麦克风权限被拒绝',
+  'voice.error.network': '网络错误',
+  'voice.error.notInitialized': '语音会话未初始化',
+  'voice.error.startFailed': '启动语音会话失败',
+  'voice.error.notAllowed': '语音功能不可用',
+  'voice.error.connection': '连接错误',
+  'voice.dismiss': '关闭',
 
   // Banners
   'offline.title': '离线',
   'offline.message': '您当前处于离线状态。某些功能可能受限。',
   'syncing.title': '同步中…',
   'syncing.message': '正在同步您的数据。',
+  'reconnecting.message': '正在重新连接...',
+
+  // Send blocked
+  'send.blocked.title': '无法发送消息',
+  'send.blocked.noConnection': '未连接到服务器',
 
   // Install prompt
   'install.title': '安装 HAPI',
@@ -207,6 +241,20 @@ export default {
   'language.title': '语言',
   'language.english': 'English',
   'language.chinese': '简体中文',
+
+  // Settings page
+  'settings.title': '设置',
+  'settings.language.title': '语言',
+  'settings.language.label': '语言',
+  'settings.display.title': '显示',
+  'settings.display.fontSize': '字体大小',
+  'settings.voice.title': '语音助手',
+  'settings.voice.language': '语音语言',
+  'settings.voice.autoDetect': '自动检测',
+  'settings.about.title': '关于',
+  'settings.about.website': '官方网站',
+  'settings.about.appVersion': '应用版本',
+  'settings.about.protocolVersion': '协议版本',
 
   // Misc
   'misc.noMachines': '无可用机器',

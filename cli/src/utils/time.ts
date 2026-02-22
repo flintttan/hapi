@@ -61,7 +61,7 @@ export type RetryOptions = {
  *
  * Unlike createBackoff, this function:
  * - Supports a shouldRetry predicate to skip non-retryable errors
- * - Has sensible defaults for daemon-style long-running processes
+ * - Has sensible defaults for runner-style long-running processes
  * - Uses clearer exponential backoff (2^n with jitter)
  */
 export async function withRetry<T>(

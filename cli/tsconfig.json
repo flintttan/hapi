@@ -27,7 +27,7 @@
     "src/**/*.ts",
     "src/**/*.tsx",
     "src/**/*.d.ts",
-    "../server/src/**/*.ts",
-    "../server/src/**/*.d.ts"
+    "../hub/src/**/*.ts",
+    "../hub/src/**/*.d.ts"
   ]
 }

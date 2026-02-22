@@ -1,12 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { isObject } from '@hapi/protocol'
 import type { SyncEvent } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
 import { clearMessageWindow, ingestIncomingMessages } from '@/lib/message-window-store'
-
-function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object'
-}
 
 type SSESubscription = {
     all?: boolean
@@ -93,6 +90,7 @@ export function useSSE(options: {
     }, [options.onToast])
 
     const subscription = options.subscription ?? {}
+
     const subscriptionKey = useMemo(() => {
         return `${subscription.all ? '1' : '0'}|${subscription.sessionId ?? ''}|${subscription.machineId ?? ''}`
     }, [subscription.all, subscription.sessionId, subscription.machineId])
@@ -106,7 +104,10 @@ export function useSSE(options: {
         }
 
         setSubscriptionId(null)
-        const url = buildEventsUrl(options.baseUrl, options.token, subscription, getVisibilityState())
+        const url = buildEventsUrl(options.baseUrl, options.token, {
+            ...subscription,
+            sessionId: subscription.sessionId ?? undefined
+        }, getVisibilityState())
         const eventSource = new EventSource(url)
         eventSourceRef.current = eventSource
 

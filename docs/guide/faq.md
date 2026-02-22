@@ -4,7 +4,7 @@
 
 ### What is HAPI?
 
-HAPI is a local-first, self-hosted platform for running and controlling AI coding agents (Claude Code, Codex, Gemini) remotely. It lets you start coding sessions on your computer and monitor/control them from your phone.
+HAPI is a local-first, self-hosted platform for running and controlling AI coding agents (Claude Code, Codex, Gemini, OpenCode) remotely. It lets you start coding sessions on your computer and monitor/control them from your phone.
 
 ### What does HAPI stand for?
 
@@ -19,12 +19,15 @@ Yes, HAPI is open source and free to use under the AGPL-3.0-only license.
 - **Claude Code** (recommended)
 - **OpenAI Codex**
 - **Google Gemini**
+- **OpenCode**
 
 ## Setup & Installation
 
-### Do I need a server?
+### Do I need a hub?
 
-HAPI includes an embedded server. Just run `hapi server` on your machine - no external server required.
+HAPI includes an embedded hub. Just run `hapi hub` on your machine - no external hub required.
+
+`hapi server` remains supported as an alias.
 
 ### How do I access HAPI from my phone?
 
@@ -34,21 +37,21 @@ http://<your-computer-ip>:3006
 ```
 
 For internet access:
-- If the server has a public IP, access it directly (use HTTPS via reverse proxy for production)
+- If the hub has a public IP, access it directly (use HTTPS via reverse proxy for production)
 - If behind NAT, set up a tunnel (Cloudflare Tunnel, Tailscale, or ngrok)
 
 ### What's the access token for?
 
 The `CLI_API_TOKEN` is a shared secret that authenticates:
-- CLI connections to the server
+- CLI connections to the hub
 - Web app logins
 - Telegram account binding
 
-It's auto-generated on first server start and saved to `~/.hapi/settings.json`.
+It's auto-generated on first hub start and saved to `~/.hapi/settings.json`.
 
 ### Do you support multiple accounts?
 
-Yes. We support lightweight multi-account access via namespaces for shared team servers. See [Namespace (Advanced)](./namespace.md).
+Yes. We support lightweight multi-account access via namespaces for shared team hubs. See [Namespace (Advanced)](./namespace.md).
 
 ### Can I use HAPI without Telegram?
 
@@ -72,9 +75,9 @@ HAPI supports two methods:
 
 ### Can I start sessions remotely?
 
-Yes, with daemon mode:
+Yes, with runner mode:
 
-1. Run `hapi daemon start` on your computer
+1. Run `hapi runner start` on your computer
 2. Your machine appears in the "Machines" list in the web app
 3. Tap to spawn new sessions from anywhere
 
@@ -88,6 +91,14 @@ In the session view, tap the "Files" tab to:
 ### Can I send messages to the AI from my phone?
 
 Yes. Open any session and use the chat interface to send messages directly to the AI agent.
+
+### Can I access a terminal remotely?
+
+Yes. Open a session in the web app and tap the Terminal tab for a remote shell.
+
+### How do I use voice control?
+
+Set `ELEVENLABS_API_KEY`, open a session in the web app, and click the microphone button. See [Voice Assistant](./voice-assistant.md).
 
 ## Security
 
@@ -113,27 +124,27 @@ Only if they have your access token. For additional security:
 
 ### "Connection refused" error
 
-- Ensure server is running: `hapi server`
+- Ensure hub is running: `hapi hub`
 - Check firewall allows port 3006
-- Verify `HAPI_SERVER_URL` is correct
+- Verify `HAPI_API_URL` is correct
 
 ### "Invalid token" error
 
 - Re-run `hapi auth login`
-- Check token matches in CLI and server
+- Check token matches in CLI and hub
 - Verify `~/.hapi/settings.json` has correct `cliApiToken`
 
-### Daemon won't start
+### Runner won't start
 
 ```bash
 # Check status
-hapi daemon status
+hapi runner status
 
 # Clear stale lock file
-rm ~/.hapi/daemon.state.json.lock
+rm ~/.hapi/runner.state.json.lock
 
 # Check logs
-hapi daemon logs
+hapi runner logs
 ```
 
 ### Claude Code not found
@@ -151,7 +162,7 @@ export HAPI_CLAUDE_PATH=/path/to/claude
 hapi doctor
 ```
 
-This checks server connectivity, token validity, agent availability, and more.
+This checks hub connectivity, token validity, agent availability, and more.
 
 ## Comparison
 

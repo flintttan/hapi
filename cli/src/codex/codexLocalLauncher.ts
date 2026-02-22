@@ -1,34 +1,58 @@
 import { logger } from '@/ui/logger';
 import { codexLocal } from './codexLocal';
 import { CodexSession } from './session';
-import { Future } from '@/utils/future';
 import { createCodexSessionScanner } from './utils/codexSessionScanner';
 import { convertCodexEvent } from './utils/codexEventConverter';
-import { getLocalLaunchExitReason } from '@/agent/localLaunchPolicy';
 import { buildHapiMcpBridge } from './utils/buildHapiMcpBridge';
+import { BaseLocalLauncher } from '@/modules/common/launcher/BaseLocalLauncher';
 
 export async function codexLocalLauncher(session: CodexSession): Promise<'switch' | 'exit'> {
-    let exitReason: 'switch' | 'exit' | null = null;
-    const processAbortController = new AbortController();
-    const exitFuture = new Future<void>();
     const resumeSessionId = session.sessionId;
+    let scanner: Awaited<ReturnType<typeof createCodexSessionScanner>> | null = null;
 
-    // Start hapi server for MCP bridge (same as remote mode)
+    // Start hapi hub for MCP bridge (same as remote mode)
     const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
     logger.debug(`[codex-local]: Started hapi MCP bridge server at ${happyServer.url}`);
+
+    const handleSessionFound = (sessionId: string) => {
+        session.onSessionFound(sessionId);
+        scanner?.onNewSession(sessionId);
+    };
+
+    const launcher = new BaseLocalLauncher({
+        label: 'codex-local',
+        failureLabel: 'Local Codex process failed',
+        queue: session.queue,
+        rpcHandlerManager: session.client.rpcHandlerManager,
+        startedBy: session.startedBy,
+        startingMode: session.startingMode,
+        launch: async (abortSignal) => {
+            await codexLocal({
+                path: session.path,
+                sessionId: resumeSessionId,
+                onSessionFound: handleSessionFound,
+                abort: abortSignal,
+                codexArgs: session.codexArgs,
+                mcpServers
+            });
+        },
+        sendFailureMessage: (message) => {
+            session.sendSessionEvent({ type: 'message', message });
+        },
+        recordLocalLaunchFailure: (message, exitReason) => {
+            session.recordLocalLaunchFailure(message, exitReason);
+        },
+        abortLogMessage: 'doAbort',
+        switchLogMessage: 'doSwitch'
+    });
 
     const handleSessionMatchFailed = (message: string) => {
         logger.warn(`[codex-local]: ${message}`);
         session.sendSessionEvent({ type: 'message', message });
-        if (!exitReason) {
-            exitReason = 'exit';
-        }
-        if (!processAbortController.signal.aborted) {
-            processAbortController.abort();
-        }
+        launcher.control.requestExit();
     };
 
-    const scanner = await createCodexSessionScanner({
+    scanner = await createCodexSessionScanner({
         sessionId: resumeSessionId,
         cwd: session.path,
         startupTimestampMs: Date.now(),
@@ -40,7 +64,7 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
             const converted = convertCodexEvent(event);
             if (converted?.sessionId) {
                 session.onSessionFound(converted.sessionId);
-                scanner.onNewSession(converted.sessionId);
+                scanner?.onNewSession(converted.sessionId);
             }
             if (converted?.userMessage) {
                 session.sendUserMessage(converted.userMessage);
@@ -52,95 +76,10 @@ export async function codexLocalLauncher(session: CodexSession): Promise<'switch
     });
 
     try {
-        async function abortProcess() {
-            if (!processAbortController.signal.aborted) {
-                processAbortController.abort();
-            }
-            await exitFuture.promise;
-        }
-
-        async function doAbort() {
-            logger.debug('[codex-local]: doAbort');
-            if (!exitReason) {
-                exitReason = 'switch';
-            }
-            session.queue.reset();
-            await abortProcess();
-        }
-
-        async function doSwitch() {
-            logger.debug('[codex-local]: doSwitch');
-            if (!exitReason) {
-                exitReason = 'switch';
-            }
-            await abortProcess();
-        }
-
-        session.client.rpcHandlerManager.registerHandler('abort', doAbort);
-        session.client.rpcHandlerManager.registerHandler('switch', doSwitch);
-        session.queue.setOnMessage(() => {
-            void doSwitch();
-        });
-
-        if (exitReason) {
-            return exitReason;
-        }
-        if (session.queue.size() > 0) {
-            return 'switch';
-        }
-
-        const handleSessionFound = (sessionId: string) => {
-            session.onSessionFound(sessionId);
-            scanner.onNewSession(sessionId);
-        };
-
-        while (true) {
-            if (exitReason) {
-                return exitReason;
-            }
-
-            logger.debug('[codex-local]: launch');
-            try {
-                await codexLocal({
-                    path: session.path,
-                    sessionId: resumeSessionId,
-                    onSessionFound: handleSessionFound,
-                    abort: processAbortController.signal,
-                    codexArgs: session.codexArgs,
-                    mcpServers
-                });
-
-                if (!exitReason) {
-                    exitReason = 'exit';
-                    break;
-                }
-            } catch (error) {
-                logger.debug('[codex-local]: launch error', error);
-                const message = error instanceof Error ? error.message : String(error);
-                session.sendSessionEvent({ type: 'message', message: `Local Codex process failed: ${message}` });
-                const failureExitReason = exitReason ?? getLocalLaunchExitReason({
-                    startedBy: session.startedBy,
-                    startingMode: session.startingMode
-                });
-                session.recordLocalLaunchFailure(message, failureExitReason);
-                if (!exitReason) {
-                    exitReason = failureExitReason;
-                }
-                if (failureExitReason === 'exit') {
-                    logger.warn(`[codex-local]: Local Codex process failed: ${message}`);
-                }
-                break;
-            }
-        }
+        return await launcher.run();
     } finally {
-        exitFuture.resolve(undefined);
-        session.client.rpcHandlerManager.registerHandler('abort', async () => {});
-        session.client.rpcHandlerManager.registerHandler('switch', async () => {});
-        session.queue.setOnMessage(null);
-        await scanner.cleanup();
+        await scanner?.cleanup();
         happyServer.stop();
         logger.debug('[codex-local]: Stopped hapi MCP bridge server');
     }
-
-    return exitReason || 'exit';
 }

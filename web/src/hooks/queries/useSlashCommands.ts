@@ -50,6 +50,7 @@ const BUILTIN_COMMANDS: Record<string, SlashCommand[]> = {
         { name: 'compress', description: 'Compress the context by replacing it with a summary', source: 'builtin' },
         { name: 'stats', description: 'Check session stats', source: 'builtin' },
     ],
+    opencode: [],
 }
 
 export function useSlashCommands(
@@ -79,14 +80,16 @@ export function useSlashCommands(
         retry: false, // Don't retry RPC failures
     })
 
-    // Merge built-in commands with user-defined commands from API
+    // Merge built-in commands with user-defined and plugin commands from API
     const commands = useMemo(() => {
         const builtin = BUILTIN_COMMANDS[agentType] ?? BUILTIN_COMMANDS['claude'] ?? []
 
-        // If API succeeded, add user-defined commands
+        // If API succeeded, add user-defined and plugin commands
         if (query.data?.success && query.data.commands) {
-            const userCommands = query.data.commands.filter(cmd => cmd.source === 'user')
-            return [...builtin, ...userCommands]
+            const extraCommands = query.data.commands.filter(
+                cmd => cmd.source === 'user' || cmd.source === 'plugin'
+            )
+            return [...builtin, ...extraCommands]
         }
 
         // Fallback to built-in commands only

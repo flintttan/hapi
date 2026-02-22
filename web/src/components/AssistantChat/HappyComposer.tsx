@@ -2,6 +2,8 @@ import { getPermissionModeOptionsForFlavor, MODEL_MODE_LABELS, MODEL_MODES } fro
 import { ComposerPrimitive, useAssistantApi, useAssistantState } from '@assistant-ui/react'
 import {
     type ChangeEvent as ReactChangeEvent,
+    type ClipboardEvent as ReactClipboardEvent,
+    type FormEvent as ReactFormEvent,
     type KeyboardEvent as ReactKeyboardEvent,
     type SyntheticEvent as ReactSyntheticEvent,
     useCallback,
@@ -12,15 +14,19 @@ import {
 } from 'react'
 import type { AgentState, ModelMode, PermissionMode } from '@/types/api'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
+import type { ConversationStatus } from '@/realtime/types'
 import { useActiveWord } from '@/hooks/useActiveWord'
 import { useActiveSuggestions } from '@/hooks/useActiveSuggestions'
 import { applySuggestion } from '@/utils/applySuggestion'
 import { usePlatform } from '@/hooks/usePlatform'
 import { usePWAInstall } from '@/hooks/usePWAInstall'
+import { isCodexFamilyFlavor } from '@/lib/agentFlavorUtils'
+import { markSkillUsed } from '@/lib/recent-skills'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { StatusBar } from '@/components/AssistantChat/StatusBar'
 import { ComposerButtons } from '@/components/AssistantChat/ComposerButtons'
+import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
 import { useTranslation } from '@/lib/use-translation'
 
 export interface TextInputState {
@@ -35,6 +41,7 @@ export function HappyComposer(props: {
     permissionMode?: PermissionMode
     modelMode?: ModelMode
     active?: boolean
+    allowSendWhenInactive?: boolean
     thinking?: boolean
     agentState?: AgentState | null
     contextSize?: number
@@ -46,6 +53,11 @@ export function HappyComposer(props: {
     onTerminal?: () => void
     autocompletePrefixes?: string[]
     autocompleteSuggestions?: (query: string) => Promise<Suggestion[]>
+    // Voice assistant props
+    voiceStatus?: ConversationStatus
+    voiceMicMuted?: boolean
+    onVoiceToggle?: () => void
+    onVoiceMicToggle?: () => void
 }) {
     const { t } = useTranslation()
     const {
@@ -53,6 +65,7 @@ export function HappyComposer(props: {
         permissionMode: rawPermissionMode,
         modelMode: rawModelMode,
         active = true,
+        allowSendWhenInactive = false,
         thinking = false,
         agentState,
         contextSize,
@@ -62,8 +75,12 @@ export function HappyComposer(props: {
         onModelModeChange,
         onSwitchToRemote,
         onTerminal,
-        autocompletePrefixes = ['@', '/'],
-        autocompleteSuggestions = defaultSuggestionHandler
+        autocompletePrefixes = ['@', '/', '$'],
+        autocompleteSuggestions = defaultSuggestionHandler,
+        voiceStatus = 'disconnected',
+        voiceMicMuted = false,
+        onVoiceToggle,
+        onVoiceMicToggle
     } = props
 
     // Use ?? so missing values fall back to default (destructuring defaults only handle undefined)
@@ -72,15 +89,27 @@ export function HappyComposer(props: {
 
     const api = useAssistantApi()
     const composerText = useAssistantState(({ composer }) => composer.text)
+    const attachments = useAssistantState(({ composer }) => composer.attachments)
     const threadIsRunning = useAssistantState(({ thread }) => thread.isRunning)
     const threadIsDisabled = useAssistantState(({ thread }) => thread.isDisabled)
 
-    const controlsDisabled = disabled || !active || threadIsDisabled
+    const controlsDisabled = disabled || (!active && !allowSendWhenInactive) || threadIsDisabled
     const trimmed = composerText.trim()
     const hasText = trimmed.length > 0
+    const hasAttachments = attachments.length > 0
+    const attachmentsReady = !hasAttachments || attachments.every((attachment) => {
+        if (attachment.status.type === 'complete') {
+            return true
+        }
+        if (attachment.status.type !== 'requires-action') {
+            return false
+        }
+        const path = (attachment as { path?: string }).path
+        return typeof path === 'string' && path.length > 0
+    })
     // Allow sending messages even when agent is thinking (threadIsRunning)
     // This enables interrupting or continuing the conversation mid-response
-    const canSend = hasText && !controlsDisabled
+    const canSend = (hasText || hasAttachments) && attachmentsReady && !controlsDisabled
 
     const [inputState, setInputState] = useState<TextInputState>({
         text: '',
@@ -139,6 +168,9 @@ export function HappyComposer(props: {
     const handleSuggestionSelect = useCallback((index: number) => {
         const suggestion = suggestions[index]
         if (!suggestion || !textareaRef.current) return
+        if (suggestion.text.startsWith('$')) {
+            markSkillUsed(suggestion.text.slice(1))
+        }
 
         // Slash commands should insert only the command itself.
         // Custom command Markdown content is treated as a hidden prompt template and must not be pasted into the input box.
@@ -280,7 +312,7 @@ export function HappyComposer(props: {
 
     useEffect(() => {
         const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
-            if (e.key === 'm' && (e.metaKey || e.ctrlKey) && onModelModeChange && agentFlavor !== 'codex' && agentFlavor !== 'gemini') {
+            if (e.key === 'm' && (e.metaKey || e.ctrlKey) && onModelModeChange && !isCodexFamilyFlavor(agentFlavor)) {
                 e.preventDefault()
                 const currentIndex = MODEL_MODES.indexOf(modelMode as typeof MODEL_MODES[number])
                 const nextIndex = (currentIndex + 1) % MODEL_MODES.length
@@ -309,14 +341,35 @@ export function HappyComposer(props: {
         }))
     }, [])
 
+    const handlePaste = useCallback(async (e: ReactClipboardEvent<HTMLTextAreaElement>) => {
+        const files = Array.from(e.clipboardData?.files || [])
+        const imageFiles = files.filter(file => file.type.startsWith('image/'))
+
+        if (imageFiles.length === 0) return
+
+        e.preventDefault()
+
+        try {
+            for (const file of imageFiles) {
+                await api.composer().addAttachment(file)
+            }
+        } catch (error) {
+            console.error('Error adding pasted image:', error)
+        }
+    }, [api])
+
     const handleSettingsToggle = useCallback(() => {
         haptic('light')
         setShowSettings(prev => !prev)
     }, [haptic])
 
-    const handleSubmit = useCallback(() => {
+    const handleSubmit = useCallback((event?: ReactFormEvent<HTMLFormElement>) => {
+        if (event && !attachmentsReady) {
+            event.preventDefault()
+            return
+        }
         setShowContinueHint(false)
-    }, [])
+    }, [attachmentsReady])
 
     const handlePermissionChange = useCallback((mode: PermissionMode) => {
         if (!onPermissionModeChange || controlsDisabled) return
@@ -333,9 +386,14 @@ export function HappyComposer(props: {
     }, [onModelModeChange, controlsDisabled, haptic])
 
     const showPermissionSettings = Boolean(onPermissionModeChange && permissionModeOptions.length > 0)
-    const showModelSettings = Boolean(onModelModeChange && agentFlavor !== 'codex' && agentFlavor !== 'gemini')
+    const showModelSettings = Boolean(onModelModeChange && !isCodexFamilyFlavor(agentFlavor))
     const showSettingsButton = Boolean(showPermissionSettings || showModelSettings)
     const showAbortButton = true
+    const voiceEnabled = Boolean(onVoiceToggle)
+
+    const handleSend = useCallback(() => {
+        api.composer().send()
+    }, [api])
 
     const overlays = useMemo(() => {
         if (showSettings && (showPermissionSettings || showModelSettings)) {
@@ -457,7 +515,7 @@ export function HappyComposer(props: {
     return (
         <div className={`px-3 ${bottomPaddingClass} pt-2 bg-[var(--app-bg)]`}>
             <div className="mx-auto w-full max-w-content">
-                <ComposerPrimitive.Root className="relative">
+                <ComposerPrimitive.Root className="relative" onSubmit={handleSubmit}>
                     {overlays}
 
                     <StatusBar
@@ -468,9 +526,16 @@ export function HappyComposer(props: {
                         modelMode={modelMode}
                         permissionMode={permissionMode}
                         agentFlavor={agentFlavor}
+                        voiceStatus={voiceStatus}
                     />
 
                     <div className="overflow-hidden rounded-[20px] bg-[var(--app-secondary-bg)]">
+                        {attachments.length > 0 ? (
+                            <div className="flex flex-wrap gap-2 px-4 pt-3">
+                                <ComposerPrimitive.Attachments components={{ Attachment: AttachmentItem }} />
+                            </div>
+                        ) : null}
+
                         <div className="flex items-center px-4 py-3">
                             <ComposerPrimitive.Input
                                 ref={textareaRef}
@@ -478,13 +543,13 @@ export function HappyComposer(props: {
                                 placeholder={showContinueHint ? t('misc.typeMessage') : t('misc.typeAMessage')}
                                 disabled={controlsDisabled}
                                 maxRows={5}
-                                submitOnEnter={false}
+                                submitOnEnter={!isTouch}
                                 cancelOnEscape={false}
                                 onChange={handleChange}
                                 onSelect={handleSelect}
                                 onKeyDown={handleKeyDown}
-                                onSubmit={handleSubmit}
-                                className="flex-1 resize-none bg-transparent text-sm leading-snug text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+                                onPaste={handlePaste}
+                                className="flex-1 resize-none bg-transparent text-base leading-snug text-[var(--app-fg)] placeholder-[var(--app-hint)] focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
                             />
                         </div>
 
@@ -504,6 +569,12 @@ export function HappyComposer(props: {
                             switchDisabled={switchDisabled}
                             isSwitching={isSwitching}
                             onSwitch={handleSwitch}
+                            voiceEnabled={voiceEnabled}
+                            voiceStatus={voiceStatus}
+                            voiceMicMuted={voiceMicMuted}
+                            onVoiceToggle={onVoiceToggle ?? (() => {})}
+                            onVoiceMicToggle={onVoiceMicToggle}
+                            onSend={handleSend}
                         />
                     </div>
                 </ComposerPrimitive.Root>

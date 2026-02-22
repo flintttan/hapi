@@ -1,4 +1,4 @@
-export type StartedBy = 'daemon' | 'terminal';
+export type StartedBy = 'runner' | 'terminal';
 
 export type LocalLaunchExitReason = 'switch' | 'exit';
 
@@ -8,7 +8,7 @@ export type LocalLaunchContext = {
 };
 
 export function getLocalLaunchExitReason(context: LocalLaunchContext): LocalLaunchExitReason {
-    if (context.startedBy === 'daemon' || context.startingMode === 'remote') {
+    if (context.startedBy === 'runner' || context.startingMode === 'remote') {
         return 'switch';
     }
 

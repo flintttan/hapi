@@ -13,10 +13,11 @@ export const codexCommand: CommandDefinition = {
             const { runCodex } = await import('@/codex/runCodex')
 
             const options: {
-                startedBy?: 'daemon' | 'terminal'
+                startedBy?: 'runner' | 'terminal'
                 codexArgs?: string[]
                 permissionMode?: CodexPermissionMode
                 resumeSessionId?: string
+                model?: string
             } = {}
             const unknownArgs: string[] = []
 
@@ -32,10 +33,17 @@ export const codexCommand: CommandDefinition = {
                     continue
                 }
                 if (arg === '--started-by') {
-                    options.startedBy = commandArgs[++i] as 'daemon' | 'terminal'
+                    options.startedBy = commandArgs[++i] as 'runner' | 'terminal'
                 } else if (arg === '--yolo' || arg === '--dangerously-bypass-approvals-and-sandbox') {
                     options.permissionMode = 'yolo'
                     unknownArgs.push(arg)
+                } else if (arg === '--model') {
+                    const model = commandArgs[++i]
+                    if (!model) {
+                        throw new Error('Missing --model value')
+                    }
+                    options.model = model
+                    unknownArgs.push('--model', model)
                 } else {
                     unknownArgs.push(arg)
                 }

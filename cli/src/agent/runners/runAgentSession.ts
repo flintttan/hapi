@@ -10,6 +10,7 @@ import { startHappyServer } from '@/claude/utils/startHappyServer';
 import { getHappyCliCommand } from '@/utils/spawnHappyCLI';
 import { registerKillSessionHandler } from '@/claude/registerKillSessionHandler';
 import { bootstrapSession } from '@/agent/sessionFactory';
+import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
 
 function emitReadyIfIdle(props: {
     queueSize: () => number;
@@ -25,7 +26,7 @@ function emitReadyIfIdle(props: {
 
 export async function runAgentSession(opts: {
     agentType: string;
-    startedBy?: 'daemon' | 'terminal';
+    startedBy?: 'runner' | 'terminal';
 }): Promise<void> {
     const initialState: AgentState = {
         controlledByUser: false
@@ -45,7 +46,8 @@ export async function runAgentSession(opts: {
     const messageQueue = new MessageQueue2<Record<string, never>>(() => hashObject({}));
 
     session.onUserMessage((message) => {
-        messageQueue.push(message.content.text, {});
+        const formattedText = formatMessageWithAttachments(message.content.text, message.content.attachments);
+        messageQueue.push(formattedText, {});
     });
 
     const backend: AgentBackend = AgentRegistry.create(opts.agentType);

@@ -1,19 +1,20 @@
 # hapi CLI
 
-Run Claude Code, Codex, or Gemini sessions from your terminal and control them remotely through the hapi server.
+Run Claude Code, Codex, Gemini, or OpenCode sessions from your terminal and control them remotely through the hapi hub.
 
 ## What it does
 
-- Starts Claude Code sessions and registers them with hapi-server.
+- Starts Claude Code sessions and registers them with hapi-hub.
 - Starts Codex mode for OpenAI-based sessions.
 - Starts Gemini mode via ACP (Anthropic Code Plugins).
+- Starts OpenCode mode via ACP and its plugin hook system.
 - Provides an MCP stdio bridge for external tools.
-- Manages a background daemon for long-running sessions.
+- Manages a background runner for long-running sessions.
 - Includes diagnostics and auth helpers.
 
 ## Typical flow
 
-1. Start the server and set env vars (see ../server/README.md).
+1. Start the hub and set env vars (see ../hub/README.md).
 2. Set the same CLI_API_TOKEN on this machine or run `hapi auth login`.
 3. Run `hapi` to start a session.
 4. Use the web app or Telegram Mini App to monitor and control.
@@ -24,8 +25,11 @@ Run Claude Code, Codex, or Gemini sessions from your terminal and control them r
 
 - `hapi` - Start a Claude Code session (passes through Claude CLI flags). See `src/index.ts`.
 - `hapi codex` - Start Codex mode. See `src/codex/runCodex.ts`.
+- `hapi codex resume <sessionId>` - Resume existing Codex session.
 - `hapi gemini` - Start Gemini mode via ACP. See `src/agent/runners/runAgentSession.ts`.
-  Note: Gemini runs in remote mode only; it waits for messages from the server UI/Telegram.
+  Note: Gemini runs in remote mode only; it waits for messages from the hub UI/Telegram.
+- `hapi opencode` - Start OpenCode mode via ACP. See `src/opencode/runOpencode.ts`.
+  Note: OpenCode supports local and remote modes; local mode streams via OpenCode plugins.
 
 ### Authentication
 
@@ -35,22 +39,20 @@ Run Claude Code, Codex, or Gemini sessions from your terminal and control them r
 
 See `src/commands/auth.ts`.
 
-### Daemon management
+### Runner management
 
-- `hapi daemon start` - Start daemon as detached process.
-- `hapi daemon stop` - Stop daemon gracefully.
-- `hapi daemon status` - Show daemon diagnostics.
-- `hapi daemon list` - List active sessions managed by daemon.
-- `hapi daemon stop-session <sessionId>` - Terminate specific session.
-- `hapi daemon logs` - Print path to latest daemon log file.
-- `hapi daemon install` - Install daemon as system service.
-- `hapi daemon uninstall` - Remove daemon system service.
+- `hapi runner start` - Start runner as detached process.
+- `hapi runner stop` - Stop runner gracefully.
+- `hapi runner status` - Show runner diagnostics.
+- `hapi runner list` - List active sessions managed by runner.
+- `hapi runner stop-session <sessionId>` - Terminate specific session.
+- `hapi runner logs` - Print path to latest runner log file.
 
-See `src/daemon/run.ts`.
+See `src/runner/run.ts`.
 
 ### Diagnostics
 
-- `hapi doctor` - Show full diagnostics (version, daemon status, logs, processes).
+- `hapi doctor` - Show full diagnostics (version, runner status, logs, processes).
 - `hapi doctor clean` - Kill runaway HAPI processes.
 
 See `src/ui/doctor.ts`.
@@ -58,7 +60,8 @@ See `src/ui/doctor.ts`.
 ### Other
 
 - `hapi mcp` - Start MCP stdio bridge. See `src/codex/happyMcpStdioBridge.ts`.
-- `hapi server` - Start the bundled server (single binary workflow).
+- `hapi hub` - Start the bundled hub (single binary workflow).
+- `hapi server` - Alias for `hapi hub`.
 
 ## Configuration
 
@@ -66,8 +69,8 @@ See `src/configuration.ts` for all options.
 
 ### Required
 
-- `CLI_API_TOKEN` - Shared secret; must match the server. Can be set via env or `~/.hapi/settings.json` (env wins).
-- `HAPI_SERVER_URL` - Server base URL (default: http://localhost:3006).
+- `CLI_API_TOKEN` - Shared secret; must match the hub. Can be set via env or `~/.hapi/settings.json` (env wins).
+- `HAPI_API_URL` - Hub base URL (default: http://localhost:3006).
 
 ### Optional
 
@@ -76,22 +79,31 @@ See `src/configuration.ts` for all options.
 - `HAPI_CLAUDE_PATH` - Path to a specific `claude` executable.
 - `HAPI_HTTP_MCP_URL` - Default MCP target for `hapi mcp`.
 
-### Daemon
+### Runner
 
-- `HAPI_DAEMON_HEARTBEAT_INTERVAL` - Heartbeat interval in ms (default: 60000).
-- `HAPI_DAEMON_HTTP_TIMEOUT` - HTTP timeout for daemon control in ms (default: 10000).
+- `HAPI_RUNNER_HEARTBEAT_INTERVAL` - Heartbeat interval in ms (default: 60000).
+- `HAPI_RUNNER_HTTP_TIMEOUT` - HTTP timeout for runner control in ms (default: 10000).
+
+### Worktree (set by runner)
+
+- `HAPI_WORKTREE_BASE_PATH` - Base repository path.
+- `HAPI_WORKTREE_BRANCH` - Current branch name.
+- `HAPI_WORKTREE_NAME` - Worktree name.
+- `HAPI_WORKTREE_PATH` - Full worktree path.
+- `HAPI_WORKTREE_CREATED_AT` - Creation timestamp (ms).
 
 ## Storage
 
 Data is stored in `~/.hapi/` (or `$HAPI_HOME`):
 
 - `settings.json` - User settings (machineId, token, onboarding flag). See `src/persistence.ts`.
-- `daemon.state.json` - Daemon state (pid, port, version, heartbeat).
+- `runner.state.json` - Runner state (pid, port, version, heartbeat).
 - `logs/` - Log files.
 
 ## Requirements
 
 - Claude CLI installed and logged in (`claude` on PATH).
+- OpenCode CLI installed (`opencode` on PATH).
 - Bun for building from source.
 
 ## Build from source
@@ -116,12 +128,13 @@ bun run build:single-exe
 - `src/claude/` - Claude Code integration.
 - `src/codex/` - Codex mode integration.
 - `src/agent/` - Multi-agent support (Gemini via ACP).
-- `src/daemon/` - Background service.
+- `src/opencode/` - OpenCode ACP + hook integration.
+- `src/runner/` - Background service.
 - `src/commands/` - CLI command handlers.
 - `src/ui/` - User interface and diagnostics.
 - `src/modules/` - Tool implementations (ripgrep, difftastic, git).
 
 ## Related docs
 
-- `../server/README.md`
+- `../hub/README.md`
 - `../web/README.md`

@@ -6,11 +6,11 @@ HAPI consists of three interconnected components that work together to provide r
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────┐
-│                      Your Machine (Local or Server)                        │
+│                     Your Machine (Local or Hub Host)                       │
 │                                                                            │
 │   ┌──────────────┐         ┌──────────────┐         ┌──────────────┐       │
 │   │              │         │              │         │              │       │
-│   │   HAPI CLI   │◄───────►│ HAPI Server  │◄───────►│   Web App    │       │
+│   │   HAPI CLI   │◄───────►│  HAPI Hub    │◄───────►│   Web App    │       │
 │   │              │ Socket  │              │   SSE   │  (embedded)  │       │
 │   │  + AI Agent  │   .IO   │  + SQLite    │         │              │       │
 │   │              │         │  + REST API  │         │              │       │
@@ -41,16 +41,16 @@ HAPI consists of three interconnected components that work together to provide r
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
-> **Note:** The server can run on your local desktop or a remote server (VPS, cloud, etc.). If deployed on a server with a public IP, tunneling is not required.
+> **Note:** The hub can run on your local desktop or a remote host (VPS, cloud, etc.). If deployed on a host with a public IP, tunneling is not required.
 
 ## Components
 
 ### HAPI CLI
 
-The CLI is a wrapper around AI coding agents (Claude Code, Codex, Gemini). It:
+The CLI is a wrapper around AI coding agents (Claude Code, Codex, Gemini, OpenCode). It:
 
 - Starts and manages coding sessions
-- Registers sessions with the HAPI server
+- Registers sessions with the HAPI hub
 - Relays messages and permission requests
 - Provides MCP (Model Context Protocol) tools
 
@@ -59,12 +59,13 @@ The CLI is a wrapper around AI coding agents (Claude Code, Codex, Gemini). It:
 hapi              # Start Claude Code session
 hapi codex        # Start OpenAI Codex session
 hapi gemini       # Start Google Gemini session
-hapi daemon start # Run background service for remote session spawning
+hapi opencode     # Start OpenCode session
+hapi runner start # Run background service for remote session spawning
 ```
 
-### HAPI Server
+### HAPI Hub
 
-The server is the central hub that connects everything:
+The hub is the central service that connects everything:
 
 - **HTTP API** - RESTful endpoints for sessions, messages, permissions
 - **Socket.IO** - Real-time bidirectional communication with CLI
@@ -93,10 +94,10 @@ A React-based PWA that provides the mobile interface:
 2. CLI starts Claude Code (or other agent)
          │
          ▼
-3. CLI connects to server via Socket.IO
+3. CLI connects to hub via Socket.IO
          │
          ▼
-4. Server creates session in database
+4. Hub creates session in database
          │
          ▼
 5. Web clients receive SSE update
@@ -111,10 +112,10 @@ A React-based PWA that provides the mobile interface:
 1. AI agent requests tool permission (e.g., file edit)
          │
          ▼
-2. CLI sends permission request to server
+2. CLI sends permission request to hub
          │
          ▼
-3. Server stores request and notifies via SSE + Telegram
+3. Hub stores request and notifies via SSE + Telegram
          │
          ▼
 4. User receives notification on phone
@@ -123,7 +124,7 @@ A React-based PWA that provides the mobile interface:
 5. User approves/denies in web app or Telegram
          │
          ▼
-6. Server relays decision to CLI via Socket.IO
+6. Hub relays decision to CLI via Socket.IO
          │
          ▼
 7. CLI informs AI agent, execution continues
@@ -132,7 +133,7 @@ A React-based PWA that provides the mobile interface:
 ### Message Flow
 
 ```
-User (Phone)                Server                    CLI
+User (Phone)                 Hub                     CLI
      │                         │                       │
      │──── Send message ──────►│                       │
      │                         │─── Socket.IO emit ───►│
@@ -146,7 +147,7 @@ User (Phone)                Server                    CLI
 
 ## Communication Protocols
 
-### CLI ↔ Server: Socket.IO
+### CLI ↔ Hub: Socket.IO
 
 Real-time bidirectional communication for:
 - Session registration and heartbeat
@@ -155,7 +156,7 @@ Real-time bidirectional communication for:
 - Metadata and state updates
 - RPC method invocation
 
-### Server ↔ Web: REST + SSE
+### Hub ↔ Web: REST + SSE
 
 - **REST API** for actions (send message, approve permission)
 - **SSE stream** for real-time updates (new messages, status changes)
@@ -173,7 +174,7 @@ HAPI's defining feature is the ability to seamlessly hand off control between lo
 
 ### Local Mode
 
-When working in local mode, you have the full terminal experience — it is native Claude Code or Codex:
+When working in local mode, you have the full terminal experience — it is native Claude Code, Codex, or OpenCode:
 
 - Direct keyboard input with instant response
 - Full terminal UI with syntax highlighting

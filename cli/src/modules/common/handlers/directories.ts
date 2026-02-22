@@ -1,6 +1,6 @@
 import { logger } from '@/ui/logger'
 import { readdir, stat } from 'fs/promises'
-import { basename, join } from 'path'
+import { basename, join, resolve } from 'path'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import { validatePath } from '../pathSecurity'
 import { getErrorMessage, rpcError } from '../rpcResponses'
@@ -46,17 +46,20 @@ export function registerDirectoryHandlers(rpcHandlerManager: RpcHandlerManager, 
     rpcHandlerManager.registerHandler<ListDirectoryRequest, ListDirectoryResponse>('listDirectory', async (data) => {
         logger.debug('List directory request:', data.path)
 
-        const validation = validatePath(data.path, workingDirectory)
+        const targetPath = data.path || '.'
+
+        const validation = validatePath(targetPath, workingDirectory)
         if (!validation.valid) {
             return rpcError(validation.error ?? 'Invalid directory path')
         }
 
         try {
-            const entries = await readdir(data.path, { withFileTypes: true })
+            const resolvedPath = resolve(workingDirectory, targetPath)
+            const entries = await readdir(resolvedPath, { withFileTypes: true })
 
             const directoryEntries: DirectoryEntry[] = await Promise.all(
                 entries.map(async (entry) => {
-                    const fullPath = join(data.path, entry.name)
+                    const fullPath = join(resolvedPath, entry.name)
                     let type: 'file' | 'directory' | 'other' = 'other'
                     let size: number | undefined
                     let modified: number | undefined
@@ -65,14 +68,18 @@ export function registerDirectoryHandlers(rpcHandlerManager: RpcHandlerManager, 
                         type = 'directory'
                     } else if (entry.isFile()) {
                         type = 'file'
+                    } else if (entry.isSymbolicLink()) {
+                        type = 'other'
                     }
 
-                    try {
-                        const stats = await stat(fullPath)
-                        size = stats.size
-                        modified = stats.mtime.getTime()
-                    } catch (error) {
-                        logger.debug(`Failed to stat ${fullPath}:`, error)
+                    if (!entry.isSymbolicLink()) {
+                        try {
+                            const stats = await stat(fullPath)
+                            size = stats.size
+                            modified = stats.mtime.getTime()
+                        } catch (error) {
+                            logger.debug(`Failed to stat ${fullPath}:`, error)
+                        }
                     }
 
                     return {
@@ -100,10 +107,14 @@ export function registerDirectoryHandlers(rpcHandlerManager: RpcHandlerManager, 
     rpcHandlerManager.registerHandler<GetDirectoryTreeRequest, GetDirectoryTreeResponse>('getDirectoryTree', async (data) => {
         logger.debug('Get directory tree request:', data.path, 'maxDepth:', data.maxDepth)
 
-        const validation = validatePath(data.path, workingDirectory)
+        const targetPath = data.path || '.'
+
+        const validation = validatePath(targetPath, workingDirectory)
         if (!validation.valid) {
             return rpcError(validation.error ?? 'Invalid directory path')
         }
+
+        const resolvedRoot = resolve(workingDirectory, targetPath)
 
         async function buildTree(path: string, name: string, currentDepth: number): Promise<TreeNode | null> {
             try {
@@ -157,8 +168,8 @@ export function registerDirectoryHandlers(rpcHandlerManager: RpcHandlerManager, 
                 return rpcError('maxDepth must be non-negative')
             }
 
-            const baseName = data.path === '/' ? '/' : basename(data.path) || data.path
-            const tree = await buildTree(data.path, baseName, 0)
+            const baseName = resolvedRoot === '/' ? '/' : basename(resolvedRoot) || resolvedRoot
+            const tree = await buildTree(resolvedRoot, baseName, 0)
 
             if (!tree) {
                 return rpcError('Failed to access the specified path')

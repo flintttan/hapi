@@ -1,6 +1,7 @@
 import { useMutation } from '@tanstack/react-query'
+import { useRef, useState } from 'react'
 import type { ApiClient } from '@/api/client'
-import type { DecryptedMessage } from '@/types/api'
+import type { AttachmentMetadata, DecryptedMessage } from '@/types/api'
 import { makeClientSideId } from '@/lib/messages'
 import {
     appendOptimisticMessage,
@@ -14,6 +15,15 @@ type SendMessageInput = {
     text: string
     localId: string
     createdAt: number
+    attachments?: AttachmentMetadata[]
+}
+
+type BlockedReason = 'no-api' | 'no-session' | 'pending'
+
+type UseSendMessageOptions = {
+    resolveSessionId?: (sessionId: string) => Promise<string>
+    onSessionResolved?: (sessionId: string) => void
+    onBlocked?: (reason: BlockedReason) => void
 }
 
 function findMessageByLocalId(
@@ -30,26 +40,39 @@ function findMessageByLocalId(
     return null
 }
 
-export function useSendMessage(api: ApiClient | null, sessionId: string | null): {
-    sendMessage: (text: string) => void
+export function useSendMessage(
+    api: ApiClient | null,
+    sessionId: string | null,
+    options?: UseSendMessageOptions
+): {
+    sendMessage: (text: string, attachments?: AttachmentMetadata[]) => void
     retryMessage: (localId: string) => void
     isSending: boolean
 } {
     const { haptic } = usePlatform()
+    const [isResolving, setIsResolving] = useState(false)
+    const resolveGuardRef = useRef(false)
 
     const mutation = useMutation({
         mutationFn: async (input: SendMessageInput) => {
             if (!api) {
                 throw new Error('API unavailable')
             }
-            await api.sendMessage(input.sessionId, input.text, input.localId)
+            await api.sendMessage(input.sessionId, input.text, input.localId, input.attachments)
         },
         onMutate: async (input) => {
             const optimisticMessage: DecryptedMessage = {
                 id: input.localId,
                 seq: null,
                 localId: input.localId,
-                content: { role: 'user', content: input.text },
+                content: {
+                    role: 'user',
+                    content: {
+                        type: 'text',
+                        text: input.text,
+                        attachments: input.attachments
+                    }
+                },
                 createdAt: input.createdAt,
                 status: 'sending',
                 originalText: input.text,
@@ -67,21 +90,68 @@ export function useSendMessage(api: ApiClient | null, sessionId: string | null):
         },
     })
 
-    const sendMessage = (text: string) => {
-        if (!api || !sessionId) return
-        if (mutation.isPending) return
+    const sendMessage = (text: string, attachments?: AttachmentMetadata[]) => {
+        if (!api) {
+            options?.onBlocked?.('no-api')
+            haptic.notification('error')
+            return
+        }
+        if (!sessionId) {
+            options?.onBlocked?.('no-session')
+            haptic.notification('error')
+            return
+        }
+        if (mutation.isPending || resolveGuardRef.current) {
+            options?.onBlocked?.('pending')
+            return
+        }
         const localId = makeClientSideId('local')
-        mutation.mutate({
-            sessionId,
-            text,
-            localId,
-            createdAt: Date.now(),
-        })
+        const createdAt = Date.now()
+        void (async () => {
+            let targetSessionId = sessionId
+            if (options?.resolveSessionId) {
+                resolveGuardRef.current = true
+                setIsResolving(true)
+                try {
+                    const resolved = await options.resolveSessionId(sessionId)
+                    if (resolved && resolved !== sessionId) {
+                        options.onSessionResolved?.(resolved)
+                        targetSessionId = resolved
+                    }
+                } catch (error) {
+                    haptic.notification('error')
+                    console.error('Failed to resolve session before send:', error)
+                    return
+                } finally {
+                    resolveGuardRef.current = false
+                    setIsResolving(false)
+                }
+            }
+            mutation.mutate({
+                sessionId: targetSessionId,
+                text,
+                localId,
+                createdAt,
+                attachments,
+            })
+        })()
     }
 
     const retryMessage = (localId: string) => {
-        if (!api || !sessionId) return
-        if (mutation.isPending) return
+        if (!api) {
+            options?.onBlocked?.('no-api')
+            haptic.notification('error')
+            return
+        }
+        if (!sessionId) {
+            options?.onBlocked?.('no-session')
+            haptic.notification('error')
+            return
+        }
+        if (mutation.isPending || resolveGuardRef.current) {
+            options?.onBlocked?.('pending')
+            return
+        }
 
         const message = findMessageByLocalId(sessionId, localId)
         if (!message?.originalText) return
@@ -99,6 +169,6 @@ export function useSendMessage(api: ApiClient | null, sessionId: string | null):
     return {
         sendMessage,
         retryMessage,
-        isSending: mutation.isPending,
+        isSending: mutation.isPending || isResolving,
     }
 }

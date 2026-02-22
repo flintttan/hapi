@@ -31,9 +31,18 @@ function areStringArraysEqual(left?: string[] | null, right?: string[] | null): 
     return true
 }
 
+type AnswersFormat = Record<string, string[]> | Record<string, { answers: string[] }>
+
+function normalizeAnswerEntry(entry: string[] | { answers: string[] }): string[] {
+    if (Array.isArray(entry)) {
+        return entry
+    }
+    return entry.answers ?? []
+}
+
 function areAnswersEqual(
-    left?: Record<string, string[]> | null,
-    right?: Record<string, string[]> | null
+    left?: AnswersFormat | null,
+    right?: AnswersFormat | null
 ): boolean {
     if (left === right) return true
     if (!left || !right) return false
@@ -45,7 +54,9 @@ function areAnswersEqual(
     for (let i = 0; i < leftKeys.length; i += 1) {
         const leftKey = leftKeys[i]
         if (leftKey !== rightKeys[i]) return false
-        if (!areStringArraysEqual(left[leftKey], right[leftKey])) return false
+        const leftEntry = (left as Record<string, string[] | { answers: string[] }>)[leftKey]
+        const rightEntry = (right as Record<string, string[] | { answers: string[] }>)[leftKey]
+        if (!areStringArraysEqual(normalizeAnswerEntry(leftEntry), normalizeAnswerEntry(rightEntry))) return false
     }
     return true
 }

@@ -1,13 +1,16 @@
 import { useCallback, useMemo, useState } from 'react'
-import { useNavigate, useParams } from '@tanstack/react-router'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import type { FileSearchItem, GitFileStatus } from '@/types/api'
 import { FileIcon } from '@/components/FileIcon'
+import { DirectoryTree } from '@/components/SessionFiles/DirectoryTree'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useGitStatusFiles } from '@/hooks/queries/useGitStatusFiles'
 import { useSession } from '@/hooks/queries/useSession'
 import { useSessionFileSearch } from '@/hooks/queries/useSessionFileSearch'
 import { encodeBase64 } from '@/lib/utils'
+import { queryKeys } from '@/lib/query-keys'
+import { useQueryClient } from '@tanstack/react-query'
 
 function BackIcon(props: { className?: string }) {
     return (
@@ -227,10 +230,15 @@ function FileListSkeleton(props: { label: string; rows?: number }) {
 export default function FilesPage() {
     const { api } = useAppContext()
     const navigate = useNavigate()
+    const queryClient = useQueryClient()
     const goBack = useAppGoBack()
     const { sessionId } = useParams({ from: '/sessions/$sessionId/files' })
+    const search = useSearch({ from: '/sessions/$sessionId/files' })
     const { session } = useSession(api, sessionId)
     const [searchQuery, setSearchQuery] = useState('')
+
+    const initialTab = search.tab === 'directories' ? 'directories' : 'changes'
+    const [activeTab, setActiveTab] = useState<'changes' | 'directories'>(initialTab)
 
     const {
         status: gitStatus,
@@ -240,26 +248,62 @@ export default function FilesPage() {
     } = useGitStatusFiles(api, sessionId)
 
     const shouldSearch = Boolean(searchQuery)
-        || (gitStatus ? (gitStatus.totalStaged === 0 && gitStatus.totalUnstaged === 0) : Boolean(gitError))
 
     const searchResults = useSessionFileSearch(api, sessionId, searchQuery, {
-        enabled: shouldSearch && !gitLoading
+        enabled: shouldSearch
     })
 
     const handleOpenFile = useCallback((path: string, staged?: boolean) => {
-        const search = staged === undefined
-            ? { path: encodeBase64(path) }
-            : { path: encodeBase64(path), staged }
+        const fileSearch = staged === undefined
+            ? (activeTab === 'directories'
+                ? { path: encodeBase64(path), tab: 'directories' as const }
+                : { path: encodeBase64(path) })
+            : (activeTab === 'directories'
+                ? { path: encodeBase64(path), staged, tab: 'directories' as const }
+                : { path: encodeBase64(path), staged })
         navigate({
             to: '/sessions/$sessionId/file',
             params: { sessionId },
-            search
+            search: fileSearch
         })
-    }, [navigate, sessionId])
+    }, [activeTab, navigate, sessionId])
 
     const branchLabel = gitStatus?.branch ?? 'detached'
     const subtitle = session?.metadata?.path ?? sessionId
     const showGitErrorBanner = Boolean(gitError)
+    const rootLabel = useMemo(() => {
+        const base = session?.metadata?.path ?? sessionId
+        const parts = base.split(/[/\\]/).filter(Boolean)
+        return parts.length ? parts[parts.length - 1] : base
+    }, [session?.metadata?.path, sessionId])
+
+    const handleRefresh = useCallback(() => {
+        if (searchQuery) {
+            void queryClient.invalidateQueries({
+                queryKey: queryKeys.sessionFiles(sessionId, searchQuery)
+            })
+            return
+        }
+
+        if (activeTab === 'directories') {
+            void queryClient.invalidateQueries({
+                queryKey: ['session-directory', sessionId]
+            })
+            return
+        }
+
+        void refetchGit()
+    }, [activeTab, queryClient, refetchGit, searchQuery, sessionId])
+
+    const handleTabChange = useCallback((nextTab: 'changes' | 'directories') => {
+        setActiveTab(nextTab)
+        navigate({
+            to: '/sessions/$sessionId/files',
+            params: { sessionId },
+            search: nextTab === 'changes' ? {} : { tab: nextTab },
+            replace: true,
+        })
+    }, [navigate, sessionId])
 
     return (
         <div className="flex h-full flex-col">
@@ -278,7 +322,7 @@ export default function FilesPage() {
                     </div>
                     <button
                         type="button"
-                        onClick={() => { void refetchGit() }}
+                        onClick={handleRefresh}
                         className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
                         title="Refresh"
                     >
@@ -303,7 +347,36 @@ export default function FilesPage() {
                 </div>
             </div>
 
-            {!gitLoading && gitStatus ? (
+            <div className="bg-[var(--app-bg)] border-b border-[var(--app-divider)]" role="tablist">
+                <div className="mx-auto w-full max-w-content grid grid-cols-2">
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'changes'}
+                        onClick={() => handleTabChange('changes')}
+                        className={`relative py-3 text-center text-sm font-semibold transition-colors hover:bg-[var(--app-subtle-bg)] ${activeTab === 'changes' ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
+                    >
+                        Changes
+                        <span
+                            className={`absolute bottom-0 left-1/2 h-0.5 w-10 -translate-x-1/2 rounded-full ${activeTab === 'changes' ? 'bg-[var(--app-link)]' : 'bg-transparent'}`}
+                        />
+                    </button>
+                    <button
+                        type="button"
+                        role="tab"
+                        aria-selected={activeTab === 'directories'}
+                        onClick={() => handleTabChange('directories')}
+                        className={`relative py-3 text-center text-sm font-semibold transition-colors hover:bg-[var(--app-subtle-bg)] ${activeTab === 'directories' ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
+                    >
+                        Directories
+                        <span
+                            className={`absolute bottom-0 left-1/2 h-0.5 w-10 -translate-x-1/2 rounded-full ${activeTab === 'directories' ? 'bg-[var(--app-link)]' : 'bg-transparent'}`}
+                        />
+                    </button>
+                </div>
+            </div>
+
+            {!gitLoading && gitStatus && !searchQuery && activeTab === 'changes' ? (
                 <div className="bg-[var(--app-bg)]">
                     <div className="mx-auto w-full max-w-content px-3 py-2 border-b border-[var(--app-divider)]">
                         <div className="flex items-center gap-2 text-sm">
@@ -319,14 +392,12 @@ export default function FilesPage() {
 
             <div className="flex-1 overflow-y-auto">
                 <div className="mx-auto w-full max-w-content">
-                    {showGitErrorBanner ? (
+                    {showGitErrorBanner && activeTab === 'changes' ? (
                         <div className="border-b border-[var(--app-divider)] bg-amber-500/10 px-3 py-2 text-xs text-[var(--app-hint)]">
                             {gitError}
                         </div>
                     ) : null}
-                    {gitLoading ? (
-                        <FileListSkeleton label="Loading Git status…" />
-                    ) : shouldSearch ? (
+                    {shouldSearch ? (
                         searchResults.isLoading ? (
                             <FileListSkeleton label="Loading files…" />
                         ) : searchResults.error ? (
@@ -347,6 +418,15 @@ export default function FilesPage() {
                                 ))}
                             </div>
                         )
+                    ) : activeTab === 'directories' ? (
+                        <DirectoryTree
+                            api={api}
+                            sessionId={sessionId}
+                            rootLabel={rootLabel}
+                            onOpenFile={(path) => handleOpenFile(path)}
+                        />
+                    ) : gitLoading ? (
+                        <FileListSkeleton label="Loading Git status…" />
                     ) : (
                         <div>
                             {gitStatus?.stagedFiles.length ? (
@@ -381,9 +461,15 @@ export default function FilesPage() {
                                 </div>
                             ) : null}
 
+                            {!gitStatus ? (
+                                <div className="p-6 text-sm text-[var(--app-hint)]">
+                                    Git status unavailable. Use Directories to browse all files, or search.
+                                </div>
+                            ) : null}
+
                             {gitStatus && gitStatus.stagedFiles.length === 0 && gitStatus.unstagedFiles.length === 0 ? (
                                 <div className="p-6 text-sm text-[var(--app-hint)]">
-                                    No changes detected. Use search to browse files.
+                                    No changes detected. Use Directories to browse all files, or search.
                                 </div>
                             ) : null}
                         </div>

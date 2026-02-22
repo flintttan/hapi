@@ -15,6 +15,7 @@ import { getToolName } from "./getToolName";
 import { EnhancedMode, PermissionMode } from "../loop";
 import { getToolDescriptor } from "./getToolDescriptor";
 import { delay } from "@/utils/time";
+import { isObject } from "@hapi/protocol";
 import {
     BasePermissionHandler,
     type PendingPermissionRequest,
@@ -27,21 +28,35 @@ interface PermissionResponse {
     reason?: string;
     mode?: PermissionMode;
     allowTools?: string[];
-    answers?: Record<string, string[]>;
+    answers?: Record<string, string[]> | Record<string, { answers: string[] }>;
     receivedAt?: number;
 }
 
 const PLAN_EXIT_MODES: PermissionMode[] = ['default', 'acceptEdits', 'bypassPermissions'];
 
-function isObject(value: unknown): value is Record<string, unknown> {
-    return Boolean(value) && typeof value === 'object';
-}
-
 function isAskUserQuestionToolName(toolName: string): boolean {
     return toolName === 'AskUserQuestion' || toolName === 'ask_user_question';
 }
 
-function formatAskUserQuestionAnswers(answers: Record<string, string[]>, input: unknown): string {
+function isRequestUserInputToolName(toolName: string): boolean {
+    return toolName === 'request_user_input';
+}
+
+function isQuestionToolName(toolName: string): boolean {
+    return isAskUserQuestionToolName(toolName) || isRequestUserInputToolName(toolName);
+}
+
+function formatAskUserQuestionAnswers(answers: Record<string, string[]> | Record<string, { answers: string[] }>, input: unknown): string {
+    // Normalize nested format to flat format for display
+    const flatAnswers: Record<string, string[]> = {};
+    for (const [key, value] of Object.entries(answers)) {
+        if (Array.isArray(value)) {
+            flatAnswers[key] = value;
+        } else if (value && typeof value === 'object' && 'answers' in value) {
+            flatAnswers[key] = value.answers;
+        }
+    }
+
     const questions = (() => {
         if (!isObject(input)) return null;
         const raw = input.questions;
@@ -49,7 +64,7 @@ function formatAskUserQuestionAnswers(answers: Record<string, string[]>, input: 
         return raw.filter((q) => isObject(q));
     })();
 
-    const keys = Object.keys(answers).sort((a, b) => {
+    const keys = Object.keys(flatAnswers).sort((a, b) => {
         const aNum = Number.parseInt(a, 10);
         const bNum = Number.parseInt(b, 10);
         if (Number.isFinite(aNum) && Number.isFinite(bNum)) return aNum - bNum;
@@ -66,7 +81,7 @@ function formatAskUserQuestionAnswers(answers: Record<string, string[]>, input: 
             : Number.isFinite(idx)
                 ? `Question ${idx + 1}`
                 : `Question ${key}`;
-        const value = answers[key] ?? [];
+        const value = flatAnswers[key] ?? [];
         const joined = value.map((v) => String(v)).filter((v) => v.trim().length > 0).join(', ');
         return `${header}: ${joined || '(no answer)'}`;
     });
@@ -85,7 +100,32 @@ function formatAskUserQuestionAnswers(answers: Record<string, string[]>, input: 
         : `User answered:\n${body}`;
 }
 
-function buildAskUserQuestionUpdatedInput(input: unknown, answers: Record<string, string[]>): Record<string, unknown> {
+function buildAskUserQuestionUpdatedInput(input: unknown, answers: Record<string, string[]> | Record<string, { answers: string[] }>): Record<string, unknown> {
+    // Normalize to flat format for AskUserQuestion
+    const flatAnswers: Record<string, string[]> = {};
+    for (const [key, value] of Object.entries(answers)) {
+        if (Array.isArray(value)) {
+            flatAnswers[key] = value;
+        } else if (value && typeof value === 'object' && 'answers' in value) {
+            flatAnswers[key] = value.answers;
+        }
+    }
+
+    if (!isObject(input)) {
+        return { answers: flatAnswers };
+    }
+
+    return {
+        ...input,
+        answers: flatAnswers
+    };
+}
+
+/**
+ * Build updated input for request_user_input tool
+ * The answers format is nested: { answers: { [id]: { answers: string[] } } }
+ */
+function buildRequestUserInputUpdatedInput(input: unknown, answers: unknown): Record<string, unknown> {
     if (!isObject(input)) {
         return { answers };
     }
@@ -126,10 +166,10 @@ export class PermissionHandler extends BasePermissionHandler<PermissionResponse,
     /**
      * Handler response
      */
-    protected handlePermissionResponse(
+    protected async handlePermissionResponse(
         response: PermissionResponse,
         pending: PendingPermissionRequest<PermissionResult>
-    ): PermissionCompletion {
+    ): Promise<PermissionCompletion> {
         const completion: PermissionCompletion = {
             status: response.approved ? 'approved' : 'denied',
             reason: response.reason,
@@ -141,7 +181,7 @@ export class PermissionHandler extends BasePermissionHandler<PermissionResponse,
         // Update allowed tools
         if (response.allowTools && response.allowTools.length > 0) {
             response.allowTools.forEach(tool => {
-                if (isAskUserQuestionToolName(tool)) {
+                if (isQuestionToolName(tool)) {
                     return;
                 }
                 if (tool.startsWith('Bash(') || tool === 'Bash') {
@@ -169,6 +209,22 @@ export class PermissionHandler extends BasePermissionHandler<PermissionResponse,
                 pending.resolve({
                     behavior: 'allow',
                     updatedInput: buildAskUserQuestionUpdatedInput(pending.input, answers)
+                });
+            }
+            return completion;
+        }
+
+        // Handle request_user_input
+        if (isRequestUserInputToolName(pending.toolName)) {
+            const answers = response.answers ?? {};
+            if (Object.keys(answers).length === 0) {
+                pending.resolve({ behavior: 'deny', message: 'No answers were provided.' });
+                completion.status = 'denied';
+                completion.reason = completion.reason ?? 'No answers were provided.';
+            } else {
+                pending.resolve({
+                    behavior: 'allow',
+                    updatedInput: buildRequestUserInputUpdatedInput(pending.input, answers)
                 });
             }
             return completion;
@@ -205,10 +261,10 @@ export class PermissionHandler extends BasePermissionHandler<PermissionResponse,
      * Creates the canCallTool callback for the SDK
      */
     handleToolCall = async (toolName: string, input: unknown, mode: EnhancedMode, options: { signal: AbortSignal }): Promise<PermissionResult> => {
-        const isAskUserQuestion = isAskUserQuestionToolName(toolName);
+        const isQuestionTool = isQuestionToolName(toolName);
 
         // Check if tool is explicitly allowed
-        if (!isAskUserQuestion && toolName === 'Bash') {
+        if (!isQuestionTool && toolName === 'Bash') {
             const inputObj = input as { command?: string };
             if (inputObj?.command) {
                 // Check literal matches
@@ -222,7 +278,7 @@ export class PermissionHandler extends BasePermissionHandler<PermissionResponse,
                     }
                 }
             }
-        } else if (!isAskUserQuestion && this.allowedTools.has(toolName)) {
+        } else if (!isQuestionTool && this.allowedTools.has(toolName)) {
             return { behavior: 'allow', updatedInput: input as Record<string, unknown> };
         }
 
@@ -233,11 +289,11 @@ export class PermissionHandler extends BasePermissionHandler<PermissionResponse,
         // Handle special cases
         //
 
-        if (!isAskUserQuestion && this.permissionMode === 'bypassPermissions') {
+        if (!isQuestionTool && this.permissionMode === 'bypassPermissions') {
             return { behavior: 'allow', updatedInput: input as Record<string, unknown> };
         }
 
-        if (!isAskUserQuestion && this.permissionMode === 'acceptEdits' && descriptor.edit) {
+        if (!isQuestionTool && this.permissionMode === 'acceptEdits' && descriptor.edit) {
             return { behavior: 'allow', updatedInput: input as Record<string, unknown> };
         }
 

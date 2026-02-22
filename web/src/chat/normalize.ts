@@ -1,7 +1,7 @@
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
+import { safeStringify } from '@hapi/protocol'
 import type { DecryptedMessage } from '@/types/api'
 import type { NormalizedMessage } from '@/chat/types'
-import { safeStringify } from '@/chat/normalizeUtils'
 import { isCodexContent, isSkippableAgentContent, normalizeAgentRecord } from '@/chat/normalizeAgent'
 import { normalizeUserRecord } from '@/chat/normalizeUser'
 

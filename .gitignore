@@ -6,11 +6,11 @@
 **/.vitepress/cache/
 **/dist-exe/
 **/*.tsbuildinfo
-server/src/web/embeddedAssets.generated.ts
+hub/src/web/embeddedAssets.generated.ts
 
 # Downloaded tools (fetched at build time)
-server/tools/tunwg/tunwg-*
-server/tools/tunwg/*.exe
+hub/tools/tunwg/tunwg-*
+hub/tools/tunwg/*.exe
 
 # Env files (can contain secrets)
 **/.env
@@ -56,3 +56,6 @@ scripts/debug-*.sh
 scripts/inspect-*.mjs
 scripts/inspect-*.py
 .mcp.json
+
+# Generated npm bundle output (local)
+cli/npm/main/
