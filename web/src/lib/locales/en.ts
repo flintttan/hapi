@@ -242,6 +242,11 @@ export default {
 
   // Settings page
   'settings.title': 'Settings',
+  'settings.account.title': 'Account',
+  'settings.account.currentUser': 'Current user',
+  'settings.account.unknownUser': 'Unknown user',
+  'settings.account.logout': 'Sign out',
+  'settings.account.logoutConfirm': 'Sign out of this device?',
   'settings.language.title': 'Language',
   'settings.language.label': 'Language',
   'settings.display.title': 'Display',

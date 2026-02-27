@@ -1,9 +1,10 @@
-import { useState, useRef, useEffect } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { getElevenLabsSupportedLanguages, getLanguageDisplayName, type Language } from '@/lib/languages'
 import { getFontScaleOptions, useFontScale, type FontScale } from '@/hooks/useFontScale'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
+import { useAppContext } from '@/lib/app-context'
 
 const locales: { value: Locale; nativeLabel: string }[] = [
     { value: 'en', nativeLabel: 'English' },
@@ -71,6 +72,7 @@ function ChevronDownIcon(props: { className?: string }) {
 
 export default function SettingsPage() {
     const { t, locale, setLocale } = useTranslation()
+    const { user, onLogout } = useAppContext()
     const goBack = useAppGoBack()
     const [isOpen, setIsOpen] = useState(false)
     const [isFontOpen, setIsFontOpen] = useState(false)
@@ -109,6 +111,20 @@ export default function SettingsPage() {
         }
         setIsVoiceOpen(false)
     }
+
+    const userLabel = (() => {
+        if (!user) return t('settings.account.unknownUser')
+        if (user.username) return `@${user.username}`
+        if (user.firstName) return user.firstName
+        return String(user.id)
+    })()
+
+    const handleLogout = useCallback(() => {
+        if (!onLogout) return
+        const confirmed = confirm(t('settings.account.logoutConfirm'))
+        if (!confirmed) return
+        onLogout()
+    }, [onLogout, t])
 
     // Close dropdown when clicking outside
     useEffect(() => {
@@ -163,6 +179,28 @@ export default function SettingsPage() {
 
             <div className="flex-1 overflow-y-auto">
                 <div className="mx-auto w-full max-w-content">
+                    {/* Account section */}
+                    <div className="border-b border-[var(--app-divider)]">
+                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
+                            {t('settings.account.title')}
+                        </div>
+
+                        <div className="flex w-full items-center justify-between px-3 py-3">
+                            <span className="text-[var(--app-fg)]">{t('settings.account.currentUser')}</span>
+                            <span className="text-[var(--app-hint)]">{userLabel}</span>
+                        </div>
+
+                        {onLogout ? (
+                            <button
+                                type="button"
+                                onClick={handleLogout}
+                                className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                            >
+                                <span className="text-red-600">{t('settings.account.logout')}</span>
+                            </button>
+                        ) : null}
+                    </div>
+
                     {/* Language section */}
                     <div className="border-b border-[var(--app-divider)]">
                         <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">

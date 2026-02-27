@@ -244,6 +244,11 @@ export default {
 
   // Settings page
   'settings.title': '设置',
+  'settings.account.title': '账号',
+  'settings.account.currentUser': '当前用户',
+  'settings.account.unknownUser': '未知用户',
+  'settings.account.logout': '退出登录',
+  'settings.account.logoutConfirm': '确定要退出登录吗？',
   'settings.language.title': '语言',
   'settings.language.label': '语言',
   'settings.display.title': '显示',

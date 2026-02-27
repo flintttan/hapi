@@ -12,6 +12,14 @@ vi.mock('@tanstack/react-router', () => ({
     useLocation: () => '/settings',
 }))
 
+// Mock app context
+vi.mock('@/lib/app-context', () => ({
+    useAppContext: () => ({
+        user: { id: 'user-1', username: 'alice' },
+        onLogout: vi.fn(),
+    }),
+}))
+
 // Mock useFontScale hook
 vi.mock('@/hooks/useFontScale', () => ({
     useFontScale: () => ({ fontScale: 1, setFontScale: vi.fn() }),
@@ -67,6 +75,13 @@ describe('SettingsPage', () => {
         expect(screen.getByText('About')).toBeInTheDocument()
     })
 
+    it('renders the Account section', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getByText('Account')).toBeInTheDocument()
+        expect(screen.getByText('Current user')).toBeInTheDocument()
+        expect(screen.getByText('@alice')).toBeInTheDocument()
+    })
+
     it('displays the App Version with correct value', () => {
         renderWithProviders(<SettingsPage />)
         expect(screen.getAllByText('App Version').length).toBeGreaterThanOrEqual(1)
@@ -93,6 +108,9 @@ describe('SettingsPage', () => {
     it('uses correct i18n keys for About section', () => {
         const spyT = renderWithSpyT(<SettingsPage />)
         const calledKeys = spyT.mock.calls.map((call) => call[0])
+        expect(calledKeys).toContain('settings.account.title')
+        expect(calledKeys).toContain('settings.account.currentUser')
+        expect(calledKeys).toContain('settings.account.logout')
         expect(calledKeys).toContain('settings.about.title')
         expect(calledKeys).toContain('settings.about.website')
         expect(calledKeys).toContain('settings.about.appVersion')
