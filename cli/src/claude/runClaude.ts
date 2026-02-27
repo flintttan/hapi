@@ -29,7 +29,15 @@ export interface StartOptions {
 }
 
 export async function runClaude(options: StartOptions = {}): Promise<void> {
-    const workingDirectory = process.cwd();
+    const forcedCwd = process.env.HAPI_SESSION_CWD;
+    const workingDirectory = forcedCwd ?? process.cwd();
+    if (forcedCwd) {
+        try {
+            process.chdir(forcedCwd);
+        } catch (error) {
+            logger.debug(`[START] Failed to chdir to HAPI_SESSION_CWD=${forcedCwd}`, error);
+        }
+    }
     const startedBy = options.startedBy ?? 'terminal';
 
     // Log environment info at startup

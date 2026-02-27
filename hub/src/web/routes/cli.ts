@@ -32,6 +32,11 @@ type CliEnv = {
     }
 }
 
+function stripNamespace<T extends { namespace: string }>(value: T): Omit<T, 'namespace'> {
+    const { namespace: _namespace, ...rest } = value
+    return rest
+}
+
 function resolveSessionForNamespace(
     engine: SyncEngine,
     sessionId: string,
@@ -110,7 +115,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store: S
 
         const namespace = c.get('namespace')
         const session = engine.getOrCreateSession(parsed.data.tag, parsed.data.metadata, parsed.data.agentState ?? null, namespace)
-        return c.json({ session })
+        return c.json({ session: stripNamespace(session) })
     })
 
     app.get('/sessions/:id', (c) => {
@@ -125,7 +130,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store: S
         if (!resolved.ok) {
             return c.json({ error: resolved.error }, resolved.status)
         }
-        return c.json({ session: resolved.session })
+        return c.json({ session: stripNamespace(resolved.session) })
     })
 
     app.get('/sessions/:id/messages', (c) => {
@@ -169,7 +174,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store: S
             return c.json({ error: 'Machine access denied' }, 403)
         }
         const machine = engine.getOrCreateMachine(parsed.data.id, parsed.data.metadata, parsed.data.runnerState ?? null, namespace)
-        return c.json({ machine })
+        return c.json({ machine: stripNamespace(machine) })
     })
 
     app.get('/machines/:id', (c) => {
@@ -184,7 +189,7 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store: S
         if (!resolved.ok) {
             return c.json({ error: resolved.error }, resolved.status)
         }
-        return c.json({ machine: resolved.machine })
+        return c.json({ machine: stripNamespace(resolved.machine) })
     })
 
     return app

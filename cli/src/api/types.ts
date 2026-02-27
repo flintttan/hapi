@@ -76,7 +76,7 @@ export type CliMessagesResponse = z.infer<typeof CliMessagesResponseSchema>
 export const CreateSessionResponseSchema = z.object({
     session: z.object({
         id: z.string(),
-        namespace: z.string(),
+        namespace: z.string().optional(),
         seq: z.number(),
         createdAt: z.number(),
         updatedAt: z.number(),

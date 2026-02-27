@@ -21,7 +21,15 @@ export async function runGemini(opts: {
     permissionMode?: PermissionMode;
     model?: string;
 } = {}): Promise<void> {
-    const workingDirectory = process.cwd();
+    const forcedCwd = process.env.HAPI_SESSION_CWD;
+    const workingDirectory = forcedCwd ?? process.cwd();
+    if (forcedCwd) {
+        try {
+            process.chdir(forcedCwd);
+        } catch (error) {
+            logger.debug(`[gemini] Failed to chdir to HAPI_SESSION_CWD=${forcedCwd}`, error);
+        }
+    }
     const startedBy = opts.startedBy ?? 'terminal';
 
     logger.debug(`[gemini] Starting with options: startedBy=${startedBy}, startingMode=${opts.startingMode}`);

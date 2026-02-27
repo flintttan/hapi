@@ -21,7 +21,15 @@ export async function runCodex(opts: {
     resumeSessionId?: string;
     model?: string;
 }): Promise<void> {
-    const workingDirectory = process.cwd();
+    const forcedCwd = process.env.HAPI_SESSION_CWD;
+    const workingDirectory = forcedCwd ?? process.cwd();
+    if (forcedCwd) {
+        try {
+            process.chdir(forcedCwd);
+        } catch (error) {
+            logger.debug(`[codex] Failed to chdir to HAPI_SESSION_CWD=${forcedCwd}`, error);
+        }
+    }
     const startedBy = opts.startedBy ?? 'terminal';
 
     logger.debug(`[codex] Starting with options: startedBy=${startedBy}`);

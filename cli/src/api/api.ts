@@ -56,7 +56,7 @@ export class ApiClient {
 
         return {
             id: raw.id,
-            namespace: raw.namespace,
+            namespace: raw.namespace ?? 'default',
             seq: raw.seq,
             createdAt: raw.createdAt,
             updatedAt: raw.updatedAt,
