@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 
 /**
- * Generates a static embedded assets file for a specific target platform
- * This avoids runtime dependency on bun:bundle module
+ * Generates a static embedded assets file for a specific target platform.
+ * This avoids runtime dependency on bun:bundle module.
  */
 
 import { writeFileSync } from 'node:fs';
@@ -12,21 +12,18 @@ import { fileURLToPath } from 'node:url';
 interface Target {
     platform: string;
     arch: string;
-    feature: string;
 }
 
 function parseTarget(target: string): Target {
     const parts = target.split('-');
-    if (parts.length !== 3 || parts[0] !== 'bun') {
+    if ((parts.length !== 3 && parts.length !== 4) || parts[0] !== 'bun') {
         throw new Error(`Invalid target: ${target}`);
     }
 
     const platform = parts[1] === 'windows' ? 'win32' : parts[1];
     const arch = parts[2];
-    const platformToken = parts[1].toUpperCase();
-    const feature = `HAPI_TARGET_${platformToken}_${arch.toUpperCase()}`;
 
-    return { platform, arch, feature };
+    return { platform, arch };
 }
 
 function getPlatformAssets(target: Target): string {

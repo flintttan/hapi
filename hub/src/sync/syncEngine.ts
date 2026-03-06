@@ -300,7 +300,7 @@ export class SyncEngine {
     async spawnSession(
         machineId: string,
         directory: string,
-        agent: 'claude' | 'codex' | 'gemini' | 'opencode' = 'claude',
+        agent: 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode' = 'claude',
         model?: string,
         yolo?: boolean,
         sessionType?: 'simple' | 'worktree',
@@ -345,7 +345,7 @@ export class SyncEngine {
             return { type: 'error', message: 'Session metadata missing path', code: 'resume_unavailable' }
         }
 
-        const flavor = metadata.flavor === 'codex' || metadata.flavor === 'gemini' || metadata.flavor === 'opencode'
+        const flavor = metadata.flavor === 'codex' || metadata.flavor === 'gemini' || metadata.flavor === 'opencode' || metadata.flavor === 'cursor'
             ? metadata.flavor
             : 'claude'
         const resumeToken = flavor === 'codex'
@@ -354,7 +354,9 @@ export class SyncEngine {
                 ? metadata.geminiSessionId
                 : flavor === 'opencode'
                     ? metadata.opencodeSessionId
-                    : metadata.claudeSessionId
+                    : flavor === 'cursor'
+                        ? metadata.cursorSessionId
+                        : metadata.claudeSessionId
 
         if (!resumeToken) {
             return { type: 'error', message: 'Resume session ID unavailable', code: 'resume_unavailable' }
@@ -467,7 +469,7 @@ export class SyncEngine {
 
     async listSlashCommands(sessionId: string, agent: string): Promise<{
         success: boolean
-        commands?: Array<{ name: string; description?: string; source: 'builtin' | 'user' }>
+        commands?: Array<{ name: string; description?: string; source: 'builtin' | 'user' | 'plugin' | 'project' }>
         error?: string
     }> {
         return await this.rpcGateway.listSlashCommands(sessionId, agent)

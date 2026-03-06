@@ -39,6 +39,9 @@ export function requireSessionFromParam(
 ): { sessionId: string; session: Session } | Response {
     const paramName = options?.paramName ?? 'id'
     const sessionId = c.req.param(paramName)
+    if (!sessionId) {
+        return c.json({ error: 'Missing session id' }, 400)
+    }
     return requireSession(c, engine, sessionId, { requireActive: options?.requireActive })
 }
 

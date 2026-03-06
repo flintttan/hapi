@@ -5,12 +5,13 @@ import { fileURLToPath } from 'node:url';
 const DEFAULT_TARGETS = [
     'bun-darwin-x64',
     'bun-darwin-arm64',
-    'bun-linux-x64',
+    'bun-linux-x64-baseline',
     'bun-linux-arm64',
     'bun-windows-x64'
 ];
 const SUPPORTED_PLATFORMS = new Set(['darwin', 'linux', 'windows']);
 const SUPPORTED_ARCHES = new Set(['x64', 'arm64']);
+const SUPPORTED_LINUX_X64_VARIANTS = new Set(['baseline', 'modern']);
 
 function getArg(args: string[], name: string): string | undefined {
     const idx = args.indexOf(name);
@@ -37,13 +38,22 @@ function resolveHostArch(): string {
     throw new Error(`Unsupported host arch: ${process.arch}`);
 }
 
+function resolveDefaultTarget(): string {
+    const platform = resolveHostPlatform();
+    const arch = resolveHostArch();
+    if (platform === 'linux' && arch === 'x64') {
+        return 'bun-linux-x64-baseline';
+    }
+    return `bun-${platform}-${arch}`;
+}
+
 function resolveTarget(target?: string): string {
     if (!target) {
-        return `bun-${resolveHostPlatform()}-${resolveHostArch()}`;
+        return resolveDefaultTarget();
     }
 
     const parts = target.split('-');
-    if (parts.length < 2 || parts.length > 3 || parts[0] !== 'bun') {
+    if (parts.length < 2 || parts.length > 4 || parts[0] !== 'bun') {
         throw new Error(`Invalid target: ${target}`);
     }
 
@@ -57,12 +67,25 @@ function resolveTarget(target?: string): string {
         throw new Error(`Unsupported arch in target: ${target}`);
     }
 
-    return `bun-${platformPart}-${archPart}`;
+    const variantPart = parts[3];
+    if (!variantPart) {
+        return `bun-${platformPart}-${archPart}`;
+    }
+
+    if (platformPart !== 'linux' || archPart !== 'x64') {
+        throw new Error(`Unsupported variant in target: ${target}`);
+    }
+
+    if (!SUPPORTED_LINUX_X64_VARIANTS.has(variantPart)) {
+        throw new Error(`Unsupported linux x64 variant in target: ${target}`);
+    }
+
+    return `bun-${platformPart}-${archPart}-${variantPart}`;
 }
 
 function parseTarget(target: string): { platform: string; arch: string } {
     const parts = target.split('-');
-    if (parts.length !== 3 || parts[0] !== 'bun') {
+    if ((parts.length !== 3 && parts.length !== 4) || parts[0] !== 'bun') {
         throw new Error(`Invalid target: ${target}`);
     }
 
@@ -75,6 +98,16 @@ function parseTarget(target: string): { platform: string; arch: string } {
 
     if (!SUPPORTED_ARCHES.has(archPart)) {
         throw new Error(`Unsupported arch in target: ${target}`);
+    }
+
+    const variantPart = parts[3];
+    if (variantPart) {
+        if (platformPart !== 'linux' || archPart !== 'x64') {
+            throw new Error(`Unsupported variant in target: ${target}`);
+        }
+        if (!SUPPORTED_LINUX_X64_VARIANTS.has(variantPart)) {
+            throw new Error(`Unsupported linux x64 variant in target: ${target}`);
+        }
     }
 
     return {
@@ -235,7 +268,7 @@ async function main(): Promise<void> {
     const includeWebAssets = args.includes('--with-web-assets');
 
     if (args.includes('--target') && !target) {
-        console.error('Usage: bun run scripts/build-executable.ts [--target <bun-platform[-arch]>] [--outdir dist-exe] [--name hapi] [--with-web-assets]');
+        console.error('Usage: bun run scripts/build-executable.ts [--target <bun-platform[-arch[-variant]]>] [--outdir dist-exe] [--name hapi] [--with-web-assets]');
         console.error('   or: bun run scripts/build-executable.ts --all [--outdir dist-exe] [--name hapi] [--with-web-assets]');
         process.exit(1);
     }

@@ -46,7 +46,7 @@ const PLATFORMS = [
         name: 'linux-x64',
         os: 'linux',
         cpu: 'x64',
-        buildTarget: 'bun-linux-x64',
+        buildTarget: 'bun-linux-x64-baseline',
         binName: 'hapi'
     },
     {

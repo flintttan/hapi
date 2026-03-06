@@ -7,7 +7,7 @@
 ::: code-group
 
 ```bash [npm]
-npm install -g @twsxtd/hapi
+npm install -g @twsxtd/hapi --registry=https://registry.npmjs.org
 ```
 
 ```bash [Homebrew]
@@ -19,6 +19,8 @@ npx @twsxtd/hapi
 ```
 
 :::
+
+> Recommendation: use the official npm registry for global install. Some mirrors may not sync platform packages in time.
 
 Other install options: [Installation](./installation.md)
 

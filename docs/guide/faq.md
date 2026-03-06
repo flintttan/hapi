@@ -18,6 +18,7 @@ Yes, HAPI is open source and free to use under the AGPL-3.0-only license.
 
 - **Claude Code** (recommended)
 - **OpenAI Codex**
+- **Cursor Agent**
 - **Google Gemini**
 - **OpenCode**
 
@@ -155,6 +156,19 @@ npm install -g @anthropic-ai/claude-code
 # or
 export HAPI_CLAUDE_PATH=/path/to/claude
 ```
+
+### Cursor Agent not found
+
+Install Cursor Agent CLI:
+```bash
+# macOS/Linux
+curl https://cursor.com/install -fsS | bash
+
+# Windows (PowerShell)
+irm 'https://cursor.com/install?win32=true' | iex
+```
+
+Ensure `agent` is on your PATH.
 
 ### How do I run diagnostics?
 

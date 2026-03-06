@@ -1,6 +1,7 @@
 import { authCommand } from './auth'
 import { claudeCommand } from './claude'
 import { codexCommand } from './codex'
+import { cursorCommand } from './cursor'
 import { connectCommand } from './connect'
 import { runnerCommand } from './runner'
 import { doctorCommand } from './doctor'
@@ -16,6 +17,7 @@ const COMMANDS: CommandDefinition[] = [
     authCommand,
     connectCommand,
     codexCommand,
+    cursorCommand,
     geminiCommand,
     opencodeCommand,
     mcpCommand,

@@ -71,6 +71,7 @@ ${chalk.bold('Usage:')}
   hapi [options]         Start Claude with Telegram control (direct-connect)
   hapi auth              Manage authentication
   hapi codex             Start Codex mode
+  hapi cursor            Start Cursor Agent mode
   hapi gemini            Start Gemini ACP mode
   hapi opencode          Start OpenCode ACP mode
   hapi mcp               Start MCP stdio bridge

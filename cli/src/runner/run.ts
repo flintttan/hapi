@@ -331,15 +331,19 @@ export async function startRunner(): Promise<void> {
         // Construct arguments for the CLI
         const agentCommand = agent === 'codex'
           ? 'codex'
-          : agent === 'gemini'
-            ? 'gemini'
-            : agent === 'opencode'
-              ? 'opencode'
-              : 'claude';
+          : agent === 'cursor'
+            ? 'cursor'
+            : agent === 'gemini'
+              ? 'gemini'
+              : agent === 'opencode'
+                ? 'opencode'
+                : 'claude';
         const args = [agentCommand];
         if (options.resumeSessionId) {
             if (agent === 'codex') {
                 args.push('resume', options.resumeSessionId);
+            } else if (agent === 'cursor') {
+                args.push('--resume', options.resumeSessionId);
             } else {
                 args.push('--resume', options.resumeSessionId);
             }
@@ -393,26 +397,29 @@ export async function startRunner(): Promise<void> {
           }
         });
 
-        happyProcess.stderr?.on('data', (data) => {
-          stderrTail = appendTail(stderrTail, data);
-        });
+	        const pid = happyProcess?.pid;
 
-        if (!happyProcess.pid) {
-          logger.debug('[RUNNER RUN] Failed to spawn process - no PID returned');
-          await maybeCleanupWorktree('no-pid');
-          return {
-            type: 'error',
-            errorMessage: 'Failed to spawn HAPI process - no PID returned'
-          };
-        }
+	        if (!happyProcess || pid == null) {
+	          logger.debug('[RUNNER RUN] Failed to spawn process - no PID returned');
+	          await maybeCleanupWorktree('no-pid');
+	          return {
+	            type: 'error',
+	            errorMessage: 'Failed to spawn HAPI process - no PID returned'
+	          };
+	        }
 
-        const pid = happyProcess.pid;
-        logger.debug(`[RUNNER RUN] Spawned process with PID ${pid}`);
+	        const childProcess = happyProcess;
 
-        const trackedSession: TrackedSession = {
-          startedBy: 'runner',
-          pid,
-          childProcess: happyProcess,
+	        childProcess.stderr?.on('data', (data) => {
+	          stderrTail = appendTail(stderrTail, data);
+	        });
+
+	        logger.debug(`[RUNNER RUN] Spawned process with PID ${pid}`);
+
+	        const trackedSession: TrackedSession = {
+	          startedBy: 'runner',
+	          pid,
+	          childProcess,
           directoryCreated,
           message: directoryCreated ? `The path '${directory}' did not exist. We created a new folder and spawned a new session there.` : undefined
         };
@@ -485,8 +492,8 @@ export async function startRunner(): Promise<void> {
 	            });
 	          };
 
-	          happyProcess.on('exit', handleChildExit);
-	          happyProcess.on('error', handleChildError);
+	          childProcess.on('exit', handleChildExit);
+	          childProcess.on('error', handleChildError);
 	        });
         if (spawnResult.type !== 'success') {
           await maybeCleanupWorktree('spawn-error');

@@ -15,8 +15,8 @@ export function registerCommonHandlers(rpcHandlerManager: RpcHandlerManager, wor
     registerDirectoryHandlers(rpcHandlerManager, workingDirectory)
     registerRipgrepHandlers(rpcHandlerManager, workingDirectory)
     registerDifftasticHandlers(rpcHandlerManager, workingDirectory)
-    registerSlashCommandHandlers(rpcHandlerManager)
-    registerSkillsHandlers(rpcHandlerManager)
+    registerSlashCommandHandlers(rpcHandlerManager, workingDirectory)
+    registerSkillsHandlers(rpcHandlerManager, workingDirectory)
     registerGitHandlers(rpcHandlerManager, workingDirectory)
     registerUploadHandlers(rpcHandlerManager)
 }

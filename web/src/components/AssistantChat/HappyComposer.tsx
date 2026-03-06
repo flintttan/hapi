@@ -20,7 +20,7 @@ import { useActiveSuggestions } from '@/hooks/useActiveSuggestions'
 import { applySuggestion } from '@/utils/applySuggestion'
 import { usePlatform } from '@/hooks/usePlatform'
 import { usePWAInstall } from '@/hooks/usePWAInstall'
-import { isCodexFamilyFlavor } from '@/lib/agentFlavorUtils'
+import { isClaudeFlavor } from '@/lib/agentFlavorUtils'
 import { markSkillUsed } from '@/lib/recent-skills'
 import { FloatingOverlay } from '@/components/ChatInput/FloatingOverlay'
 import { Autocomplete } from '@/components/ChatInput/Autocomplete'
@@ -257,6 +257,15 @@ export function HappyComposer(props: {
             return
         }
 
+        // Shift+Enter sends the message (works on all platforms including iPadOS with keyboard)
+        if (key === 'Enter' && e.shiftKey) {
+            e.preventDefault()
+            if (!canSend) return
+            api.composer().send()
+            setShowContinueHint(false)
+            return
+        }
+
         if (suggestions.length > 0) {
             if (key === 'ArrowUp') {
                 e.preventDefault()
@@ -307,12 +316,14 @@ export function HappyComposer(props: {
         onPermissionModeChange,
         permissionMode,
         permissionModes,
+        canSend,
+        api,
         haptic
     ])
 
     useEffect(() => {
         const handleGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
-            if (e.key === 'm' && (e.metaKey || e.ctrlKey) && onModelModeChange && !isCodexFamilyFlavor(agentFlavor)) {
+            if (e.key === 'm' && (e.metaKey || e.ctrlKey) && onModelModeChange && isClaudeFlavor(agentFlavor)) {
                 e.preventDefault()
                 const currentIndex = MODEL_MODES.indexOf(modelMode as typeof MODEL_MODES[number])
                 const nextIndex = (currentIndex + 1) % MODEL_MODES.length
@@ -386,7 +397,7 @@ export function HappyComposer(props: {
     }, [onModelModeChange, controlsDisabled, haptic])
 
     const showPermissionSettings = Boolean(onPermissionModeChange && permissionModeOptions.length > 0)
-    const showModelSettings = Boolean(onModelModeChange && !isCodexFamilyFlavor(agentFlavor))
+    const showModelSettings = Boolean(onModelModeChange && isClaudeFlavor(agentFlavor))
     const showSettingsButton = Boolean(showPermissionSettings || showModelSettings)
     const showAbortButton = true
     const voiceEnabled = Boolean(onVoiceToggle)

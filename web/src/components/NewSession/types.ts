@@ -1,4 +1,4 @@
-export type AgentType = 'claude' | 'codex' | 'gemini' | 'opencode'
+export type AgentType = 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode'
 export type SessionType = 'simple' | 'worktree'
 
 export const MODEL_OPTIONS: Record<AgentType, { value: string; label: string }[]> = {
@@ -14,6 +14,7 @@ export const MODEL_OPTIONS: Record<AgentType, { value: string; label: string }[]
         { value: 'gpt-5.1-codex-max', label: 'GPT-5.1 Codex Max' },
         { value: 'gpt-5.1-codex-mini', label: 'GPT-5.1 Codex Mini' },
     ],
+    cursor: [],
     gemini: [
         { value: 'auto', label: 'Auto' },
         { value: 'gemini-3-pro-preview', label: 'Gemini 3 Pro Preview' },
