@@ -14,6 +14,10 @@ export type {
     Session,
     SessionSummary,
     SessionSummaryMetadata,
+    TeamMember,
+    TeamMessage,
+    TeamState,
+    TeamTask,
     TodoItem,
     WorktreeMetadata
 } from '@hapi/protocol/types'
@@ -38,6 +42,22 @@ export type DecryptedMessage = ProtocolDecryptedMessage & {
     originalText?: string
 }
 
+export type RunnerState = {
+    status?: string
+    pid?: number
+    httpPort?: number
+    startedAt?: number
+    shutdownRequestedAt?: number
+    shutdownSource?: string
+    lastSpawnError?: {
+        message: string
+        pid?: number
+        exitCode?: number | null
+        signal?: string | null
+        at: number
+    } | null
+}
+
 export type Machine = {
     id: string
     active: boolean
@@ -47,6 +67,7 @@ export type Machine = {
         happyCliVersion: string
         displayName?: string
     } | null
+    runnerState?: RunnerState | null
 }
 
 export type AuthResponse = {

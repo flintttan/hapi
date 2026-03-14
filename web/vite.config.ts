@@ -6,7 +6,33 @@ import { createRequire } from 'node:module'
 
 const require = createRequire(import.meta.url)
 const base = process.env.VITE_BASE_URL || '/'
-const apiTarget = process.env.VITE_API_TARGET || `http://127.0.0.1:${process.env.WEBAPP_PORT || '3006'}`
+const hubTarget = process.env.VITE_HUB_PROXY
+    || process.env.VITE_API_TARGET
+    || `http://127.0.0.1:${process.env.WEBAPP_PORT || '3006'}`
+
+function getVendorChunkName(id: string): string | undefined {
+    if (!id.includes('/node_modules/')) {
+        return undefined
+    }
+
+    if (id.includes('/node_modules/@xterm/')) {
+        return 'vendor-terminal'
+    }
+
+    if (
+        id.includes('/node_modules/@assistant-ui/')
+        || id.includes('/node_modules/remark-gfm/')
+        || id.includes('/node_modules/hast-util-to-jsx-runtime/')
+    ) {
+        return 'vendor-assistant'
+    }
+
+    if (id.includes('/node_modules/@elevenlabs/react/')) {
+        return 'vendor-voice'
+    }
+
+    return undefined
+}
 
 export default defineConfig({
     define: {
@@ -17,11 +43,11 @@ export default defineConfig({
         allowedHosts: ['hapidev.weishu.me'],
         proxy: {
             '/api': {
-                target: apiTarget,
+                target: hubTarget,
                 changeOrigin: true
             },
             '/socket.io': {
-                target: apiTarget,
+                target: hubTarget,
                 ws: true
             }
         }
@@ -87,6 +113,13 @@ export default defineConfig({
     },
     build: {
         outDir: 'dist',
-        emptyOutDir: true
+        emptyOutDir: true,
+        rollupOptions: {
+            output: {
+                manualChunks(id) {
+                    return getVendorChunkName(id)
+                }
+            }
+        }
     }
 })

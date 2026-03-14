@@ -57,6 +57,7 @@ Bun workspaces; `shared` consumed by cli, hub, web.
 - Path alias `@/*` maps to `./src/*` per package
 - Prefer 4-space indentation
 - Zod for runtime validation (schemas in `shared/src/schemas.ts`)
+- Write necessary tests ONLY.
 
 ## Common commands (repo root)
 
