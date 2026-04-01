@@ -12,7 +12,7 @@
     },
     "cli": {
       "name": "@flintttan/hapi",
-      "version": "0.5.45",
+      "version": "0.5.46",
       "bin": {
         "hapi": "bin/hapi.cjs",
       },
@@ -43,11 +43,11 @@
         "vitest": "^4.0.16",
       },
       "optionalDependencies": {
-        "@flintttan/hapi-darwin-arm64": "0.5.45",
-        "@flintttan/hapi-darwin-x64": "0.5.45",
-        "@flintttan/hapi-linux-arm64": "0.5.45",
-        "@flintttan/hapi-linux-x64": "0.5.45",
-        "@flintttan/hapi-win32-x64": "0.5.45",
+        "@flintttan/hapi-darwin-arm64": "0.5.46",
+        "@flintttan/hapi-darwin-x64": "0.5.46",
+        "@flintttan/hapi-linux-arm64": "0.5.46",
+        "@flintttan/hapi-linux-x64": "0.5.46",
+        "@flintttan/hapi-win32-x64": "0.5.46",
       },
     },
     "docs": {
@@ -59,7 +59,7 @@
     },
     "hub": {
       "name": "hapi-hub",
-      "version": "0.5.45",
+      "version": "0.5.46",
       "dependencies": {
         "@hapi/protocol": "workspace:*",
         "@socket.io/bun-engine": "^0.1.0",
@@ -91,7 +91,7 @@
     },
     "web": {
       "name": "hapi-web",
-      "version": "0.5.45",
+      "version": "0.5.46",
       "dependencies": {
         "@assistant-ui/react": "^0.11.53",
         "@assistant-ui/react-markdown": "^0.11.9",
@@ -574,16 +574,6 @@
     "@fastify/swagger": ["@fastify/swagger@9.7.0", "", { "dependencies": { "fastify-plugin": "^5.0.0", "json-schema-resolver": "^3.0.0", "openapi-types": "^12.1.3", "rfdc": "^1.3.1", "yaml": "^2.4.2" } }, "sha512-Vp1SC1GC2Hrkd3faFILv86BzUNyFz5N4/xdExqtCgkGASOzn/x+eMe4qXIGq7cdT6wif/P/oa6r1Ruqx19paZA=="],
 
     "@flintttan/hapi": ["@flintttan/hapi@workspace:cli"],
-
-    "@flintttan/hapi-darwin-arm64": ["@flintttan/hapi-darwin-arm64@0.5.45", "", { "os": "darwin", "cpu": "arm64", "bin": { "hapi": "bin/hapi" } }, "sha512-YV3Zt7dmUbo4QwDQMnWggiLrVIt52cl2vgdU3zn8W2/ZFWim3IV9WsKdoRmCPFClrBOzGfHXDmdISi+JOrcoIw=="],
-
-    "@flintttan/hapi-darwin-x64": ["@flintttan/hapi-darwin-x64@0.5.45", "", { "os": "darwin", "cpu": "x64", "bin": { "hapi": "bin/hapi" } }, "sha512-dr1SGooBHtms5eCnH1M7iqvuB8Fa5AmOIczCwjgIaSl18KkejCu6HpQwySafFCs8GcHqQ0hU3+cxvLtNW0zoVA=="],
-
-    "@flintttan/hapi-linux-arm64": ["@flintttan/hapi-linux-arm64@0.5.45", "", { "os": "linux", "cpu": "arm64", "bin": { "hapi": "bin/hapi" } }, "sha512-1fUSi1sfvUslUbRDn02U97Zc8qbtdrTIAqtYlcR42FI/6fuYtRXWgEafDvhM8p42z90qw5oqAEXsvbeObAg5dg=="],
-
-    "@flintttan/hapi-linux-x64": ["@flintttan/hapi-linux-x64@0.5.45", "", { "os": "linux", "cpu": "x64", "bin": { "hapi": "bin/hapi" } }, "sha512-NmrVP3VBxaKtEsNsvqbd/Dv2J13uNwvamNDDBiP5mvXU2rUsVJv4DgKVwDB5Luk8PzMByFWwdPFCKxzbCR0uXw=="],
-
-    "@flintttan/hapi-win32-x64": ["@flintttan/hapi-win32-x64@0.5.45", "", { "os": "win32", "cpu": "x64", "bin": { "hapi": "bin/hapi.exe" } }, "sha512-IZ6nimOgitZjXtpm1Dc8aJgV6PMcLBqCBv2hHa/S5f3GEJ7OYFXLxzdV4M3hjIyuZEOOHV9mbRwO33NgVOcd2w=="],
 
     "@floating-ui/core": ["@floating-ui/core@1.7.5", "", { "dependencies": { "@floating-ui/utils": "^0.2.11" } }, "sha512-1Ih4WTWyw0+lKyFMcBHGbb5U5FtuHJuujoyyr5zTaWS5EYMeT6Jb2AuDeftsCsEuchO+mM2ij5+q9crhydzLhQ=="],
 
