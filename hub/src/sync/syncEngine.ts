@@ -7,7 +7,7 @@
  * - No E2E encryption; data is stored as JSON in SQLite
  */
 
-import type { DecryptedMessage, ModelMode, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
+import type { CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import type { Server } from 'socket.io'
 import type { Store } from '../store'
 import type { RpcRegistry } from '../socket/rpcRegistry'
@@ -187,7 +187,9 @@ export class SyncEngine {
         thinking?: boolean
         mode?: 'local' | 'remote'
         permissionMode?: PermissionMode
-        modelMode?: ModelMode
+        model?: string | null
+        effort?: string | null
+        collaborationMode?: CodexCollaborationMode
     }): void {
         this.sessionCache.handleSessionAlive(payload)
     }
@@ -210,8 +212,15 @@ export class SyncEngine {
         this.machineCache.reloadAll()
     }
 
-    getOrCreateSession(tag: string, metadata: unknown, agentState: unknown, namespace: string): Session {
-        return this.sessionCache.getOrCreateSession(tag, metadata, agentState, namespace)
+    getOrCreateSession(
+        tag: string,
+        metadata: unknown,
+        agentState: unknown,
+        namespace: string,
+        model?: string,
+        effort?: string
+    ): Session {
+        return this.sessionCache.getOrCreateSession(tag, metadata, agentState, namespace, model, effort)
     }
 
     getOrCreateMachine(id: string, metadata: unknown, runnerState: unknown, namespace: string): Machine {
@@ -281,14 +290,23 @@ export class SyncEngine {
         sessionId: string,
         config: {
             permissionMode?: PermissionMode
-            modelMode?: ModelMode
+            model?: string | null
+            effort?: string | null
+            collaborationMode?: CodexCollaborationMode
         }
     ): Promise<void> {
         const result = await this.rpcGateway.requestSessionConfig(sessionId, config)
         if (!result || typeof result !== 'object') {
             throw new Error('Invalid response from session config RPC')
         }
-        const obj = result as { applied?: { permissionMode?: Session['permissionMode']; modelMode?: Session['modelMode'] } }
+        const obj = result as {
+            applied?: {
+                permissionMode?: Session['permissionMode']
+                model?: Session['model']
+                effort?: Session['effort']
+                collaborationMode?: Session['collaborationMode']
+            }
+        }
         const applied = obj.applied
         if (!applied || typeof applied !== 'object') {
             throw new Error('Missing applied session config')
@@ -302,11 +320,13 @@ export class SyncEngine {
         directory: string,
         agent: 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode' = 'claude',
         model?: string,
+        modelReasoningEffort?: string,
         yolo?: boolean,
         sessionType?: 'simple' | 'worktree',
         worktreeName?: string,
-        approvedNewDirectoryCreation?: boolean,
-        resumeSessionId?: string
+        resumeSessionId?: string,
+        effort?: string,
+        approvedNewDirectoryCreation?: boolean
     ): Promise<
         | { type: 'success'; sessionId: string }
         | { type: 'requestToApproveDirectoryCreation'; directory: string }
@@ -317,11 +337,13 @@ export class SyncEngine {
             directory,
             agent,
             model,
+            modelReasoningEffort,
             yolo,
             sessionType,
             worktreeName,
-            approvedNewDirectoryCreation,
-            resumeSessionId
+            resumeSessionId,
+            effort,
+            approvedNewDirectoryCreation
         )
     }
 
@@ -387,12 +409,14 @@ export class SyncEngine {
             targetMachine.id,
             metadata.path,
             flavor,
+            session.model ?? undefined,
             undefined,
             undefined,
             undefined,
             undefined,
-            undefined,
-            resumeToken
+            resumeToken,
+            session.effort ?? undefined,
+            undefined
         )
 
         if (spawnResult.type !== 'success') {

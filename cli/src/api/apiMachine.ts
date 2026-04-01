@@ -10,6 +10,7 @@ import type { Update, UpdateMachineBody } from '@hapi/protocol'
 import type { RunnerState, Machine, MachineMetadata } from './types'
 import { RunnerStateSchema, MachineMetadataSchema } from './types'
 import { backoff } from '@/utils/time'
+import { getInvokedCwd } from '@/utils/invokedCwd'
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
 import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/rpcTypes'
@@ -77,7 +78,7 @@ export class ApiMachineClient {
             logger: (msg, data) => logger.debug(msg, data)
         })
 
-        registerCommonHandlers(this.rpcHandlerManager, process.cwd())
+        registerCommonHandlers(this.rpcHandlerManager, getInvokedCwd())
 
         this.rpcHandlerManager.registerHandler<PathExistsRequest, PathExistsResponse>('path-exists', async (params) => {
             const rawPaths = Array.isArray(params?.paths) ? params.paths : []
@@ -110,6 +111,8 @@ export class ApiMachineClient {
                     approvedNewDirectoryCreation,
                     agent,
                     model,
+                    effort,
+                    modelReasoningEffort,
                     yolo,
                     token,
                     sessionType,
@@ -128,6 +131,8 @@ export class ApiMachineClient {
                     approvedNewDirectoryCreation,
                     agent,
                     model,
+                    effort,
+                    modelReasoningEffort,
                     yolo,
                     token,
                     sessionType,

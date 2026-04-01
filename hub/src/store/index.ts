@@ -37,7 +37,7 @@ type DbCliTokenLookup = {
     user_id: string
 }
 
-const SCHEMA_VERSION: number = 4
+const SCHEMA_VERSION: number = 6
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -174,6 +174,8 @@ export class Store {
                 metadata_version INTEGER DEFAULT 1,
                 agent_state TEXT,
                 agent_state_version INTEGER DEFAULT 1,
+                model TEXT,
+                effort TEXT,
                 todos TEXT,
                 todos_updated_at INTEGER,
                 team_state TEXT,
@@ -360,6 +362,20 @@ export class Store {
         }
     }
 
+    private migrateFromV4ToV5(): void {
+        const columns = this.getSessionColumnNames()
+        if (!columns.has('model')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN model TEXT')
+        }
+    }
+
+    private migrateFromV5ToV6(): void {
+        const columns = this.getSessionColumnNames()
+        if (!columns.has('effort')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN effort TEXT')
+        }
+    }
+
     private getSessionColumnNames(): Set<string> {
         const rows = this.db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
         return new Set(rows.map((row) => row.name))
@@ -450,6 +466,12 @@ export class Store {
         }
         if (!columns.has('team_state_updated_at')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN team_state_updated_at INTEGER')
+        }
+        if (!columns.has('model')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN model TEXT')
+        }
+        if (!columns.has('effort')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN effort TEXT')
         }
         if (!columns.has('metadata_version')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN metadata_version INTEGER NOT NULL DEFAULT 1')

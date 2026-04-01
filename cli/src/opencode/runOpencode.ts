@@ -12,6 +12,7 @@ import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
 import { PermissionModeSchema } from '@hapi/protocol/schemas';
 import { startOpencodeHookServer } from './utils/startOpencodeHookServer';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
+import { getInvokedCwd } from '@/utils/invokedCwd';
 
 export async function runOpencode(opts: {
     startedBy?: 'runner' | 'terminal';
@@ -19,8 +20,8 @@ export async function runOpencode(opts: {
     permissionMode?: PermissionMode;
     resumeSessionId?: string;
 } = {}): Promise<void> {
-    const forcedCwd = process.env.HAPI_SESSION_CWD;
-    const workingDirectory = forcedCwd ?? process.cwd();
+    const forcedCwd = process.env.HAPI_SESSION_CWD?.trim();
+    const workingDirectory = forcedCwd || getInvokedCwd();
     if (forcedCwd) {
         try {
             process.chdir(forcedCwd);

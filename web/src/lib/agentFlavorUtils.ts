@@ -13,3 +13,7 @@ export function isCursorFlavor(flavor?: string | null): boolean {
 export function isKnownFlavor(flavor?: string | null): boolean {
     return isClaudeFlavor(flavor) || isCodexFamilyFlavor(flavor) || isCursorFlavor(flavor)
 }
+
+export function supportsModelChange(flavor?: string | null): boolean {
+    return flavor === 'claude' || flavor === 'gemini'
+}
