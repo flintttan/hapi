@@ -12,7 +12,7 @@
     },
     "cli": {
       "name": "@flintttan/hapi",
-      "version": "0.5.46",
+      "version": "0.5.47",
       "bin": {
         "hapi": "bin/hapi.cjs",
       },
@@ -43,11 +43,11 @@
         "vitest": "^4.0.16",
       },
       "optionalDependencies": {
-        "@flintttan/hapi-darwin-arm64": "0.5.46",
-        "@flintttan/hapi-darwin-x64": "0.5.46",
-        "@flintttan/hapi-linux-arm64": "0.5.46",
-        "@flintttan/hapi-linux-x64": "0.5.46",
-        "@flintttan/hapi-win32-x64": "0.5.46",
+        "@flintttan/hapi-darwin-arm64": "0.5.47",
+        "@flintttan/hapi-darwin-x64": "0.5.47",
+        "@flintttan/hapi-linux-arm64": "0.5.47",
+        "@flintttan/hapi-linux-x64": "0.5.47",
+        "@flintttan/hapi-win32-x64": "0.5.47",
       },
     },
     "docs": {
@@ -59,7 +59,7 @@
     },
     "hub": {
       "name": "hapi-hub",
-      "version": "0.5.46",
+      "version": "0.5.47",
       "dependencies": {
         "@hapi/protocol": "workspace:*",
         "@socket.io/bun-engine": "^0.1.0",
@@ -91,7 +91,7 @@
     },
     "web": {
       "name": "hapi-web",
-      "version": "0.5.46",
+      "version": "0.5.47",
       "dependencies": {
         "@assistant-ui/react": "^0.11.53",
         "@assistant-ui/react-markdown": "^0.11.9",
