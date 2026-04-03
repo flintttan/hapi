@@ -1,10 +1,38 @@
 import type { AgentEvent } from '@/chat/types'
 
-export function formatUnixTimestamp(value: number): string {
+function normalizeTimestamp(value: number): Date {
     const ms = value < 1_000_000_000_000 ? value * 1000 : value
-    const date = new Date(ms)
+    return new Date(ms)
+}
+
+export function formatUnixTimestamp(value: number): string {
+    const date = normalizeTimestamp(value)
     if (Number.isNaN(date.getTime())) return String(value)
     return date.toLocaleString()
+}
+
+export function formatResetTime(value: number): string {
+    const date = normalizeTimestamp(value)
+    if (Number.isNaN(date.getTime())) return String(value)
+
+    const now = new Date()
+    const isToday = date.getFullYear() === now.getFullYear()
+        && date.getMonth() === now.getMonth()
+        && date.getDate() === now.getDate()
+
+    if (isToday) {
+        return date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    }
+    return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
+// Known types: five_hour → "5-hour", seven_day → "7-day".
+// Unknown types use underscore-to-space fallback (e.g. thirty_day → "thirty day").
+function formatLimitType(limitType: string | undefined): string {
+    if (!limitType) return ''
+    if (limitType === 'five_hour') return '5-hour'
+    if (limitType === 'seven_day') return '7-day'
+    return limitType.replace(/_/g, ' ')
 }
 
 function formatDuration(ms: number): string {
@@ -47,9 +75,20 @@ export function getEventPresentation(event: AgentEvent): EventPresentation {
         const mode = typeof modeValue === 'string' ? modeValue : 'default'
         return { icon: '🔐', text: `Permission mode: ${mode}` }
     }
+    if (event.type === 'limit-warning') {
+        const ev = event as { utilization?: number; endsAt?: number; limitType?: string }
+        const pct = Math.round((ev.utilization ?? 0) * 100)
+        const endsAt = typeof ev.endsAt === 'number' ? ev.endsAt : null
+        const typeLabel = formatLimitType(ev.limitType)
+        const suffix = typeLabel ? ` (${typeLabel})` : ''
+        return { icon: '⚠️', text: endsAt ? `Usage limit ${pct}%${suffix} · resets ${formatResetTime(endsAt)}` : `Usage limit ${pct}%${suffix}` }
+    }
     if (event.type === 'limit-reached') {
-        const endsAt = typeof event.endsAt === 'number' ? event.endsAt : null
-        return { icon: '⏳', text: endsAt ? `Usage limit reached until ${formatUnixTimestamp(endsAt)}` : 'Usage limit reached' }
+        const ev = event as { endsAt?: number; limitType?: string }
+        const endsAt = typeof ev.endsAt === 'number' ? ev.endsAt : null
+        const typeLabel = formatLimitType(ev.limitType)
+        const suffix = typeLabel ? ` (${typeLabel})` : ''
+        return { icon: '⏳', text: endsAt ? `Usage limit reached${suffix} until ${formatUnixTimestamp(endsAt)}` : `Usage limit reached${suffix}` }
     }
     if (event.type === 'message') {
         return { icon: null, text: typeof event.message === 'string' ? event.message : 'Message' }

@@ -1,11 +1,25 @@
 import type { AgentEvent, AgentEventBlock, ChatBlock, NormalizedMessage } from '@/chat/types'
 
-function parseClaudeUsageLimit(text: string): number | null {
-    const match = text.match(/^Claude AI usage limit reached\|(\d+)$/)
-    if (!match) return null
-    const timestamp = Number.parseInt(match[1], 10)
-    if (!Number.isFinite(timestamp)) return null
-    return timestamp
+function parseClaudeUsageLimit(text: string): AgentEvent | null {
+    const reachedMatch = text.match(/^Claude AI usage limit reached\|(\d+)(?:\|([^|]*))?$/)
+    if (reachedMatch) {
+        const timestamp = Number.parseInt(reachedMatch[1], 10)
+        if (Number.isFinite(timestamp)) {
+            return { type: 'limit-reached', endsAt: timestamp, limitType: reachedMatch[2] || '' }
+        }
+    }
+
+    const warningMatch = text.match(/^Claude AI usage limit warning\|(\d+)\|(\d+)\|([^|]*)$/)
+    if (warningMatch) {
+        const timestamp = Number.parseInt(warningMatch[1], 10)
+        const utilization = Number.parseInt(warningMatch[2], 10) / 100
+        const limitType = warningMatch[3] || ''
+        if (Number.isFinite(timestamp) && Number.isFinite(utilization)) {
+            return { type: 'limit-warning', utilization, endsAt: timestamp, limitType }
+        }
+    }
+
+    return null
 }
 
 export function parseMessageAsEvent(msg: NormalizedMessage): AgentEvent | null {
@@ -14,9 +28,9 @@ export function parseMessageAsEvent(msg: NormalizedMessage): AgentEvent | null {
 
     for (const content of msg.content) {
         if (content.type === 'text') {
-            const limitReached = parseClaudeUsageLimit(content.text)
-            if (limitReached !== null) {
-                return { type: 'limit-reached', endsAt: limitReached }
+            const limitEvent = parseClaudeUsageLimit(content.text)
+            if (limitEvent !== null) {
+                return limitEvent
             }
         }
     }

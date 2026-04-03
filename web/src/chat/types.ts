@@ -12,7 +12,8 @@ export type AgentEvent =
     | { type: 'switch'; mode: 'local' | 'remote' }
     | { type: 'message'; message: string }
     | { type: 'title-changed'; title: string }
-    | { type: 'limit-reached'; endsAt: number }
+    | { type: 'limit-reached'; endsAt: number; limitType: string }
+    | { type: 'limit-warning'; /** 0–1 ratio (e.g. 0.9 = 90%), integer-precision via CLI pipe format */ utilization: number; endsAt: number; limitType: string }
     | { type: 'ready' }
     | { type: 'api-error'; retryAttempt: number; maxRetries: number; error: unknown }
     | { type: 'turn-duration'; durationMs: number }

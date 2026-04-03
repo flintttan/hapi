@@ -245,6 +245,99 @@ describe('AcpMessageHandler', () => {
         expect(calls[1].name).toBe('hapi_change_title');
     });
 
+    it('intercepts rate_limit_event chunk before it enters the text buffer', () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message));
+
+        // Normal text chunk first
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: 'thinking...' }
+        });
+
+        // rate_limit_event arrives as a separate chunk in the same turn
+        const rateLimitJson = JSON.stringify({
+            type: 'rate_limit_event',
+            rate_limit_info: {
+                status: 'allowed_warning',
+                resetsAt: 1774278000,
+                rateLimitType: 'five_hour',
+                utilization: 0.9,
+            },
+        });
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: rateLimitJson }
+        });
+
+        handler.flushText();
+
+        // The normal text should be preserved
+        const textMessages = messages.filter(m => m.type === 'text');
+        expect(textMessages).toHaveLength(2);
+        // First: the normal text
+        expect(textMessages[0]).toEqual({ type: 'text', text: 'thinking...' });
+        // Second: the converted rate limit warning (not raw JSON)
+        expect((textMessages[1] as { text: string }).text).toMatch(/^Claude AI usage limit warning\|/);
+    });
+
+    it('suppresses allowed rate_limit_event chunk without affecting text buffer', () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message));
+
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: 'hello' }
+        });
+
+        const allowedJson = JSON.stringify({
+            type: 'rate_limit_event',
+            rate_limit_info: {
+                status: 'allowed',
+                resetsAt: 1774278000,
+            },
+        });
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: allowedJson }
+        });
+
+        handler.flushText();
+
+        // Only the normal text, no rate limit noise
+        expect(messages).toEqual([{ type: 'text', text: 'hello' }]);
+    });
+
+    it('does not split text buffer when suppressing allowed event mid-stream', () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message));
+
+        // text → allowed → text → flush should produce ONE merged text message
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: 'part one ' }
+        });
+
+        const allowedJson = JSON.stringify({
+            type: 'rate_limit_event',
+            rate_limit_info: { status: 'allowed', resetsAt: 1774278000 },
+        });
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: allowedJson }
+        });
+
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: 'part two' }
+        });
+
+        handler.flushText();
+
+        // Must be a single text message, not split into two
+        expect(messages).toEqual([{ type: 'text', text: 'part one part two' }]);
+    });
+
     it('allows kind fallback to replace placeholder tool name', () => {
         const messages: AgentMessage[] = [];
         const handler = new AcpMessageHandler((message) => messages.push(message));
