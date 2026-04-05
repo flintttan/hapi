@@ -6,12 +6,13 @@ import {
     type CodeHeaderProps,
 } from '@assistant-ui/react-markdown'
 import remarkGfm from 'remark-gfm'
+import remarkDisableIndentedCode from '@/lib/remark-disable-indented-code'
 import { cn } from '@/lib/utils'
 import { SyntaxHighlighter } from '@/components/assistant-ui/shiki-highlighter'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 
-export const MARKDOWN_PLUGINS = [remarkGfm]
+export const MARKDOWN_PLUGINS = [remarkGfm, remarkDisableIndentedCode]
 
 function CodeHeader(props: CodeHeaderProps) {
     const { copied, copy } = useCopyToClipboard()
