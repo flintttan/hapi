@@ -364,4 +364,147 @@ describe('AcpMessageHandler', () => {
         expect(calls[0].name).toBe('Tool');
         expect(calls[1].name).toBe('search');
     });
+
+    it('drops leaked session metadata envelope from text buffer', () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message));
+
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: 'real answer' }
+        });
+
+        // Leaked metadata envelope with parentUuid string
+        const metadataJson = JSON.stringify({
+            type: 'output',
+            data: {
+                parentUuid: 'abc-123',
+                isSidechain: false,
+                userType: 'external',
+                sessionId: 'session-456',
+                version: '0.0.0',
+            },
+        });
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: metadataJson }
+        });
+
+        handler.flushText();
+
+        expect(messages).toEqual([{ type: 'text', text: 'real answer' }]);
+    });
+
+    it('drops leaked root metadata envelope with parentUuid: null', () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message));
+
+        const metadataJson = JSON.stringify({
+            type: 'output',
+            data: {
+                parentUuid: null,
+                sessionId: 'session-789',
+                userType: 'external',
+            },
+        });
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: metadataJson }
+        });
+
+        handler.flushText();
+
+        expect(messages).toEqual([]);
+    });
+
+    it('clears buffered prefix when cumulative metadata chunk arrives', () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message));
+
+        // First chunk: incomplete JSON prefix
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: '{"type":"ou' }
+        });
+
+        // Second chunk: full cumulative metadata JSON (starts with buffered prefix)
+        const metadataJson = JSON.stringify({
+            type: 'output',
+            data: {
+                parentUuid: 'abc-123',
+                sessionId: 'session-456',
+                userType: 'external',
+            },
+        });
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: metadataJson }
+        });
+
+        handler.flushText();
+
+        // Both the prefix and the full chunk should be gone
+        expect(messages).toEqual([]);
+    });
+
+    it('clears buffered prefix when cumulative rate_limit_event chunk arrives', () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message));
+
+        // First chunk: incomplete JSON prefix
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: '{"type":"rate' }
+        });
+
+        // Second chunk: full cumulative rate_limit_event (allowed — should be suppressed)
+        const rateLimitJson = JSON.stringify({
+            type: 'rate_limit_event',
+            rate_limit_info: {
+                status: 'allowed',
+                resetsAt: 1774278000,
+            },
+        });
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: rateLimitJson }
+        });
+
+        handler.flushText();
+
+        // Both the prefix and the full chunk should be gone
+        expect(messages).toEqual([]);
+    });
+
+    it('clears buffered prefix when cumulative displayable rate_limit_event arrives', () => {
+        const messages: AgentMessage[] = [];
+        const handler = new AcpMessageHandler((message) => messages.push(message));
+
+        // First chunk: incomplete prefix
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: '{"type":"rate' }
+        });
+
+        // Second chunk: full rate_limit_event with displayable status
+        const rateLimitJson = JSON.stringify({
+            type: 'rate_limit_event',
+            rate_limit_info: {
+                status: 'allowed_warning',
+                resetsAt: 1774278000,
+                utilization: 0.9,
+                rateLimitType: 'five_hour',
+            },
+        });
+        handler.handleUpdate({
+            sessionUpdate: ACP_SESSION_UPDATE_TYPES.agentMessageChunk,
+            content: { type: 'text', text: rateLimitJson }
+        });
+
+        handler.flushText();
+
+        // Should only have the converted warning, no raw JSON prefix
+        expect(messages).toHaveLength(1);
+        expect((messages[0] as { text: string }).text).toMatch(/^Claude AI usage limit warning\|/);
+    });
 });

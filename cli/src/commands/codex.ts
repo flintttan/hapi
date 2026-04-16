@@ -3,6 +3,7 @@ import { authAndSetupMachineIfNeeded } from '@/ui/auth'
 import { initializeToken } from '@/ui/tokenInit'
 import { maybeAutoStartServer } from '@/utils/autoStartServer'
 import type { CommandDefinition } from './types'
+import { CODEX_PERMISSION_MODES } from '@hapi/protocol/modes'
 import type { CodexPermissionMode } from '@hapi/protocol/types'
 import type { ReasoningEffort } from '@/codex/appServerTypes'
 
@@ -36,6 +37,7 @@ export const codexCommand: CommandDefinition = {
                 modelReasoningEffort?: ReasoningEffort
             } = {}
             const unknownArgs: string[] = []
+            let hasExplicitPermissionMode = false
 
             for (let i = 0; i < commandArgs.length; i++) {
                 const arg = commandArgs[i]
@@ -50,7 +52,14 @@ export const codexCommand: CommandDefinition = {
                 }
                 if (arg === '--started-by') {
                     options.startedBy = commandArgs[++i] as 'runner' | 'terminal'
-                } else if (arg === '--yolo' || arg === '--dangerously-bypass-approvals-and-sandbox') {
+                } else if (arg === '--permission-mode') {
+                    const mode = commandArgs[++i]
+                    if (!mode || !(CODEX_PERMISSION_MODES as readonly string[]).includes(mode)) {
+                        throw new Error(`Invalid --permission-mode value: ${mode ?? '(missing)'}`)
+                    }
+                    options.permissionMode = mode as CodexPermissionMode
+                    hasExplicitPermissionMode = true
+                } else if ((arg === '--yolo' || arg === '--dangerously-bypass-approvals-and-sandbox') && !hasExplicitPermissionMode) {
                     options.permissionMode = 'yolo'
                     unknownArgs.push(arg)
                 } else if (arg === '--model') {

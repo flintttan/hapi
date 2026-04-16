@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "katex/dist/katex.min.css";
 @config "../tailwind.config.ts";
 
 :root {
@@ -93,11 +94,16 @@ html {
     font-size: calc(100% * var(--app-font-scale, 1));
 }
 
+button, [role="button"] {
+    cursor: pointer;
+}
+
 html,
 body {
     height: 100vh;
     height: 100dvh;
-    height: var(--tg-viewport-stable-height, 100dvh);
+    height: var(--app-viewport-height, 100dvh);
+    height: var(--tg-viewport-stable-height, var(--app-viewport-height, 100dvh));
     touch-action: pan-x pan-y;
     overscroll-behavior: none;
     -webkit-text-size-adjust: 100%;
@@ -163,7 +169,28 @@ body {
     }
 }
 
-/* Desktop-only: move the sidebar scrollbar to the left without flipping content. */
+/* Collapsible panel animation */
+.collapsible-panel {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.collapsible-panel[data-open] {
+    grid-template-rows: 1fr;
+}
+
+.collapsible-panel > .collapsible-inner {
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.collapsible-panel[data-open] > .collapsible-inner {
+    opacity: 1;
+}
+
+/* Desktop sidebar: use custom width from CSS variable */
 @media (min-width: 1024px) {
     .desktop-scrollbar-left {
         direction: rtl;
@@ -172,6 +199,28 @@ body {
     .desktop-scrollbar-left > * {
         direction: ltr;
     }
+
+    /* Apply resizable width to sidebar */
+    div[style*="--sidebar-w"] {
+        width: var(--sidebar-w) !important;
+    }
+}
+
+/* Sidebar resize handle */
+.sidebar-resize-handle {
+    width: 4px;
+    cursor: col-resize;
+    background: var(--app-divider);
+    transition: background-color 0.15s;
+}
+
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle[data-dragging] {
+    background: var(--app-link);
+}
+
+.sidebar-resize-handle[data-dragging] {
+    opacity: 0.6;
 }
 
 /*
@@ -296,6 +345,10 @@ html[data-theme="dark"] .shiki span {
 
 .animate-spin {
   animation: spin 1s linear infinite;
+}
+
+.animate-spin-slow {
+  animation: spin 2s linear infinite;
 }
 
 /* New messages indicator bounce animation */

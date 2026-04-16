@@ -237,6 +237,7 @@ export default {
   'reconnecting.reason.error': 'stream error',
   'reconnecting.reason.closed': 'stream closed',
   'reconnecting.reason.heartbeatTimeout': 'heartbeat timeout',
+  'reconnecting.reason.visibilityRecovery': 'resuming after background',
 
   // Send blocked
   'send.blocked.title': 'Cannot send message',
@@ -282,6 +283,7 @@ export default {
   'misc.collaborationMode': 'Collaboration Mode',
   'misc.permissionMode': 'Permission Mode',
   'misc.model': 'Model',
+  'misc.reasoningEffort': 'Reasoning Effort',
   'misc.effort': 'Effort',
   'misc.loading': 'Loading…',
   'misc.loadOlder': 'Load older',

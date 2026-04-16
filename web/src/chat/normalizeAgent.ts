@@ -116,41 +116,67 @@ function normalizeUserOutput(
             createdAt,
             role: 'agent',
             isSidechain: true,
-            content: [{ type: 'sidechain', uuid, prompt: messageContent }]
+            content: [{ type: 'sidechain', uuid, parentUUID, prompt: messageContent }]
         }
     }
 
     // Handle system-injected messages that arrive as type:'user' through
     // the agent output path. Real user text goes through normalizeUserRecord.
+    //
+    // All string-content user messages here are system-injected (subagent
+    // prompts, task notifications, system reminders, etc.).  Always emit as
+    // sidechain so the uuid/parentUUID chain is preserved — the reducer uses
+    // sidechain UUIDs to identify sentinel auto-replies.  Task-notification
+    // summaries are extracted as events by the reducer, not here.
     if (typeof messageContent === 'string') {
-        // Convert <task-notification> to a visible event
-        const trimmed = messageContent.trimStart()
-        if (trimmed.startsWith('<task-notification>')) {
-            const summary = trimmed.match(/<summary>([\s\S]*?)<\/summary>/)?.[1]?.trim()
-            if (summary) {
-                return {
-                    id: messageId,
-                    localId,
-                    createdAt,
-                    role: 'event',
-                    content: { type: 'message', message: summary },
-                    isSidechain: false,
-                    meta
-                }
-            }
-        }
-
-        // All other string-content user messages in this path are
-        // system-injected (subagent prompts, system reminders, etc.).
-        // Treat as sidechain so the tracer can match it to a parent Task
-        // tool call; unmatched ones are harmlessly skipped by the reducer.
         return {
             id: messageId,
             localId,
             createdAt,
             role: 'agent',
             isSidechain: true,
-            content: [{ type: 'sidechain', uuid, prompt: messageContent }]
+            content: [{ type: 'sidechain', uuid, parentUUID, prompt: messageContent }]
+        }
+    }
+
+    // Sidechain user messages with array content (e.g. subagent prompts
+    // that Claude Code serialised as [{type:'text', text:'...'}] instead
+    // of a plain string).  Extract the text and treat as sidechain so the
+    // tracer can match it to the parent Task tool call.
+    if (isSidechain && Array.isArray(messageContent)) {
+        const textParts = messageContent
+            .filter((b: unknown) => isObject(b) && b.type === 'text' && typeof b.text === 'string')
+            .map((b: Record<string, unknown>) => b.text as string)
+        if (textParts.length > 0) {
+            return {
+                id: messageId,
+                localId,
+                createdAt,
+                role: 'agent',
+                isSidechain: true,
+                content: [{ type: 'sidechain', uuid, parentUUID, prompt: textParts.join('\n\n') }]
+            }
+        }
+    }
+
+    // Non-sidechain array content that is all text blocks — these are real
+    // user messages that the CLI wrapped as agent output because
+    // isExternalUserMessage rejects array content. Emit as role:'user' so
+    // they display in the user lane.
+    if (!isSidechain && Array.isArray(messageContent)) {
+        const textParts = messageContent
+            .filter((b: unknown) => isObject(b) && b.type === 'text' && typeof b.text === 'string')
+            .map((b: Record<string, unknown>) => b.text as string)
+        if (textParts.length > 0 && textParts.length === messageContent.length) {
+            return {
+                id: messageId,
+                localId,
+                createdAt,
+                role: 'user',
+                isSidechain: false,
+                content: { type: 'text', text: textParts.join('\n\n') },
+                meta
+            }
         }
     }
 

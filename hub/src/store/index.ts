@@ -37,7 +37,7 @@ type DbCliTokenLookup = {
     user_id: string
 }
 
-const SCHEMA_VERSION: number = 6
+const SCHEMA_VERSION: number = 7
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -175,6 +175,7 @@ export class Store {
                 agent_state TEXT,
                 agent_state_version INTEGER DEFAULT 1,
                 model TEXT,
+                model_reasoning_effort TEXT,
                 effort TEXT,
                 todos TEXT,
                 todos_updated_at INTEGER,
@@ -376,6 +377,13 @@ export class Store {
         }
     }
 
+    private migrateFromV6ToV7(): void {
+        const columns = this.getSessionColumnNames()
+        if (!columns.has('model_reasoning_effort')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN model_reasoning_effort TEXT')
+        }
+    }
+
     private getSessionColumnNames(): Set<string> {
         const rows = this.db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
         return new Set(rows.map((row) => row.name))
@@ -469,6 +477,9 @@ export class Store {
         }
         if (!columns.has('model')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN model TEXT')
+        }
+        if (!columns.has('model_reasoning_effort')) {
+            this.db.exec('ALTER TABLE sessions ADD COLUMN model_reasoning_effort TEXT')
         }
         if (!columns.has('effort')) {
             this.db.exec('ALTER TABLE sessions ADD COLUMN effort TEXT')

@@ -2,6 +2,7 @@ import type { AgentMessage, PlanItem } from '@/agent/types';
 import { asString, isObject } from '@hapi/protocol';
 import { deriveToolNameWithSource, isPlaceholderToolName } from '@/agent/utils';
 import { parseRateLimitText } from '@/agent/rateLimitParser';
+import { isInternalEventJson } from '@/agent/internalEventFilter';
 import { ACP_SESSION_UPDATE_TYPES } from './constants';
 
 function normalizeStatus(status: unknown): 'pending' | 'in_progress' | 'completed' | 'failed' {
@@ -158,13 +159,30 @@ export class AcpMessageHandler {
             const content = update.content;
             const text = extractTextContent(content);
             if (text) {
+                // Check once whether the buffered text is a prefix of this
+                // chunk (cumulative streaming). Used below by both the
+                // rate-limit and internal-event filters to clear stale
+                // prefixes that would otherwise leak on flushText().
+                const hadBufferedPrefix = this.bufferedText !== '' && text.startsWith(this.bufferedText);
+
                 const rateLimit = parseRateLimitText(text);
                 if (rateLimit) {
+                    if (hadBufferedPrefix) {
+                        this.bufferedText = '';
+                    }
                     if (rateLimit.suppress) {
                         return;
                     }
                     this.flushText();
                     this.onMessage(rateLimit.message);
+                    return;
+                }
+                // Drop internal event JSON (e.g. { type: "output", data: { ... } })
+                // that should never appear as visible text.
+                if (isInternalEventJson(text)) {
+                    if (hadBufferedPrefix) {
+                        this.bufferedText = '';
+                    }
                     return;
                 }
                 this.appendTextChunk(text);

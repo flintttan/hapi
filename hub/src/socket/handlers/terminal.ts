@@ -95,12 +95,15 @@ export function registerTerminalHandlers(socket: SocketWithData, deps: TerminalH
             return
         }
 
-        if (terminalRegistry.countForSocket(socket.id) >= maxTerminalsPerSocket) {
+        const existingEntry = terminalRegistry.get(terminalId)
+        const isReconnect = existingEntry?.sessionId === sessionId
+
+        if (!isReconnect && terminalRegistry.countForSocket(socket.id) >= maxTerminalsPerSocket) {
             emitTerminalError(terminalId, `Too many terminals open (max ${maxTerminalsPerSocket}).`)
             return
         }
 
-        if (terminalRegistry.countForSession(sessionId) >= maxTerminalsPerSession) {
+        if (!isReconnect && terminalRegistry.countForSession(sessionId) >= maxTerminalsPerSession) {
             emitTerminalError(terminalId, `Too many terminals open for this session (max ${maxTerminalsPerSession}).`)
             return
         }

@@ -1,4 +1,6 @@
 export * from './messages'
+export * from './flavors'
+export * from './models'
 export * from './modes'
 export * from './socket'
 export * from './sessionSummary'

@@ -43,7 +43,8 @@ export function AttachmentItem() {
                     <ErrorIcon />
                 </span>
             ) : null}
-            <span className="max-w-[150px] truncate">{name}</span>
+            <span className={`max-w-[150px] truncate ${isError ? 'text-red-500 line-through' : ''}`}>{name}</span>
+            {isError ? <span className="text-xs text-red-500 whitespace-nowrap">Upload failed</span> : null}
             <AttachmentPrimitive.Remove
                 className="ml-auto flex h-5 w-5 items-center justify-center rounded text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)]"
                 aria-label="Remove attachment"

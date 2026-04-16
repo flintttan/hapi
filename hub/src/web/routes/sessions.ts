@@ -18,6 +18,10 @@ const modelSchema = z.object({
     model: z.string().trim().min(1).nullable()
 })
 
+const modelReasoningEffortSchema = z.object({
+    modelReasoningEffort: z.string().trim().min(1).nullable()
+})
+
 const effortSchema = z.object({
     effort: z.string().trim().min(1).nullable()
 })
@@ -322,6 +326,42 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ ok: true })
         } catch (error) {
             const message = error instanceof Error ? error.message : 'Failed to apply model'
+            return c.json({ error: message }, 409)
+        }
+    })
+
+    app.post('/sessions/:id/model-reasoning-effort', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine, { requireActive: true })
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+
+        const flavor = sessionResult.session.metadata?.flavor ?? 'claude'
+        if (flavor !== 'codex') {
+            return c.json({ error: 'Model reasoning effort is only supported for Codex sessions' }, 400)
+        }
+        if (sessionResult.session.agentState?.controlledByUser === true) {
+            return c.json({ error: 'Model reasoning effort can only be changed for remote Codex sessions' }, 409)
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = modelReasoningEffortSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        try {
+            await engine.applySessionConfig(sessionResult.sessionId, {
+                modelReasoningEffort: parsed.data.modelReasoningEffort
+            })
+            return c.json({ ok: true })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to apply model reasoning effort'
             return c.json({ error: message }, 409)
         }
     })

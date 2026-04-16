@@ -140,6 +140,7 @@ export interface ClientToServerEvents {
         mode?: 'local' | 'remote'
         permissionMode?: PermissionMode
         model?: string | null
+        modelReasoningEffort?: string | null
         effort?: string | null
         collaborationMode?: CodexCollaborationMode
     }) => void

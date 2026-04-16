@@ -6,6 +6,7 @@ import { getAuthToken } from '@/api/auth'
 import { apiValidationError } from '@/utils/errorUtils'
 import { ApiMachineClient } from './apiMachine'
 import { ApiSessionClient } from './apiSession'
+import { buildHubRequestHeaders } from './hubExtraHeaders'
 
 export class ApiClient {
     static async create(): Promise<ApiClient> {
@@ -19,6 +20,7 @@ export class ApiClient {
         metadata: Metadata
         state: AgentState | null
         model?: string
+        modelReasoningEffort?: string
         effort?: string
     }): Promise<Session> {
         const response = await axios.post<CreateSessionResponse>(
@@ -28,13 +30,14 @@ export class ApiClient {
                 metadata: opts.metadata,
                 agentState: opts.state,
                 model: opts.model,
+                modelReasoningEffort: opts.modelReasoningEffort,
                 effort: opts.effort
             },
             {
-                headers: {
+                headers: buildHubRequestHeaders({
                     Authorization: `Bearer ${this.token}`,
                     'Content-Type': 'application/json'
-                },
+                }),
                 timeout: 60_000
             }
         )
@@ -74,6 +77,7 @@ export class ApiClient {
             thinkingAt: raw.thinkingAt,
             todos: raw.todos,
             model: raw.model,
+            modelReasoningEffort: raw.modelReasoningEffort,
             effort: raw.effort,
             permissionMode: raw.permissionMode,
             collaborationMode: raw.collaborationMode
@@ -93,10 +97,10 @@ export class ApiClient {
                 runnerState: opts.runnerState ?? null
             },
             {
-                headers: {
+                headers: buildHubRequestHeaders({
                     Authorization: `Bearer ${this.token}`,
                     'Content-Type': 'application/json'
-                },
+                }),
                 timeout: 60_000
             }
         )

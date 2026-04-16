@@ -87,7 +87,7 @@ class Hapi < Formula
       url "https://github.com/flintttan/hapi/releases/download/v#{version}/hapi-linux-arm64.tar.gz"
       sha256 "${shas.linuxArm64}"
     else
-      url "https://github.com/flintttan/hapi/releases/download/v#{version}/hapi-linux-x64.tar.gz"
+      url "https://github.com/flintttan/hapi/releases/download/v#{version}/hapi-linux-x64-baseline.tar.gz"
       sha256 "${shas.linuxX64}"
     end
   end
@@ -218,7 +218,7 @@ async function main(): Promise<void> {
         }
 
         console.log('\nUsers can now install via:');
-        console.log('  brew install tiann/tap/hapi');
+        console.log('  brew install flintttan/tap/hapi');
     } finally {
         // Cleanup
         rmSync(tempDir, { recursive: true, force: true });

@@ -105,13 +105,14 @@ describe('normalizeDecryptedMessage', () => {
         expect(firstBlock.text).toContain('"foo": "bar"')
     })
 
-    it('converts <task-notification> user output to event', () => {
+    it('normalizes <task-notification> user output as sidechain (event extracted by reducer)', () => {
         const message = makeMessage({
             role: 'agent',
             content: {
                 type: 'output',
                 data: {
                     type: 'user',
+                    uuid: 'u-notif',
                     message: { content: '<task-notification> <summary>Background command stopped</summary> </task-notification>' }
                 }
             }
@@ -119,12 +120,18 @@ describe('normalizeDecryptedMessage', () => {
 
         const normalized = normalizeDecryptedMessage(message)
 
+        // Normalizer emits as sidechain (preserving uuid for sentinel detection);
+        // the reducer extracts the summary as an event.
         expect(normalized).toMatchObject({
-            id: 'msg-1',
-            role: 'event',
-            isSidechain: false,
-            content: { type: 'message', message: 'Background command stopped' }
+            role: 'agent',
+            isSidechain: true,
         })
+        if (normalized?.role === 'agent') {
+            expect(normalized.content[0]).toMatchObject({
+                type: 'sidechain',
+                prompt: expect.stringContaining('<task-notification>')
+            })
+        }
     })
 
     it('treats <task-notification> without summary as sidechain (dropped by reducer)', () => {
@@ -193,6 +200,176 @@ describe('normalizeDecryptedMessage', () => {
         expect(normalized).toMatchObject({
             role: 'agent',
             isSidechain: true,
+        })
+    })
+
+    it('treats sidechain user output with array content as sidechain', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    uuid: 'u3',
+                    isSidechain: true,
+                    message: { content: [{ type: 'text', text: 'This is an agent prompt in array form' }] }
+                }
+            }
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+
+        expect(normalized).toMatchObject({
+            role: 'agent',
+            isSidechain: true,
+        })
+        if (normalized?.role !== 'agent') throw new Error('Expected agent')
+        expect(normalized.content[0]).toMatchObject({
+            type: 'sidechain',
+            prompt: 'This is an agent prompt in array form'
+        })
+    })
+
+    it('keeps "No response requested." text in normalized output (filtered later by reducer)', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    uuid: 'a-1',
+                    message: { role: 'assistant', content: 'No response requested.' }
+                }
+            }
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+        // Normalizer preserves the text (uuid/parentUUID needed by tracer);
+        // the reducer is responsible for suppressing it during rendering.
+        expect(normalized).not.toBeNull()
+        expect(normalized?.role).toBe('agent')
+        if (normalized?.role === 'agent') {
+            expect(normalized.content).toHaveLength(1)
+            expect(normalized.content[0]).toMatchObject({ type: 'text', text: 'No response requested.' })
+        }
+    })
+
+    it('keeps assistant messages with real content', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    uuid: 'a-2',
+                    message: { role: 'assistant', content: 'Here is the answer.' }
+                }
+            }
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+        expect(normalized).not.toBeNull()
+        expect(normalized?.role).toBe('agent')
+    })
+
+    it('propagates parentUuid from assistant output data to text block parentUUID', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    uuid: 'a-3',
+                    parentUuid: 'parent-injected-uuid',
+                    message: { role: 'assistant', content: 'No response requested.' }
+                }
+            }
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+        expect(normalized).not.toBeNull()
+        if (normalized?.role !== 'agent') throw new Error('Expected agent')
+        expect(normalized.content).toHaveLength(1)
+        expect(normalized.content[0]).toMatchObject({
+            type: 'text',
+            text: 'No response requested.',
+            parentUUID: 'parent-injected-uuid'
+        })
+    })
+
+    it('sets parentUUID to null when parentUuid is absent in assistant output', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'assistant',
+                    uuid: 'a-4',
+                    // No parentUuid field
+                    message: { role: 'assistant', content: 'Hello.' }
+                }
+            }
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+        expect(normalized).not.toBeNull()
+        if (normalized?.role !== 'agent') throw new Error('Expected agent')
+        expect(normalized.content[0]).toMatchObject({
+            type: 'text',
+            parentUUID: null
+        })
+    })
+
+    it('normalizes non-sidechain text-only array-content user output as user message', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    uuid: 'u5',
+                    isSidechain: false,
+                    message: { content: [{ type: 'text', text: 'Regular user message' }] }
+                }
+            }
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+
+        expect(normalized).toMatchObject({
+            role: 'user',
+            isSidechain: false,
+            content: { type: 'text', text: 'Regular user message' }
+        })
+    })
+
+    it('treats sidechain user output with mixed tool_result + text array as sidechain', () => {
+        const message = makeMessage({
+            role: 'agent',
+            content: {
+                type: 'output',
+                data: {
+                    type: 'user',
+                    uuid: 'u6',
+                    isSidechain: true,
+                    message: { content: [
+                        { type: 'tool_result', tool_use_id: 'tc-1', content: 'result' },
+                        { type: 'text', text: 'Some subagent text' }
+                    ] }
+                }
+            }
+        })
+
+        const normalized = normalizeDecryptedMessage(message)
+
+        expect(normalized).toMatchObject({
+            role: 'agent',
+            isSidechain: true,
+        })
+        if (normalized?.role !== 'agent') throw new Error('Expected agent')
+        expect(normalized.content[0]).toMatchObject({
+            type: 'sidechain',
+            prompt: 'Some subagent text'
         })
     })
 })

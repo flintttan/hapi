@@ -1,6 +1,5 @@
 import { logger } from '@/ui/logger';
-import { restoreTerminalState } from '@/ui/terminalState';
-import { spawnWithAbort } from '@/utils/spawnWithAbort';
+import { spawnWithTerminalGuard } from '@/utils/spawnWithTerminalGuard';
 
 export async function geminiLocal(opts: {
     path: string;
@@ -36,23 +35,17 @@ export async function geminiLocal(opts: {
 
     logger.debug(`[GeminiLocal] Spawning gemini with args: ${JSON.stringify(args)}`);
 
-    process.stdin.pause();
-    try {
-        await spawnWithAbort({
-            command: 'gemini',
-            args,
-            cwd: opts.path,
-            env,
-            signal: opts.abort,
-            shell: process.platform === 'win32',
-            logLabel: 'GeminiLocal',
-            spawnName: 'gemini',
-            installHint: 'Gemini CLI',
-            includeCause: true,
-            logExit: true
-        });
-    } finally {
-        process.stdin.resume();
-        restoreTerminalState();
-    }
+    await spawnWithTerminalGuard({
+        command: 'gemini',
+        args,
+        cwd: opts.path,
+        env,
+        signal: opts.abort,
+        shell: process.platform === 'win32',
+        logLabel: 'GeminiLocal',
+        spawnName: 'gemini',
+        installHint: 'Gemini CLI',
+        includeCause: true,
+        logExit: true
+    });
 }

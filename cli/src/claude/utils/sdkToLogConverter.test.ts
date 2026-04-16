@@ -269,6 +269,104 @@ describe('SDKToLogConverter', () => {
         })
     })
 
+    describe('Internal event filtering', () => {
+        it('should suppress rate_limit_event with allowed status', () => {
+            const sdkMessage = {
+                type: 'rate_limit_event',
+                rate_limit_info: {
+                    status: 'allowed',
+                    resetsAt: 1775559600,
+                    rateLimitType: 'five_hour'
+                }
+            } as unknown as SDKMessage
+
+            expect(converter.convert(sdkMessage)).toBeNull()
+        })
+
+        it('should convert allowed_warning to pipe-delimited text', () => {
+            const sdkMessage = {
+                type: 'rate_limit_event',
+                rate_limit_info: {
+                    status: 'allowed_warning',
+                    resetsAt: 1775559600,
+                    utilization: 0.85,
+                    rateLimitType: 'five_hour'
+                }
+            } as unknown as SDKMessage
+
+            const logMessage = converter.convert(sdkMessage)
+
+            expect(logMessage).not.toBeNull()
+            expect(logMessage!.type).toBe('assistant')
+            expect((logMessage as any).message.content[0].text).toBe(
+                'Claude AI usage limit warning|1775559600|85|five_hour'
+            )
+        })
+
+        it('should convert rejected to pipe-delimited text', () => {
+            const sdkMessage = {
+                type: 'rate_limit_event',
+                rate_limit_info: {
+                    status: 'rejected',
+                    resetsAt: 1775559600,
+                    rateLimitType: 'five_hour'
+                }
+            } as unknown as SDKMessage
+
+            const logMessage = converter.convert(sdkMessage)
+
+            expect(logMessage).not.toBeNull()
+            expect(logMessage!.type).toBe('assistant')
+            expect((logMessage as any).message.content[0].text).toBe(
+                'Claude AI usage limit reached|1775559600|five_hour'
+            )
+        })
+
+        it('should not break parent chain when rate_limit_event is suppressed', () => {
+            const user = converter.convert({
+                type: 'user',
+                message: { role: 'user', content: 'hi' }
+            } as SDKUserMessage)
+
+            converter.convert({
+                type: 'rate_limit_event',
+                rate_limit_info: { status: 'allowed' }
+            } as unknown as SDKMessage)
+
+            const assistant = converter.convert({
+                type: 'assistant',
+                message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] }
+            } as SDKAssistantMessage)
+
+            expect(assistant!.parentUuid).toBe(user!.uuid)
+        })
+
+        it('should chain parent correctly when rate_limit_event is converted', () => {
+            const user = converter.convert({
+                type: 'user',
+                message: { role: 'user', content: 'hi' }
+            } as SDKUserMessage)
+
+            const warning = converter.convert({
+                type: 'rate_limit_event',
+                rate_limit_info: {
+                    status: 'allowed_warning',
+                    resetsAt: 1775559600,
+                    utilization: 0.8,
+                    rateLimitType: 'five_hour'
+                }
+            } as unknown as SDKMessage)
+
+            const assistant = converter.convert({
+                type: 'assistant',
+                message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] }
+            } as SDKAssistantMessage)
+
+            expect(warning!.parentUuid).toBe(user!.uuid)
+            expect(assistant!.parentUuid).toBe(warning!.uuid)
+        })
+    })
+
     describe('Convenience function', () => {
         it('should convert single message without state', () => {
             const sdkMessage: SDKUserMessage = {

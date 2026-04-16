@@ -1,6 +1,5 @@
 import { logger } from '@/ui/logger';
-import { restoreTerminalState } from '@/ui/terminalState';
-import { spawnWithAbort } from '@/utils/spawnWithAbort';
+import { spawnWithTerminalGuard } from '@/utils/spawnWithTerminalGuard';
 
 /**
  * Filter out 'resume' subcommand which is managed internally by hapi.
@@ -61,23 +60,17 @@ export async function cursorLocal(opts: {
         return;
     }
 
-    process.stdin.pause();
-    try {
-        await spawnWithAbort({
-            command: 'agent',
-            args,
-            cwd: opts.path,
-            env: process.env,
-            signal: opts.abort,
-            logLabel: 'CursorLocal',
-            spawnName: 'agent',
-            installHint: 'Cursor Agent CLI (curl https://cursor.com/install -fsS | bash)',
-            includeCause: true,
-            logExit: true,
-            shell: process.platform === 'win32'
-        });
-    } finally {
-        process.stdin.resume();
-        restoreTerminalState();
-    }
+    await spawnWithTerminalGuard({
+        command: 'agent',
+        args,
+        cwd: opts.path,
+        env: process.env,
+        signal: opts.abort,
+        logLabel: 'CursorLocal',
+        spawnName: 'agent',
+        installHint: 'Cursor Agent CLI (curl https://cursor.com/install -fsS | bash)',
+        includeCause: true,
+        logExit: true,
+        shell: process.platform === 'win32'
+    });
 }

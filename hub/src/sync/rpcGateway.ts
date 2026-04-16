@@ -94,6 +94,7 @@ export class RpcGateway {
         config: {
             permissionMode?: PermissionMode
             model?: string | null
+            modelReasoningEffort?: string | null
             effort?: string | null
             collaborationMode?: CodexCollaborationMode
         }
@@ -116,6 +117,7 @@ export class RpcGateway {
         worktreeName?: string,
         resumeSessionId?: string,
         effort?: string,
+        permissionMode?: PermissionMode,
         approvedNewDirectoryCreation?: boolean
     ): Promise<
         | { type: 'success'; sessionId: string }
@@ -135,9 +137,10 @@ export class RpcGateway {
                     yolo,
                     sessionType,
                     worktreeName,
-                    approvedNewDirectoryCreation,
                     resumeSessionId,
-                    effort
+                    effort,
+                    permissionMode,
+                    approvedNewDirectoryCreation
                 }
             )
             if (result && typeof result === 'object') {

@@ -2,6 +2,7 @@ import React from 'react';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { logger } from '@/ui/logger';
+import { killProcessByChildProcess } from '@/utils/process';
 import { convertAgentMessage } from '@/agent/messageConverter';
 import { OpencodeDisplay } from '@/ui/ink/OpencodeDisplay';
 import {
@@ -177,11 +178,7 @@ class CursorRemoteLauncher extends RemoteLauncherBase {
             });
 
             const abortHandler = () => {
-                try {
-                    child.kill('SIGTERM');
-                } catch {
-                    // ignore
-                }
+                killProcessByChildProcess(child, false).catch(() => {});
                 resolve(null);
             };
             this.abortController.signal.addEventListener('abort', abortHandler);

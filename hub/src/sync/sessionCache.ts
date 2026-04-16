@@ -4,11 +4,13 @@ import type { Store } from '../store'
 import { clampAliveTime } from './aliveTime'
 import { EventPublisher } from './eventPublisher'
 import { extractTodoWriteTodosFromMessageContent, TodosSchema } from './todos'
+import { extractBackgroundTaskDelta } from './backgroundTasks'
 
 export class SessionCache {
     private readonly sessions: Map<string, Session> = new Map()
     private readonly lastBroadcastAtBySessionId: Map<string, number> = new Map()
     private readonly todoBackfillAttemptedSessionIds: Set<string> = new Set()
+    private readonly deduplicateInProgress: Set<string> = new Set()
 
     constructor(
         private readonly store: Store,
@@ -61,9 +63,10 @@ export class SessionCache {
         agentState: unknown,
         namespace: string,
         model?: string,
-        effort?: string
+        effort?: string,
+        modelReasoningEffort?: string
     ): Session {
-        const stored = this.store.sessions.getOrCreateSession(tag, metadata, agentState, namespace, model, effort)
+        const stored = this.store.sessions.getOrCreateSession(tag, metadata, agentState, namespace, model, effort, modelReasoningEffort)
         return this.refreshSession(stored.id) ?? (() => { throw new Error('Failed to load session') })()
     }
 
@@ -131,9 +134,11 @@ export class SessionCache {
             agentStateVersion: stored.agentStateVersion,
             thinking: existing?.thinking ?? false,
             thinkingAt: existing?.thinkingAt ?? 0,
+            backgroundTaskCount: existing?.backgroundTaskCount ?? 0,
             todos,
             teamState,
             model: stored.model,
+            modelReasoningEffort: stored.modelReasoningEffort,
             effort: stored.effort,
             permissionMode: existing?.permissionMode,
             collaborationMode: existing?.collaborationMode
@@ -158,6 +163,7 @@ export class SessionCache {
         mode?: 'local' | 'remote'
         permissionMode?: PermissionMode
         model?: string | null
+        modelReasoningEffort?: string | null
         effort?: string | null
         collaborationMode?: CodexCollaborationMode
     }): void {
@@ -171,6 +177,7 @@ export class SessionCache {
         const wasThinking = session.thinking
         const previousPermissionMode = session.permissionMode
         const previousModel = session.model
+        const previousModelReasoningEffort = session.modelReasoningEffort
         const previousEffort = session.effort
         const previousCollaborationMode = session.collaborationMode
 
@@ -189,6 +196,14 @@ export class SessionCache {
             }
             session.model = payload.model
         }
+        if (payload.modelReasoningEffort !== undefined) {
+            if (payload.modelReasoningEffort !== session.modelReasoningEffort) {
+                this.store.sessions.setSessionModelReasoningEffort(payload.sid, payload.modelReasoningEffort, session.namespace, {
+                    touchUpdatedAt: false
+                })
+            }
+            session.modelReasoningEffort = payload.modelReasoningEffort
+        }
         if (payload.effort !== undefined) {
             if (payload.effort !== session.effort) {
                 this.store.sessions.setSessionEffort(payload.sid, payload.effort, session.namespace, {
@@ -205,6 +220,7 @@ export class SessionCache {
         const lastBroadcastAt = this.lastBroadcastAtBySessionId.get(session.id) ?? 0
         const modeChanged = previousPermissionMode !== session.permissionMode
             || previousModel !== session.model
+            || previousModelReasoningEffort !== session.modelReasoningEffort
             || previousEffort !== session.effort
             || previousCollaborationMode !== session.collaborationMode
         const shouldBroadcast = (!wasActive && session.active)
@@ -223,11 +239,28 @@ export class SessionCache {
                     thinking: session.thinking,
                     permissionMode: session.permissionMode,
                     model: session.model,
+                    modelReasoningEffort: session.modelReasoningEffort,
                     effort: session.effort,
                     collaborationMode: session.collaborationMode
                 }
             })
         }
+    }
+
+    applyBackgroundTaskDelta(sessionId: string, delta: { started: number; completed: number }): void {
+        const session = this.sessions.get(sessionId)
+        if (!session) return
+
+        const prev = session.backgroundTaskCount ?? 0
+        const next = Math.max(0, prev + delta.started - delta.completed)
+        if (next === prev) return
+
+        session.backgroundTaskCount = next
+        this.publisher.emit({
+            type: 'session-updated',
+            sessionId,
+            data: { backgroundTaskCount: next }
+        })
     }
 
     handleSessionEnd(payload: { sid: string; time: number }): void {
@@ -243,20 +276,25 @@ export class SessionCache {
         session.active = false
         session.thinking = false
         session.thinkingAt = t
+        session.backgroundTaskCount = 0
 
-        this.publisher.emit({ type: 'session-updated', sessionId: session.id, data: { active: false, thinking: false } })
+        this.publisher.emit({ type: 'session-updated', sessionId: session.id, data: { active: false, thinking: false, backgroundTaskCount: 0 } })
     }
 
-    expireInactive(now: number = Date.now()): void {
+    expireInactive(now: number = Date.now()): string[] {
         const sessionTimeoutMs = 30_000
+        const expired: string[] = []
 
         for (const session of this.sessions.values()) {
             if (!session.active) continue
             if (now - session.activeAt <= sessionTimeoutMs) continue
             session.active = false
             session.thinking = false
+            expired.push(session.id)
             this.publisher.emit({ type: 'session-updated', sessionId: session.id, data: { active: false } })
         }
+
+        return expired
     }
 
     applySessionConfig(
@@ -264,6 +302,7 @@ export class SessionCache {
         config: {
             permissionMode?: PermissionMode
             model?: string | null
+            modelReasoningEffort?: string | null
             effort?: string | null
             collaborationMode?: CodexCollaborationMode
         }
@@ -286,6 +325,17 @@ export class SessionCache {
                 }
             }
             session.model = config.model
+        }
+        if (config.modelReasoningEffort !== undefined) {
+            if (config.modelReasoningEffort !== session.modelReasoningEffort) {
+                const updated = this.store.sessions.setSessionModelReasoningEffort(sessionId, config.modelReasoningEffort, session.namespace, {
+                    touchUpdatedAt: false
+                })
+                if (!updated) {
+                    throw new Error('Failed to update session model reasoning effort')
+                }
+            }
+            session.modelReasoningEffort = config.modelReasoningEffort
         }
         if (config.effort !== undefined) {
             if (config.effort !== session.effort) {
@@ -398,6 +448,15 @@ export class SessionCache {
             }
         }
 
+        if (newStored.modelReasoningEffort === null && oldStored.modelReasoningEffort !== null) {
+            const updated = this.store.sessions.setSessionModelReasoningEffort(newSessionId, oldStored.modelReasoningEffort, namespace, {
+                touchUpdatedAt: false
+            })
+            if (!updated) {
+                throw new Error('Failed to preserve session model reasoning effort during merge')
+            }
+        }
+
         if (newStored.effort === null && oldStored.effort !== null) {
             const updated = this.store.sessions.setSessionEffort(newSessionId, oldStored.effort, namespace, {
                 touchUpdatedAt: false
@@ -414,6 +473,27 @@ export class SessionCache {
                 oldStored.todosUpdatedAt,
                 namespace
             )
+        }
+
+        // Merge agentState: union requests/completedRequests from both sessions so pending
+        // approvals on the duplicate are not lost. Only inactive duplicates reach this point
+        // (active ones are skipped by deduplicateByAgentSessionId).
+        // Read the latest target state right before writing to avoid overwriting live updates.
+        if (oldStored.agentState !== null) {
+            for (let attempt = 0; attempt < 2; attempt += 1) {
+                const latest = this.store.sessions.getSessionByNamespace(newSessionId, namespace)
+                if (!latest) break
+                const mergedAgentState = this.mergeAgentState(oldStored.agentState, latest.agentState)
+                if (mergedAgentState === null || mergedAgentState === latest.agentState) break
+                const result = this.store.sessions.updateSessionAgentState(
+                    newSessionId,
+                    mergedAgentState,
+                    latest.agentStateVersion,
+                    namespace
+                )
+                if (result.result !== 'version-mismatch') break
+                // version-mismatch: retry with fresh snapshot
+            }
         }
 
         if (oldStored.teamState !== null && oldStored.teamStateUpdatedAt !== null) {
@@ -482,5 +562,91 @@ export class SessionCache {
         }
 
         return changed ? merged : newMetadata
+    }
+
+    private mergeAgentState(oldState: unknown | null, newState: unknown | null): unknown | null {
+        if (oldState === null) return newState
+        if (newState === null) return oldState
+
+        const oldObj = oldState as Record<string, unknown>
+        const newObj = newState as Record<string, unknown>
+
+        const completedRequests = {
+            ...((oldObj.completedRequests as Record<string, unknown> | undefined) ?? {}),
+            ...((newObj.completedRequests as Record<string, unknown> | undefined) ?? {})
+        }
+        // Filter out requests that are already completed to avoid resurrecting them as pending
+        const completedIds = new Set(Object.keys(completedRequests))
+        const requests = Object.fromEntries(
+            Object.entries({
+                ...((oldObj.requests as Record<string, unknown> | undefined) ?? {}),
+                ...((newObj.requests as Record<string, unknown> | undefined) ?? {})
+            }).filter(([id]) => !completedIds.has(id))
+        )
+
+        return { ...oldObj, ...newObj, requests, completedRequests }
+    }
+
+    private extractAgentSessionId(
+        metadata: NonNullable<Session['metadata']>
+    ): { field: 'codexSessionId' | 'claudeSessionId' | 'geminiSessionId' | 'opencodeSessionId' | 'cursorSessionId'; value: string } | null {
+        if (metadata.codexSessionId) return { field: 'codexSessionId', value: metadata.codexSessionId }
+        if (metadata.claudeSessionId) return { field: 'claudeSessionId', value: metadata.claudeSessionId }
+        if (metadata.geminiSessionId) return { field: 'geminiSessionId', value: metadata.geminiSessionId }
+        if (metadata.opencodeSessionId) return { field: 'opencodeSessionId', value: metadata.opencodeSessionId }
+        if (metadata.cursorSessionId) return { field: 'cursorSessionId', value: metadata.cursorSessionId }
+        return null
+    }
+
+    async deduplicateByAgentSessionId(sessionId: string): Promise<void> {
+        const session = this.sessions.get(sessionId)
+        if (!session?.metadata) return
+
+        const agentId = this.extractAgentSessionId(session.metadata)
+        if (!agentId) return
+
+        // Guard: skip if another dedup for this agent ID is already in progress.
+        // A skipped trigger is acceptable — the web-side display dedup hides any remaining duplicates.
+        if (this.deduplicateInProgress.has(agentId.value)) return
+        this.deduplicateInProgress.add(agentId.value)
+
+        try {
+            const candidates: { id: string; session: Session }[] = [{ id: sessionId, session }]
+            for (const [existingId, existing] of this.sessions) {
+                if (existingId === sessionId) continue
+                if (existing.namespace !== session.namespace) continue
+                if (!existing.metadata) continue
+                if (existing.metadata[agentId.field] !== agentId.value) continue
+                // Only merge inactive duplicates. Active ones still have a live CLI socket
+                // whose keepalive/messages would fail if we deleted their session record.
+                // The web-side display dedup hides active duplicates from the UI.
+                if (existing.active) continue
+                candidates.push({ id: existingId, session: existing })
+            }
+
+            if (candidates.length <= 1) return
+
+            // Prefer the triggering session as the merge target so dedup stays stable when
+            // multiple inactive duplicates share the same agent session ID. Fall back to the
+            // most recent timestamps so newer state still wins among the remaining candidates.
+            candidates.sort((a, b) =>
+                Number(b.id === sessionId) - Number(a.id === sessionId)
+                || (b.session.activeAt - a.session.activeAt)
+                || (b.session.updatedAt - a.session.updatedAt)
+            )
+            const targetId = candidates[0].id
+            const targetNamespace = candidates[0].session.namespace
+
+            for (const { id } of candidates.slice(1)) {
+                if (id === targetId) continue
+                try {
+                    await this.mergeSessions(id, targetId, targetNamespace)
+                } catch {
+                    // best-effort: duplicate remains if merge fails
+                }
+            }
+        } finally {
+            this.deduplicateInProgress.delete(agentId.value)
+        }
     }
 }

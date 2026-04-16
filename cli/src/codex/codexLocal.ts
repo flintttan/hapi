@@ -1,8 +1,8 @@
 import { logger } from '@/ui/logger';
-import { restoreTerminalState } from '@/ui/terminalState';
-import { spawnWithAbort } from '@/utils/spawnWithAbort';
+import { spawnWithTerminalGuard } from '@/utils/spawnWithTerminalGuard';
 import { buildMcpServerConfigArgs, buildDeveloperInstructionsArg } from './utils/codexMcpConfig';
 import { codexSystemPrompt } from './utils/systemPrompt';
+import type { ReasoningEffort } from './appServerTypes';
 
 /**
  * Filter out 'resume' subcommand which is managed internally by hapi.
@@ -28,6 +28,7 @@ export async function codexLocal(opts: {
     sessionId: string | null;
     path: string;
     model?: string;
+    modelReasoningEffort?: ReasoningEffort;
     sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
     onSessionFound: (id: string) => void;
     codexArgs?: string[];
@@ -42,6 +43,10 @@ export async function codexLocal(opts: {
 
     if (opts.model) {
         args.push('--model', opts.model);
+    }
+
+    if (opts.modelReasoningEffort) {
+        args.push('--model-reasoning-effort', opts.modelReasoningEffort);
     }
 
     if (opts.sandbox) {
@@ -68,23 +73,17 @@ export async function codexLocal(opts: {
         return;
     }
 
-    process.stdin.pause();
-    try {
-        await spawnWithAbort({
-            command: 'codex',
-            args,
-            cwd: opts.path,
-            env: process.env,
-            signal: opts.abort,
-            logLabel: 'CodexLocal',
-            spawnName: 'codex',
-            installHint: 'Codex CLI',
-            includeCause: true,
-            logExit: true,
-            shell: process.platform === 'win32'
-        });
-    } finally {
-        process.stdin.resume();
-        restoreTerminalState();
-    }
+    await spawnWithTerminalGuard({
+        command: 'codex',
+        args,
+        cwd: opts.path,
+        env: process.env,
+        signal: opts.abort,
+        logLabel: 'CodexLocal',
+        spawnName: 'codex',
+        installHint: 'Codex CLI',
+        includeCause: true,
+        logExit: true,
+        shell: process.platform === 'win32'
+    });
 }

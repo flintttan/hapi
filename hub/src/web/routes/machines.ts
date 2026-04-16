@@ -63,6 +63,7 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             parsed.data.worktreeName,
             undefined,
             parsed.data.effort,
+            undefined,
             parsed.data.approvedNewDirectoryCreation
         )
         return c.json(result)

@@ -79,6 +79,7 @@ function createSessionStub(permissionMode: 'default' | 'read-only' | 'safe-yolo'
                 }
             },
             getPermissionMode: () => permissionMode,
+            getModelReasoningEffort: () => null,
             onSessionFound: () => {},
             sendSessionEvent: (event: { type: string; message?: string }) => {
                 sessionEvents.push(event);

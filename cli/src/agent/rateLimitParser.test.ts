@@ -106,7 +106,7 @@ describe('parseRateLimitText', () => {
         expect(result).toEqual({ suppress: true });
     });
 
-    it('passes through unknown statuses (returns null)', () => {
+    it('suppresses unknown statuses to prevent raw JSON leaking', () => {
         const result = parseRateLimitText(JSON.stringify({
             type: 'rate_limit_event',
             rate_limit_info: {
@@ -115,7 +115,7 @@ describe('parseRateLimitText', () => {
             },
         }));
 
-        expect(result).toBeNull();
+        expect(result).toEqual({ suppress: true });
     });
 
     it('handles wrapped { type: "output", data: { ... } } format', () => {
@@ -140,7 +140,7 @@ describe('parseRateLimitText', () => {
         });
     });
 
-    it('returns null when resetsAt is missing', () => {
+    it('suppresses when resetsAt is missing to prevent raw JSON leak', () => {
         const result = parseRateLimitText(JSON.stringify({
             type: 'rate_limit_event',
             rate_limit_info: {
@@ -148,6 +148,6 @@ describe('parseRateLimitText', () => {
             },
         }));
 
-        expect(result).toBeNull();
+        expect(result).toEqual({ suppress: true });
     });
 });

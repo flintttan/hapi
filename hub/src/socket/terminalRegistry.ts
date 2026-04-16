@@ -25,8 +25,19 @@ export class TerminalRegistry {
     }
 
     register(terminalId: string, sessionId: string, socketId: string, cliSocketId: string): TerminalRegistryEntry | null {
-        if (this.terminals.has(terminalId)) {
-            return null
+        const existing = this.terminals.get(terminalId)
+        if (existing) {
+            if (existing.socketId === socketId) {
+                return existing
+            }
+            if (existing.sessionId !== sessionId) {
+                return null
+            }
+            // Same session, different socket — stale entry from a previous
+            // connection (e.g. socket reconnect in a PWA). Terminal IDs are
+            // client-generated UUIDs so cross-client collisions are not a
+            // realistic concern; clean up and re-register.
+            this.remove(terminalId)
         }
 
         const entry: TerminalRegistryEntry = {

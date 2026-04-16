@@ -1,12 +1,11 @@
 import { mkdirSync } from "node:fs";
 import { logger } from "@/ui/logger";
-import { restoreTerminalState } from "@/ui/terminalState";
 import { claudeCheckSession } from "./utils/claudeCheckSession";
 import { getProjectPath } from "./utils/path";
 import { appendMcpConfigArg } from "./utils/mcpConfig";
 import { systemPrompt } from "./utils/systemPrompt";
 import { withBunRuntimeEnv } from "@/utils/bunRuntime";
-import { spawnWithAbort } from "@/utils/spawnWithAbort";
+import { spawnWithTerminalGuard } from "@/utils/spawnWithTerminalGuard";
 import { getHapiBlobsDir } from "@/constants/uploadPaths";
 import { stripNewlinesForWindowsShellArg } from "@/utils/shellEscape";
 import { getDefaultClaudeCodePath } from "./sdk/utils";
@@ -77,8 +76,15 @@ export async function claudeLocal(opts: {
 
     // Prepare environment variables
     // Note: Local mode uses global Claude installation
+    //
+    // SDK metadata extraction (extractSDKMetadataAsync → query()) sets
+    // CLAUDE_CODE_ENTRYPOINT='sdk-ts' on the current process. If leaked
+    // into the local spawn, Claude Code thinks it was SDK-launched and
+    // excludes the session from `claude --resume`. Destructure it out
+    // so the child uses its own default entrypoint.
+    const { CLAUDE_CODE_ENTRYPOINT: _, ...cleanEnv } = process.env
     const env = {
-        ...process.env,
+        ...cleanEnv,
         DISABLE_AUTOUPDATER: '1',
         ...opts.claudeEnvVars
     }
@@ -91,8 +97,7 @@ export async function claudeLocal(opts: {
 
     // Spawn the process
     try {
-        process.stdin.pause();
-        await spawnWithAbort({
+        await spawnWithTerminalGuard({
             command: claudeCommand,
             args,
             cwd: opts.path,
@@ -107,8 +112,6 @@ export async function claudeLocal(opts: {
         });
     } finally {
         cleanupMcpConfig?.();
-        process.stdin.resume();
-        restoreTerminalState();
     }
 
     return startFrom ?? null;

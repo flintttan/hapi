@@ -42,7 +42,21 @@ export function parseRateLimitText(text: string): RateLimitResult {
     if (typeof info !== 'object' || info === null) return null;
 
     const { status, resetsAt, utilization, rateLimitType } = info as Record<string, unknown>;
-    if (typeof resetsAt !== 'number') return null;
+
+    // Suppress early for statuses that never need display,
+    // before checking resetsAt — malformed payloads should not leak.
+    if (status === 'allowed') {
+        return { suppress: true };
+    }
+
+    if (typeof resetsAt !== 'number') {
+        // Malformed rate_limit_event (missing resetsAt) — suppress to prevent
+        // raw JSON from leaking into chat.
+        return { suppress: true };
+    }
+
+    // Ensure integer for the pipe-delimited format (web regex uses \d+)
+    const resetsAtInt = Math.round(resetsAt);
 
     if (status === 'allowed_warning') {
         const pct = typeof utilization === 'number' ? Math.round(utilization * 100) : 0;
@@ -51,7 +65,7 @@ export function parseRateLimitText(text: string): RateLimitResult {
             suppress: false,
             message: {
                 type: 'text',
-                text: `Claude AI usage limit warning|${resetsAt}|${pct}|${limitType}`,
+                text: `Claude AI usage limit warning|${resetsAtInt}|${pct}|${limitType}`,
             },
         };
     }
@@ -62,16 +76,12 @@ export function parseRateLimitText(text: string): RateLimitResult {
             suppress: false,
             message: {
                 type: 'text',
-                text: `Claude AI usage limit reached|${resetsAt}|${limitType}`,
+                text: `Claude AI usage limit reached|${resetsAtInt}|${limitType}`,
             },
         };
     }
 
-    if (status === 'allowed') {
-        return { suppress: true };
-    }
-
-    // Unknown status — return null so the original text passes through.
-    // Suppressing unknown statuses risks hiding important new events.
-    return null;
+    // Unknown status — suppress to prevent raw JSON from leaking into chat.
+    // If a new status needs to be displayed, add an explicit branch above.
+    return { suppress: true };
 }
