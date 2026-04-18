@@ -507,6 +507,46 @@ const TodoWriteResultView: ToolViewComponent = (props: ToolViewProps) => {
     return <ChecklistList items={todos} />
 }
 
+const AgentResultView: ToolViewComponent = (props: ToolViewProps) => {
+    const { state, result } = props.block.tool
+
+    if (result === undefined || result === null) {
+        return <div className="text-sm text-[var(--app-hint)]">{placeholderForState(state)}</div>
+    }
+
+    // For errors, show the error text
+    if (state === 'error') {
+        const text = extractTextFromResult(result)
+        return (
+            <div className="text-sm text-red-600">
+                {text?.trim() ? text : 'Agent failed'}
+            </div>
+        )
+    }
+
+    const text = extractTextFromResult(result)
+    if (!text) {
+        return <div className="text-sm text-[var(--app-hint)]">{state === 'completed' ? 'Done' : placeholderForState(state)}</div>
+    }
+
+    // Detect internal launch metadata. Check structurally first (result object
+    // may carry agentId/output_file keys), then fall back to a strict text
+    // pattern that is unlikely to appear in normal agent prose.
+    const isInternalMeta = isObject(result) && ('agentId' in result || 'output_file' in result)
+        || (text.startsWith('Async agent launched successfully.') && text.includes('agentId:'))
+
+    if (isInternalMeta) {
+        return <div className="text-sm text-[var(--app-hint)]">Agent launched</div>
+    }
+
+    return (
+        <>
+            <MarkdownRenderer content={text} />
+            <RawJsonDevOnly value={result} />
+        </>
+    )
+}
+
 const SkillResultView: ToolViewComponent = (props: ToolViewProps) => {
     const { state, result, input } = props.block.tool
 
@@ -597,6 +637,7 @@ export const toolResultViewRegistry: Record<string, ToolViewComponent> = {
     CodexPatch: CodexPatchResultView,
     CodexDiff: CodexDiffResultView,
     Skill: SkillResultView,
+    Agent: AgentResultView,
     AskUserQuestion: AskUserQuestionResultView,
     ExitPlanMode: MarkdownResultView,
     ask_user_question: AskUserQuestionResultView,
