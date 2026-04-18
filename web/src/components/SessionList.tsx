@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
 import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
+import { useBulkSessionActions } from '@/hooks/mutations/useBulkSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { Button } from '@/components/ui/button'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useTranslation } from '@/lib/use-translation'
 
@@ -352,9 +354,21 @@ function SessionItem(props: {
     showPath?: boolean
     api: ApiClient | null
     selected?: boolean
+    selectionMode?: boolean
+    checked?: boolean
+    onCheckedChange?: (sessionId: string, checked: boolean) => void
 }) {
     const { t } = useTranslation()
-    const { session: s, onSelect, showPath = true, api, selected = false } = props
+    const {
+        session: s,
+        onSelect,
+        showPath = true,
+        api,
+        selected = false,
+        selectionMode = false,
+        checked = false,
+        onCheckedChange
+    } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
@@ -375,6 +389,12 @@ function SessionItem(props: {
             setMenuOpen(true)
         },
         onClick: () => {
+            if (selectionMode) {
+                if (!s.active) {
+                    onCheckedChange?.(s.id, !checked)
+                }
+                return
+            }
             if (!menuOpen) {
                 onSelect(s.id)
             }
@@ -384,17 +404,27 @@ function SessionItem(props: {
 
     const sessionName = getSessionTitle(s)
     const todoProgress = getTodoProgress(s)
+    const disabledSelection = selectionMode && s.active
     return (
         <>
             <button
                 type="button"
                 {...longPressHandlers}
-                className={`session-list-item flex w-full flex-col gap-1 px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''}`}
+                className={`session-list-item flex w-full flex-col gap-1 px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''} ${checked ? 'ring-1 ring-[var(--app-link)] bg-[var(--app-secondary-bg)]' : ''}`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
+                aria-disabled={disabledSelection || undefined}
             >
                 <div className={`flex items-center justify-between gap-3 ${!s.active ? 'opacity-50' : ''}`}>
                     <div className="flex items-center gap-2 min-w-0">
+                        {selectionMode ? (
+                            <span
+                                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${checked ? 'border-[var(--app-link)] bg-[var(--app-link)] text-white' : 'border-[var(--app-border)] bg-[var(--app-bg)] text-transparent'} ${disabledSelection ? 'opacity-40' : ''}`}
+                                aria-hidden="true"
+                            >
+                                ✓
+                            </span>
+                        ) : null}
                         <FlavorIcon flavor={s.metadata?.flavor} className="h-4 w-4 shrink-0" />
                         <div className={`truncate text-sm font-medium ${s.active ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}>
                             {sessionName}
@@ -428,7 +458,7 @@ function SessionItem(props: {
             </button>
 
             <SessionActionMenu
-                isOpen={menuOpen}
+                isOpen={!selectionMode && menuOpen}
                 onClose={() => setMenuOpen(false)}
                 sessionActive={s.active}
                 onRename={() => setRenameOpen(true)}
@@ -482,9 +512,11 @@ export function SessionList(props: {
     api: ApiClient | null
     machineLabelsById?: Record<string, string>
     selectedSessionId?: string | null
+    headerActions?: ReactNode
 }) {
     const { t } = useTranslation()
     const { renderHeader = true, api, selectedSessionId, machineLabelsById = {} } = props
+    const { bulkDeleteSessions, isPending: isBulkDeletePending } = useBulkSessionActions(api)
     const groups = useMemo(
         () => groupSessionsByDirectory(deduplicateSessionsByAgentId(props.sessions, selectedSessionId)),
         [props.sessions, selectedSessionId]
@@ -492,6 +524,45 @@ export function SessionList(props: {
     const [collapseOverrides, setCollapseOverrides] = useState<Map<string, boolean>>(
         () => new Map()
     )
+    const [selectionMode, setSelectionMode] = useState(false)
+    const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+    const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+    const visibleDeletableSessionIds = useMemo(
+        () => groups.flatMap((group) => group.sessions.filter((session) => !session.active).map((session) => session.id)),
+        [groups]
+    )
+    const selectedCount = selectedIds.size
+    const setSessionChecked = (sessionId: string, checked: boolean) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev)
+            if (checked) {
+                next.add(sessionId)
+            } else {
+                next.delete(sessionId)
+            }
+            return next
+        })
+    }
+    const exitSelectionMode = () => {
+        setSelectionMode(false)
+        setSelectedIds(new Set())
+    }
+    const toggleSelectionMode = () => {
+        if (selectionMode) {
+            exitSelectionMode()
+        } else {
+            setSelectionMode(true)
+        }
+    }
+    const selectAllVisible = () => {
+        setSelectedIds(new Set(visibleDeletableSessionIds))
+    }
+    const handleBulkDelete = async () => {
+        const ids = Array.from(selectedIds)
+        await bulkDeleteSessions(ids)
+        setBulkDeleteOpen(false)
+        exitSelectionMode()
+    }
     const isGroupCollapsed = (group: SessionGroup): boolean => {
         const override = collapseOverrides.get(group.key)
         if (override !== undefined) return override
@@ -595,18 +666,102 @@ export function SessionList(props: {
             {renderHeader ? (
                 <div className="flex items-center justify-between px-3 py-1">
                     <div className="text-xs text-[var(--app-hint)]">
-                        {t('sessions.count', { n: props.sessions.length, m: groups.length })}
+                        {selectionMode
+                            ? t('sessions.bulk.selected', { n: selectedCount })
+                            : t('sessions.count', { n: props.sessions.length, m: groups.length })}
                     </div>
-                    <button
-                        type="button"
-                        onClick={props.onNewSession}
-                        className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
-                        title={t('sessions.new')}
-                    >
-                        <PlusIcon className="h-5 w-5" />
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                        {props.headerActions}
+
+                        {selectionMode ? (
+                            <>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="secondary"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={selectAllVisible}
+                                    disabled={visibleDeletableSessionIds.length === 0}
+                                >
+                                    {t('sessions.bulk.selectAll')}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="destructive"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() => setBulkDeleteOpen(true)}
+                                    disabled={selectedCount === 0}
+                                >
+                                    {t('sessions.bulk.delete')}
+                                </Button>
+                            </>
+                        ) : null}
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            className="h-7 px-2 text-xs"
+                            onClick={toggleSelectionMode}
+                        >
+                            {selectionMode ? t('button.cancel') : t('sessions.bulk.manage')}
+                        </Button>
+                        {!selectionMode ? (
+                            <button
+                                type="button"
+                                onClick={props.onNewSession}
+                                className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
+                                title={t('sessions.new')}
+                            >
+                                <PlusIcon className="h-5 w-5" />
+                            </button>
+                        ) : null}
+                    </div>
                 </div>
-            ) : null}
+            ) : (
+                <div className={`flex items-center gap-1.5 px-2 pb-1 ${selectionMode ? 'justify-between' : 'justify-end'}`}>
+                    <div className="text-xs text-[var(--app-hint)]">
+                        {selectionMode ? t('sessions.bulk.selected', { n: selectedCount }) : null}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                        {props.headerActions}
+
+                        {selectionMode ? (
+                            <>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="secondary"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={selectAllVisible}
+                                    disabled={visibleDeletableSessionIds.length === 0}
+                                >
+                                    {t('sessions.bulk.selectAll')}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="destructive"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() => setBulkDeleteOpen(true)}
+                                    disabled={selectedCount === 0}
+                                >
+                                    {t('sessions.bulk.delete')}
+                                </Button>
+                            </>
+                        ) : null}
+                        <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            className="h-7 px-2 text-xs"
+                            onClick={toggleSelectionMode}
+                        >
+                            {selectionMode ? t('button.cancel') : t('sessions.bulk.manage')}
+                        </Button>
+                    </div>
+                </div>
+            )}
 
             <div className="flex flex-col gap-3 px-2 pt-1 pb-2">
                 {machineGroups.map((mg) => {
@@ -660,6 +815,9 @@ export function SessionList(props: {
                                                                 showPath={false}
                                                                 api={api}
                                                                 selected={s.id === selectedSessionId}
+                                                                selectionMode={selectionMode}
+                                                                checked={selectedIds.has(s.id)}
+                                                                onCheckedChange={setSessionChecked}
                                                             />
                                                         ))}
                                                     </div>
@@ -675,6 +833,17 @@ export function SessionList(props: {
                     )
                 })}
             </div>
+            <ConfirmDialog
+                isOpen={bulkDeleteOpen}
+                onClose={() => setBulkDeleteOpen(false)}
+                title={t('dialog.bulkDelete.title')}
+                description={t('dialog.bulkDelete.description', { n: selectedCount })}
+                confirmLabel={t('dialog.bulkDelete.confirm')}
+                confirmingLabel={t('dialog.bulkDelete.confirming')}
+                onConfirm={handleBulkDelete}
+                isPending={isBulkDeletePending}
+                destructive
+            />
         </div>
     )
 }

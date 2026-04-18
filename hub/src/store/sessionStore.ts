@@ -8,6 +8,7 @@ import {
     getSessionByNamespace,
     getSessions,
     getSessionsByNamespace,
+    getInactiveSessionIdsUpdatedBefore,
     setSessionEffort,
     setSessionModel,
     setSessionModelReasoningEffort,
@@ -98,5 +99,9 @@ export class SessionStore {
 
     deleteSession(id: string, namespace: string): boolean {
         return deleteSession(this.db, id, namespace)
+    }
+
+    getInactiveSessionIdsUpdatedBefore(namespace: string, cutoff: number, limit: number): string[] {
+        return getInactiveSessionIdsUpdatedBefore(this.db, namespace, cutoff, limit)
     }
 }

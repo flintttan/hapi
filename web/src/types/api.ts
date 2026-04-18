@@ -70,6 +70,8 @@ export type Machine = {
     runnerState?: RunnerState | null
 }
 
+export type MachineResponse = { machine: Machine }
+
 export type AuthResponse = {
     token: string
     refreshToken?: string
@@ -95,6 +97,13 @@ export type MessagesResponse = {
 
 export type MachinesResponse = { machines: Machine[] }
 export type MachinePathsExistsResponse = { exists: Record<string, boolean> }
+export type BulkDeleteSessionsResponse = { ok: boolean; deletedSessionIds: string[] }
+export type CleanupPreferencesResponse = {
+    autoCleanupEnabled: boolean
+    sessionRetentionDays: number | null
+    defaultSessionRetentionDays: number
+    effectiveSessionRetentionDays: number
+}
 
 export type SpawnResponse =
     | { type: 'success'; sessionId: string }

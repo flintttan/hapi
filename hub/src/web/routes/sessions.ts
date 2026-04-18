@@ -30,6 +30,10 @@ const renameSessionSchema = z.object({
     name: z.string().min(1).max(255)
 })
 
+const bulkDeleteSessionsSchema = z.object({
+    sessionIds: z.array(z.string().min(1)).min(1).max(200)
+})
+
 const uploadSchema = z.object({
     filename: z.string().min(1).max(255),
     content: z.string().min(1),
@@ -90,6 +94,51 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         return c.json({ session: sessionResult.session })
+    })
+
+    app.post('/sessions/bulk-delete', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = bulkDeleteSessionsSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        const namespace = c.get('namespace')
+        const sessionIds = Array.from(new Set(parsed.data.sessionIds))
+        const sessions: Array<{ sessionId: string }> = []
+        for (const sessionId of sessionIds) {
+            const access = engine.resolveSessionAccess(sessionId, namespace)
+            if (!access.ok) {
+                const status = access.reason === 'access-denied' ? 403 : 404
+                const error = access.reason === 'access-denied' ? 'Session access denied' : 'Session not found'
+                return c.json({ error, sessionId }, status)
+            }
+            if (access.session.active) {
+                return c.json({ error: 'Cannot delete active session. Archive it first.', sessionId }, 409)
+            }
+            sessions.push({ sessionId: access.sessionId })
+        }
+
+        const deletedSessionIds: string[] = []
+        try {
+            for (const { sessionId } of sessions) {
+                await engine.deleteSession(sessionId)
+                deletedSessionIds.push(sessionId)
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to delete sessions'
+            if (message.includes('active')) {
+                return c.json({ error: message, deletedSessionIds }, 409)
+            }
+            return c.json({ error: message, deletedSessionIds }, 500)
+        }
+
+        return c.json({ ok: true, deletedSessionIds })
     })
 
     app.post('/sessions/:id/resume', async (c) => {

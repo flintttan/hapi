@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react
 import { ThreadPrimitive } from '@assistant-ui/react'
 import type { ApiClient } from '@/api/client'
 import type { SessionMetadataSummary } from '@/types/api'
+import type { MessageSearchResult } from '@/lib/message-search'
 import { HappyChatProvider } from '@/components/AssistantChat/context'
 import { HappyAssistantMessage } from '@/components/AssistantChat/messages/AssistantMessage'
 import { HappyUserMessage } from '@/components/AssistantChat/messages/UserMessage'
@@ -9,6 +10,7 @@ import { HappySystemMessage } from '@/components/AssistantChat/messages/SystemMe
 import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { useTranslation } from '@/lib/use-translation'
+import { MessageSearchContext } from '@/components/AssistantChat/messageSearchContext'
 
 function NewMessagesIndicator(props: { count: number; onClick: () => void }) {
     const { t } = useTranslation()
@@ -74,6 +76,8 @@ export function HappyThread(props: {
     normalizedMessagesCount: number
     messagesVersion: number
     forceScrollToken: number
+    searchResults?: MessageSearchResult[]
+    activeSearchResult?: MessageSearchResult | null
 }) {
     const { t } = useTranslation()
     const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -91,6 +95,7 @@ export function HappyThread(props: {
     const onAtBottomChangeRef = useRef(props.onAtBottomChange)
     const onFlushPendingRef = useRef(props.onFlushPending)
     const forceScrollTokenRef = useRef(props.forceScrollToken)
+    const searchResultsById = new Set((props.searchResults ?? []).map((result) => result.id))
 
     // Smart scroll state: autoScroll enabled when user is near bottom
     const [autoScrollEnabled, setAutoScrollEnabled] = useState(true)
@@ -175,6 +180,16 @@ export function HappyThread(props: {
         forceScrollTokenRef.current = props.forceScrollToken
         scrollToBottom()
     }, [props.forceScrollToken, scrollToBottom])
+
+    useEffect(() => {
+        const activeId = props.activeSearchResult?.id
+        if (!activeId) {
+            return
+        }
+        const viewport = viewportRef.current
+        const target = viewport?.querySelector<HTMLElement>(`[data-message-search-id="${CSS.escape(activeId)}"]`)
+        target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }, [props.activeSearchResult?.id])
 
     const handleLoadMore = useCallback(() => {
         if (isLoadingMessagesRef.current || !hasMoreMessagesRef.current || isLoadingMoreRef.current || loadLockRef.current) {
@@ -326,9 +341,14 @@ export function HappyThread(props: {
                                     ) : null}
                                 </>
                             )}
-                            <div className="happy-thread-messages flex flex-col gap-3">
-                                <ThreadPrimitive.Messages components={THREAD_MESSAGE_COMPONENTS} />
-                            </div>
+                            <MessageSearchContext.Provider value={{
+                                resultIds: searchResultsById,
+                                activeId: props.activeSearchResult?.id ?? null
+                            }}>
+                                <div className="happy-thread-messages flex flex-col gap-3">
+                                    <ThreadPrimitive.Messages components={THREAD_MESSAGE_COMPONENTS} />
+                                </div>
+                            </MessageSearchContext.Provider>
                         </div>
                     </div>
                 </ThreadPrimitive.Viewport>

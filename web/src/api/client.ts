@@ -10,6 +10,7 @@ import type {
     FileSearchResponse,
     GitCommandResponse,
     MachinePathsExistsResponse,
+    MachineResponse,
     MachinesResponse,
     MessagesResponse,
     PermissionMode,
@@ -21,6 +22,8 @@ import type {
     SpawnResponse,
     UploadFileResponse,
     VisibilityPayload,
+    BulkDeleteSessionsResponse,
+    CleanupPreferencesResponse,
     SessionResponse,
     SessionsResponse
 } from '@/types/api'
@@ -236,6 +239,13 @@ export class ApiClient {
         await this.request(url, { method: 'DELETE' })
     }
 
+    async bulkDeleteSessions(sessionIds: string[]): Promise<BulkDeleteSessionsResponse> {
+        return await this.request<BulkDeleteSessionsResponse>('/api/sessions/bulk-delete', {
+            method: 'POST',
+            body: JSON.stringify({ sessionIds })
+        })
+    }
+
     async getMessages(sessionId: string, options: { beforeSeq?: number | null; limit?: number }): Promise<MessagesResponse> {
         const params = new URLSearchParams()
         if (options.beforeSeq !== undefined && options.beforeSeq !== null) {
@@ -437,6 +447,27 @@ export class ApiClient {
 
     async getMachines(): Promise<MachinesResponse> {
         return await this.request<MachinesResponse>('/api/machines')
+    }
+
+    async setMachineDisplayName(machineId: string, displayName: string | null): Promise<MachineResponse> {
+        return await this.request<MachineResponse>(`/api/machines/${encodeURIComponent(machineId)}/display-name`, {
+            method: 'PATCH',
+            body: JSON.stringify({ displayName })
+        })
+    }
+
+    async getCleanupPreferences(): Promise<CleanupPreferencesResponse> {
+        return await this.request<CleanupPreferencesResponse>('/api/preferences/cleanup')
+    }
+
+    async setCleanupPreferences(payload: {
+        autoCleanupEnabled: boolean
+        sessionRetentionDays: number | null
+    }): Promise<CleanupPreferencesResponse> {
+        return await this.request<CleanupPreferencesResponse>('/api/preferences/cleanup', {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        })
     }
 
     async checkMachinePathsExists(

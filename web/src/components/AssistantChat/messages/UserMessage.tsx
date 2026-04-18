@@ -7,9 +7,11 @@ import { MessageAttachments } from '@/components/AssistantChat/messages/MessageA
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
+import { useMessageSearchContext } from '@/components/AssistantChat/messageSearchContext'
 
 export function HappyUserMessage() {
     const ctx = useHappyChatContext()
+    const search = useMessageSearchContext()
     const { copied, copy } = useCopyToClipboard()
     const role = useAssistantState(({ message }) => message.role)
     const text = useAssistantState(({ message }) => {
@@ -35,6 +37,10 @@ export function HappyUserMessage() {
         const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         return custom?.kind === 'cli-output'
     })
+    const searchId = useAssistantState(({ message }) => {
+        const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
+        return custom?.searchId ?? null
+    })
     const cliText = useAssistantState(({ message }) => {
         const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         if (custom?.kind !== 'cli-output') return ''
@@ -44,12 +50,18 @@ export function HappyUserMessage() {
     if (role !== 'user') return null
     const canRetry = status === 'failed' && typeof localId === 'string' && Boolean(ctx.onRetryMessage)
     const onRetry = canRetry ? () => ctx.onRetryMessage!(localId) : undefined
+    const isSearchMatch = typeof searchId === 'string' && search.resultIds.has(searchId)
+    const isActiveSearchMatch = typeof searchId === 'string' && search.activeId === searchId
+    const searchAttrs = searchId ? { 'data-message-search-id': searchId } : {}
+    const searchClass = isSearchMatch
+        ? (isActiveSearchMatch ? 'ring-2 ring-amber-400 bg-amber-400/15' : 'ring-1 ring-amber-300/70 bg-amber-300/10')
+        : ''
 
     const userBubbleClass = 'w-fit min-w-0 max-w-[92%] ml-auto rounded-xl bg-[var(--app-secondary-bg)] px-3 py-2 text-[var(--app-fg)] shadow-sm'
 
     if (isCliOutput) {
         return (
-            <MessagePrimitive.Root className="px-1 min-w-0 max-w-full overflow-x-hidden">
+            <MessagePrimitive.Root className={`px-1 min-w-0 max-w-full overflow-x-hidden rounded-lg ${searchClass}`} {...searchAttrs}>
                 <div className="ml-auto w-full max-w-[92%]">
                     <CliOutputBlock text={cliText} />
                 </div>
@@ -61,7 +73,7 @@ export function HappyUserMessage() {
     const hasAttachments = attachments && attachments.length > 0
 
     return (
-        <MessagePrimitive.Root className={`${userBubbleClass} group/msg`}>
+        <MessagePrimitive.Root className={`${userBubbleClass} group/msg ${searchClass}`} {...searchAttrs}>
             <div className="flex items-end gap-2">
                 <div className="flex-1 min-w-0">
                     {hasText && <LazyRainbowText text={text} />}

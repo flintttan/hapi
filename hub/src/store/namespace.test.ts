@@ -26,4 +26,30 @@ describe('Store namespace filtering', () => {
         expect(ids).not.toContain('machine-2')
         expect(() => store.machines.getOrCreateMachine('machine-1', { host: 'beta' }, null, 'beta')).toThrow()
     })
+
+    it('refreshes existing machine metadata when the CLI reports displayName', () => {
+        const store = new Store(':memory:')
+        const created = store.machines.getOrCreateMachine(
+            'machine-1',
+            { host: 'alpha', platform: 'linux', happyCliVersion: '0.5.48' },
+            null,
+            'alpha'
+        )
+
+        const refreshed = store.machines.getOrCreateMachine(
+            'machine-1',
+            {
+                host: 'alpha',
+                platform: 'linux',
+                happyCliVersion: '0.5.48',
+                displayName: 'Desk Mac'
+            },
+            null,
+            'alpha'
+        )
+
+        expect(refreshed.metadata).toEqual(expect.objectContaining({ displayName: 'Desk Mac' }))
+        expect(refreshed.metadataVersion).toBe(created.metadataVersion + 1)
+        expect(refreshed.namespace).toBe('alpha')
+    })
 })

@@ -372,3 +372,21 @@ export function deleteSession(db: Database, id: string, namespace: string): bool
     ).run(id, namespace)
     return result.changes > 0
 }
+
+export function getInactiveSessionIdsUpdatedBefore(
+    db: Database,
+    namespace: string,
+    cutoff: number,
+    limit: number
+): string[] {
+    const rows = db.prepare(`
+        SELECT id
+        FROM sessions
+        WHERE namespace = ?
+          AND active = 0
+          AND updated_at < ?
+        ORDER BY updated_at ASC
+        LIMIT ?
+    `).all(namespace, cutoff, limit) as Array<{ id: string }>
+    return rows.map((row) => row.id)
+}

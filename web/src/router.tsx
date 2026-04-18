@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import {
     Navigate,
@@ -116,9 +116,6 @@ function SessionsPage() {
         void refetch()
     }, [refetch])
 
-    const projectCount = useMemo(() => new Set(sessions.map(s =>
-        s.metadata?.worktree?.basePath ?? s.metadata?.path ?? 'Other'
-    )).size, [sessions])
     const machineLabelsById = useMemo(() => {
         const labels: Record<string, string> = {}
         for (const machine of machines) {
@@ -128,8 +125,18 @@ function SessionsPage() {
     }, [machines])
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId', fuzzy: true })
     const selectedSessionId = sessionMatch && sessionMatch.sessionId !== 'new' ? sessionMatch.sessionId : null
+    const isSelectedSessionMissing = Boolean(
+        selectedSessionId
+        && !isLoading
+        && !sessions.some((session) => session.id === selectedSessionId)
+    )
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
     const sidebar = useSidebarResize()
+
+    useEffect(() => {
+        if (!isSelectedSessionMissing) return
+        navigate({ to: '/sessions', replace: true })
+    }, [isSelectedSessionMissing, navigate])
 
     return (
         <div className="flex h-full min-h-0">
@@ -137,32 +144,6 @@ function SessionsPage() {
                 className={`${isSessionsIndex ? 'flex' : 'hidden lg:flex'} w-full shrink-0 flex-col bg-[var(--app-bg)]`}
                 style={{ '--sidebar-w': `${sidebar.width}px` } as React.CSSProperties}
             >
-                <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
-                    <div className="mx-auto w-full max-w-content flex items-center justify-between px-3 py-2">
-                        <div className="text-xs text-[var(--app-hint)]">
-                            {t('sessions.count', { n: sessions.length, m: projectCount })}
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <button
-                                type="button"
-                                onClick={() => navigate({ to: '/settings' })}
-                                className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
-                                title={t('settings.title')}
-                            >
-                                <SettingsIcon className="h-5 w-5" />
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => navigate({ to: '/sessions/new' })}
-                                className="session-list-new-button p-1.5 rounded-full text-[var(--app-link)] transition-colors"
-                                title={t('sessions.new')}
-                            >
-                                <PlusIcon className="h-5 w-5" />
-                            </button>
-                        </div>
-                    </div>
-                </div>
-
                 <div className="app-scroll-y flex-1 min-h-0 desktop-scrollbar-left">
                     {error ? (
                         <div className="mx-auto w-full max-w-content px-3 py-2">
@@ -179,9 +160,20 @@ function SessionsPage() {
                         onNewSession={() => navigate({ to: '/sessions/new' })}
                         onRefresh={handleRefresh}
                         isLoading={isLoading}
-                        renderHeader={false}
                         api={api}
                         machineLabelsById={machineLabelsById}
+                        headerActions={
+                            <>
+                                <button
+                                    type="button"
+                                    onClick={() => navigate({ to: '/settings' })}
+                                    className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                    title={t('settings.title')}
+                                >
+                                    <SettingsIcon className="h-5 w-5" />
+                                </button>
+                            </>
+                        }
                     />
                 </div>
             </div>
@@ -218,6 +210,7 @@ function SessionPage() {
     const { sessionId } = useParams({ from: '/sessions/$sessionId' })
     const {
         session,
+        isLoading: sessionLoading,
         refetch: refetchSession,
     } = useSession(api, sessionId)
     const {
@@ -320,12 +313,16 @@ function SessionPage() {
         void refetchMessages()
     }, [refetchMessages, refetchSession])
 
-    if (!session) {
+    if (sessionLoading) {
         return (
             <div className="flex-1 flex items-center justify-center p-4">
                 <LoadingState label="Loading session…" className="text-sm" />
             </div>
         )
+    }
+
+    if (!session) {
+        return <Navigate to="/sessions" replace />
     }
 
     return (

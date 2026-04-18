@@ -47,6 +47,55 @@ export function getOrCreateMachine(
         if (stored.namespace !== namespace) {
             throw new Error('Machine namespace mismatch')
         }
+
+        const mergedMetadata = (() => {
+            if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+                return metadata
+            }
+            const incoming = { ...(metadata as Record<string, unknown>) }
+            const existingMetadata = safeJsonParse(existing.metadata)
+            if (
+                !('displayName' in incoming)
+                && existingMetadata
+                && typeof existingMetadata === 'object'
+                && !Array.isArray(existingMetadata)
+                && typeof (existingMetadata as Record<string, unknown>).displayName === 'string'
+            ) {
+                incoming.displayName = (existingMetadata as Record<string, unknown>).displayName
+            }
+            return incoming
+        })()
+
+        const nextMetadataJson = JSON.stringify(mergedMetadata)
+        const nextRunnerStateJson = runnerState === null || runnerState === undefined ? null : JSON.stringify(runnerState)
+        const metadataChanged = nextMetadataJson !== existing.metadata
+        const runnerStateChanged = runnerState !== undefined && nextRunnerStateJson !== existing.runner_state
+
+        if (metadataChanged || runnerStateChanged) {
+            const now = Date.now()
+            db.prepare(`
+                UPDATE machines
+                SET metadata = CASE WHEN @metadata_changed = 1 THEN @metadata ELSE metadata END,
+                    metadata_version = CASE WHEN @metadata_changed = 1 THEN metadata_version + 1 ELSE metadata_version END,
+                    runner_state = CASE WHEN @runner_state_changed = 1 THEN @runner_state ELSE runner_state END,
+                    runner_state_version = CASE WHEN @runner_state_changed = 1 THEN runner_state_version + 1 ELSE runner_state_version END,
+                    updated_at = @updated_at,
+                    active = CASE WHEN @runner_state_changed = 1 THEN 1 ELSE active END,
+                    active_at = CASE WHEN @runner_state_changed = 1 THEN @updated_at ELSE active_at END,
+                    seq = seq + 1
+                WHERE id = @id AND namespace = @namespace
+            `).run({
+                id,
+                namespace,
+                metadata: nextMetadataJson,
+                metadata_changed: metadataChanged ? 1 : 0,
+                runner_state: nextRunnerStateJson,
+                runner_state_changed: runnerStateChanged ? 1 : 0,
+                updated_at: now,
+            })
+            return getMachine(db, id) ?? stored
+        }
+
         return stored
     }
 

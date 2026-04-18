@@ -7,6 +7,7 @@ import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 import { getAssistantCopyText } from '@/components/AssistantChat/messages/assistantCopyText'
+import { useMessageSearchContext } from '@/components/AssistantChat/messageSearchContext'
 
 const TOOL_COMPONENTS = {
     Fallback: HappyToolMessage
@@ -21,6 +22,7 @@ const MESSAGE_PART_COMPONENTS = {
 
 export function HappyAssistantMessage() {
     const { copied, copy } = useCopyToClipboard()
+    const search = useMessageSearchContext()
     const isCliOutput = useAssistantState(({ message }) => {
         const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         return custom?.kind === 'cli-output'
@@ -39,20 +41,30 @@ export function HappyAssistantMessage() {
         if (message.role !== 'assistant') return ''
         return getAssistantCopyText(message.content)
     })
+    const searchId = useAssistantState(({ message }) => {
+        const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
+        return custom?.searchId ?? null
+    })
+    const isSearchMatch = typeof searchId === 'string' && search.resultIds.has(searchId)
+    const isActiveSearchMatch = typeof searchId === 'string' && search.activeId === searchId
+    const searchAttrs = searchId ? { 'data-message-search-id': searchId } : {}
+    const searchClass = isSearchMatch
+        ? (isActiveSearchMatch ? 'rounded-lg ring-2 ring-amber-400 bg-amber-400/15' : 'rounded-lg ring-1 ring-amber-300/70 bg-amber-300/10')
+        : ''
     const rootClass = toolOnly
         ? 'py-1 min-w-0 max-w-full overflow-x-hidden'
         : 'px-1 min-w-0 max-w-full overflow-x-hidden'
 
     if (isCliOutput) {
         return (
-            <MessagePrimitive.Root className="px-1 min-w-0 max-w-full overflow-x-hidden">
+            <MessagePrimitive.Root className={`px-1 min-w-0 max-w-full overflow-x-hidden ${searchClass}`} {...searchAttrs}>
                 <CliOutputBlock text={cliText} />
             </MessagePrimitive.Root>
         )
     }
 
     return (
-        <MessagePrimitive.Root className={`${rootClass} ${copyText ? 'group/msg' : ''}`}>
+        <MessagePrimitive.Root className={`${rootClass} ${copyText ? 'group/msg' : ''} ${searchClass}`} {...searchAttrs}>
             <div className="min-w-0">
                 <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />
             </div>

@@ -20,6 +20,10 @@ const pathsExistsSchema = z.object({
     paths: z.array(z.string().min(1)).max(1000)
 })
 
+const machineDisplayNameSchema = z.object({
+    displayName: z.string().trim().max(80).nullable()
+})
+
 export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
@@ -32,6 +36,43 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const namespace = c.get('namespace')
         const machines = engine.getOnlineMachinesByNamespace(namespace)
         return c.json({ machines })
+    })
+
+    app.patch('/machines/:id/display-name', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) {
+            return machine
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = machineDisplayNameSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        try {
+            const updated = engine.updateMachineDisplayName(
+                machineId,
+                c.get('namespace'),
+                parsed.data.displayName
+            )
+            if (!updated) {
+                return c.json({ error: 'Machine not found' }, 404)
+            }
+            return c.json({ machine: updated })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : 'Failed to update machine display name'
+            if (message.includes('concurrently') || message.includes('version')) {
+                return c.json({ error: message }, 409)
+            }
+            return c.json({ error: message }, 500)
+        }
     })
 
     app.post('/machines/:id/spawn', async (c) => {

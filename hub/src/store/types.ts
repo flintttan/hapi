@@ -61,6 +61,13 @@ export type StoredPushSubscription = {
     createdAt: number
 }
 
+export type StoredUserPreferences = {
+    namespace: string
+    autoCleanupEnabled: boolean
+    sessionRetentionDays: number | null
+    updatedAt: number
+}
+
 export type VersionedUpdateResult<T> =
     | { result: 'success'; version: number; value: T }
     | { result: 'version-mismatch'; version: number; value: T }

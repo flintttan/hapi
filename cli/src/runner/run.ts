@@ -631,11 +631,13 @@ export async function startRunner(): Promise<void> {
     // Create API client
     const api = await ApiClient.create();
 
+    const machineMetadata = await buildMachineMetadata();
+
     // Get or create machine (with retry for transient connection errors)
     const machine = await withRetry(
       () => api.getOrCreateMachine({
         machineId,
-        metadata: buildMachineMetadata(),
+        metadata: machineMetadata,
         runnerState: initialRunnerState
       }),
       {

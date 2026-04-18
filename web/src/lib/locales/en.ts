@@ -41,6 +41,10 @@ export default {
   // Sessions page
   'sessions.count': '{n} sessions in {m} projects',
   'sessions.new': 'New Session',
+  'sessions.bulk.manage': 'Manage',
+  'sessions.bulk.selected': '{n} selected',
+  'sessions.bulk.selectAll': 'Select all',
+  'sessions.bulk.delete': 'Delete',
 
   // Session list
   'session.item.path': 'path',
@@ -57,6 +61,13 @@ export default {
   // Session header
   'session.title': 'Files',
   'session.more': 'More actions',
+  'session.search.title': 'Search messages',
+  'session.search.placeholder': 'Search current messages…',
+  'session.search.empty': 'Type to search',
+  'session.search.noResults': 'No matches',
+  'session.search.previous': 'Previous result',
+  'session.search.next': 'Next result',
+  'session.search.loadedOnly': 'Searching currently loaded messages only. Load older messages to search more history.',
 
   // Session actions
   'session.action.rename': 'Rename',
@@ -78,6 +89,10 @@ export default {
   'dialog.delete.description': 'Are you sure you want to delete "{name}"? This action cannot be undone.',
   'dialog.delete.confirm': 'Delete',
   'dialog.delete.confirming': 'Deleting…',
+  'dialog.bulkDelete.title': 'Delete Sessions',
+  'dialog.bulkDelete.description': 'Delete {n} selected sessions? This action cannot be undone.',
+  'dialog.bulkDelete.confirm': 'Delete selected',
+  'dialog.bulkDelete.confirming': 'Deleting…',
   'dialog.error.default': 'Operation failed. Please try again.',
 
   // Common buttons
@@ -272,6 +287,17 @@ export default {
   'settings.voice.title': 'Voice Assistant',
   'settings.voice.language': 'Voice Language',
   'settings.voice.autoDetect': 'Auto-detect',
+  'settings.machines.title': 'Machines',
+  'settings.machines.hostname': 'Custom host name',
+  'settings.machines.hostnamePlaceholder': 'Display name',
+  'settings.machines.hostnameHint': 'Only changes the display name. The real host stays unchanged.',
+  'settings.machines.noOnline': 'No online machines',
+  'settings.cleanup.title': 'Auto Cleanup',
+  'settings.cleanup.enabled': 'Delete inactive sessions automatically',
+  'settings.cleanup.retention': 'Inactive days',
+  'settings.cleanup.defaultHint': 'Leave empty to use system default: {n} days.',
+  'settings.cleanup.saving': 'Saving…',
+  'settings.cleanup.error': 'Failed to save cleanup settings.',
   'settings.about.title': 'About',
   'settings.about.website': 'Website',
   'settings.about.appVersion': 'App Version',

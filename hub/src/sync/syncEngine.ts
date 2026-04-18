@@ -10,6 +10,7 @@
 import type { CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import type { Server } from 'socket.io'
 import type { Store } from '../store'
+import { DEFAULT_SESSION_RETENTION_DAYS } from '../store/userPreferences'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 import type { SSEManager } from '../sse/sseManager'
 import { EventPublisher, type SyncEventListener } from './eventPublisher'
@@ -48,7 +49,9 @@ export class SyncEngine {
     private readonly machineCache: MachineCache
     private readonly messageService: MessageService
     private readonly rpcGateway: RpcGateway
+    private readonly store: Store
     private inactivityTimer: NodeJS.Timeout | null = null
+    private cleanupTimer: NodeJS.Timeout | null = null
 
     constructor(
         store: Store,
@@ -56,6 +59,7 @@ export class SyncEngine {
         rpcRegistry: RpcRegistry,
         sseManager: SSEManager
     ) {
+        this.store = store
         this.eventPublisher = new EventPublisher(sseManager, (event) => this.resolveNamespace(event))
         this.sessionCache = new SessionCache(store, this.eventPublisher)
         this.machineCache = new MachineCache(store, this.eventPublisher)
@@ -63,12 +67,18 @@ export class SyncEngine {
         this.rpcGateway = new RpcGateway(io, rpcRegistry)
         this.reloadAll()
         this.inactivityTimer = setInterval(() => this.expireInactive(), 5_000)
+        this.cleanupTimer = setInterval(() => void this.cleanupInactiveSessions(), 60 * 60 * 1000)
+        setTimeout(() => void this.cleanupInactiveSessions(), 30_000)
     }
 
     stop(): void {
         if (this.inactivityTimer) {
             clearInterval(this.inactivityTimer)
             this.inactivityTimer = null
+        }
+        if (this.cleanupTimer) {
+            clearInterval(this.cleanupTimer)
+            this.cleanupTimer = null
         }
     }
 
@@ -254,6 +264,10 @@ export class SyncEngine {
         return this.machineCache.getOrCreateMachine(id, metadata, runnerState, namespace)
     }
 
+    updateMachineDisplayName(machineId: string, namespace: string, displayName: string | null): Machine | null {
+        return this.machineCache.updateMachineDisplayName(machineId, namespace, displayName)
+    }
+
     async sendMessage(
         sessionId: string,
         payload: {
@@ -311,6 +325,49 @@ export class SyncEngine {
 
     async deleteSession(sessionId: string): Promise<void> {
         await this.sessionCache.deleteSession(sessionId)
+    }
+
+    async cleanupInactiveSessions(now: number = Date.now(), limitPerNamespace: number = 200): Promise<string[]> {
+        const preferences = this.store.userPreferences.listUserCleanupPreferences()
+        const namespaces = new Set<string>([
+            ...this.sessionCache.getSessions().map((session) => session.namespace),
+            ...preferences.map((preference) => preference.namespace)
+        ])
+        const preferencesByNamespace = new Map(
+            preferences.map((preference) => [preference.namespace, preference])
+        )
+        const deleted: string[] = []
+
+        for (const namespace of namespaces) {
+            const preference = preferencesByNamespace.get(namespace)
+            const enabled = preference?.autoCleanupEnabled ?? true
+            if (!enabled) {
+                continue
+            }
+
+            const retentionDays = preference?.sessionRetentionDays ?? DEFAULT_SESSION_RETENTION_DAYS
+            if (!Number.isFinite(retentionDays) || retentionDays <= 0) {
+                continue
+            }
+
+            const cutoff = now - retentionDays * 24 * 60 * 60 * 1000
+            const sessionIds = this.store.sessions.getInactiveSessionIdsUpdatedBefore(namespace, cutoff, limitPerNamespace)
+            for (const sessionId of sessionIds) {
+                const session = this.sessionCache.getSessionByNamespace(sessionId, namespace)
+                    ?? this.sessionCache.refreshSession(sessionId)
+                if (!session || session.namespace !== namespace || session.active) {
+                    continue
+                }
+                try {
+                    await this.sessionCache.deleteSession(sessionId)
+                    deleted.push(sessionId)
+                } catch (error) {
+                    console.error('[SyncEngine] Failed to auto-clean inactive session:', error)
+                }
+            }
+        }
+
+        return deleted
     }
 
     async applySessionConfig(

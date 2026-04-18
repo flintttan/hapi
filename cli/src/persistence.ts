@@ -17,6 +17,7 @@ interface Settings {
   machineIdConfirmedByServer?: boolean
   runnerAutoStartWhenRunningHappy?: boolean
   cliApiToken?: string
+  machineDisplayName?: string
   // API URL for server connections (priority: env HAPI_API_URL > this > default)
   apiUrl?: string
   // Legacy field name (for migration, read-only)

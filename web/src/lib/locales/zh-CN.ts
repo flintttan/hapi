@@ -41,6 +41,10 @@ export default {
   // Sessions page
   'sessions.count': '{n} 个会话，{m} 个项目',
   'sessions.new': '新建会话',
+  'sessions.bulk.manage': '管理',
+  'sessions.bulk.selected': '已选择 {n} 个',
+  'sessions.bulk.selectAll': '全选',
+  'sessions.bulk.delete': '删除',
 
   // Session list
   'session.item.path': '路径',
@@ -57,6 +61,13 @@ export default {
   // Session header
   'session.title': '文件',
   'session.more': '更多操作',
+  'session.search.title': '搜索消息',
+  'session.search.placeholder': '搜索当前消息…',
+  'session.search.empty': '输入关键词开始搜索',
+  'session.search.noResults': '没有匹配结果',
+  'session.search.previous': '上一个结果',
+  'session.search.next': '下一个结果',
+  'session.search.loadedOnly': '仅搜索当前已加载消息。加载更早消息后可搜索更多历史。',
 
   // Session actions
   'session.action.rename': '重命名',
@@ -80,6 +91,10 @@ export default {
   'dialog.delete.description': '确定要删除 "{name}" 吗？此操作无法撤销。',
   'dialog.delete.confirm': '删除',
   'dialog.delete.confirming': '删除中…',
+  'dialog.bulkDelete.title': '删除会话',
+  'dialog.bulkDelete.description': '确定删除选中的 {n} 个会话吗？此操作无法撤销。',
+  'dialog.bulkDelete.confirm': '删除选中',
+  'dialog.bulkDelete.confirming': '删除中…',
   'dialog.error.default': '操作失败，请重试。',
 
   // Common buttons
@@ -274,6 +289,17 @@ export default {
   'settings.voice.title': '语音助手',
   'settings.voice.language': '语音语言',
   'settings.voice.autoDetect': '自动检测',
+  'settings.machines.title': '主机',
+  'settings.machines.hostname': '自定义主机名',
+  'settings.machines.hostnamePlaceholder': '显示名称',
+  'settings.machines.hostnameHint': '仅修改显示名称，不覆盖真实主机名。',
+  'settings.machines.noOnline': '暂无在线主机',
+  'settings.cleanup.title': '自动清理',
+  'settings.cleanup.enabled': '自动删除长期不活跃会话',
+  'settings.cleanup.retention': '不活跃天数',
+  'settings.cleanup.defaultHint': '留空则使用系统默认值：{n} 天。',
+  'settings.cleanup.saving': '保存中…',
+  'settings.cleanup.error': '自动清理设置保存失败。',
   'settings.about.title': '关于',
   'settings.about.website': '官方网站',
   'settings.about.appVersion': '应用版本',

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { getElevenLabsSupportedLanguages, getLanguageDisplayName, type Language } from '@/lib/languages'
@@ -7,6 +8,8 @@ import { getTerminalFontSizeOptions, useTerminalFontSize, type TerminalFontSize 
 import { useAppearance, getAppearanceOptions, type AppearancePreference } from '@/hooks/useTheme'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
 import { useAppContext } from '@/lib/app-context'
+import { useMachines } from '@/hooks/queries/useMachines'
+import { queryKeys } from '@/lib/query-keys'
 
 const locales: { value: Locale; nativeLabel: string }[] = [
     { value: 'en', nativeLabel: 'English' },
@@ -74,7 +77,8 @@ function ChevronDownIcon(props: { className?: string }) {
 
 export default function SettingsPage() {
     const { t, locale, setLocale } = useTranslation()
-    const { user, onLogout } = useAppContext()
+    const { user, onLogout, api } = useAppContext()
+    const queryClient = useQueryClient()
     const goBack = useAppGoBack()
     const [isOpen, setIsOpen] = useState(false)
     const [isAppearanceOpen, setIsAppearanceOpen] = useState(false)
@@ -89,6 +93,9 @@ export default function SettingsPage() {
     const { fontScale, setFontScale } = useFontScale()
     const { terminalFontSize, setTerminalFontSize } = useTerminalFontSize()
     const { appearance, setAppearance } = useAppearance()
+    const { machines } = useMachines(api, true)
+    const [machineNameDrafts, setMachineNameDrafts] = useState<Record<string, string>>({})
+    const [cleanupDaysInput, setCleanupDaysInput] = useState('')
 
     // Voice language state - read from localStorage
     const [voiceLanguage, setVoiceLanguage] = useState<string | null>(() => {
@@ -103,6 +110,46 @@ export default function SettingsPage() {
     const currentFontScaleLabel = fontScaleOptions.find((opt) => opt.value === fontScale)?.label ?? '100%'
     const currentTerminalFontSizeLabel = terminalFontSizeOptions.find((opt) => opt.value === terminalFontSize)?.label ?? '13px'
     const currentVoiceLanguage = voiceLanguages.find((lang) => lang.code === voiceLanguage)
+
+    const cleanupQuery = useQuery({
+        queryKey: ['cleanup-preferences'],
+        queryFn: () => api.getCleanupPreferences(),
+    })
+
+    const cleanupMutation = useMutation({
+        mutationFn: (payload: { autoCleanupEnabled: boolean; sessionRetentionDays: number | null }) =>
+            api.setCleanupPreferences(payload),
+        onSuccess: (data) => {
+            queryClient.setQueryData(['cleanup-preferences'], data)
+        },
+    })
+
+    const machineNameMutation = useMutation({
+        mutationFn: (payload: { machineId: string; displayName: string | null }) =>
+            api.setMachineDisplayName(payload.machineId, payload.displayName),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.machines })
+        },
+    })
+
+    useEffect(() => {
+        setMachineNameDrafts(prev => {
+            const next = { ...prev }
+            let changed = false
+            for (const machine of machines) {
+                if (next[machine.id] === undefined) {
+                    next[machine.id] = machine.metadata?.displayName ?? ''
+                    changed = true
+                }
+            }
+            return changed ? next : prev
+        })
+    }, [machines])
+
+    useEffect(() => {
+        const value = cleanupQuery.data?.sessionRetentionDays
+        setCleanupDaysInput(value == null ? '' : String(value))
+    }, [cleanupQuery.data?.sessionRetentionDays])
 
     const handleLocaleChange = (newLocale: Locale) => {
         setLocale(newLocale)
@@ -132,6 +179,27 @@ export default function SettingsPage() {
             localStorage.setItem('hapi-voice-lang', language.code)
         }
         setIsVoiceOpen(false)
+    }
+
+    const saveCleanupPreferences = (next?: Partial<{ autoCleanupEnabled: boolean; sessionRetentionDays: number | null }>) => {
+        const current = cleanupQuery.data
+        const rawDays = cleanupDaysInput.trim()
+        const parsed = rawDays ? Number(rawDays) : null
+        const sessionRetentionDays = parsed === null || !Number.isFinite(parsed)
+            ? null
+            : Math.max(1, Math.min(365, Math.floor(parsed)))
+        cleanupMutation.mutate({
+            autoCleanupEnabled: next?.autoCleanupEnabled ?? current?.autoCleanupEnabled ?? true,
+            sessionRetentionDays: next?.sessionRetentionDays ?? sessionRetentionDays
+        })
+    }
+
+    const saveMachineDisplayName = (machineId: string) => {
+        const value = machineNameDrafts[machineId]?.trim() ?? ''
+        machineNameMutation.mutate({
+            machineId,
+            displayName: value.length > 0 ? value : null
+        })
     }
 
     const userLabel = (() => {
@@ -498,6 +566,101 @@ export default function SettingsPage() {
                                     })}
                                 </div>
                             )}
+                        </div>
+                    </div>
+
+                    {/* Machines section */}
+                    <div className="border-b border-[var(--app-divider)]">
+                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
+                            {t('settings.machines.title')}
+                        </div>
+                        {machines.length === 0 ? (
+                            <div className="px-3 py-3 text-sm text-[var(--app-hint)]">
+                                {t('settings.machines.noOnline')}
+                            </div>
+                        ) : machines.map((machine) => (
+                            <div key={machine.id} className="px-3 py-3">
+                                <div className="mb-1.5 min-w-0">
+                                    <div className="truncate text-sm font-medium text-[var(--app-fg)]">
+                                        {machine.metadata?.host ?? machine.id.slice(0, 8)}
+                                    </div>
+                                    <div className="truncate text-xs text-[var(--app-hint)]">
+                                        {machine.metadata?.platform ?? t('machine.unknown')}
+                                    </div>
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <input
+                                        value={machineNameDrafts[machine.id] ?? ''}
+                                        onChange={(event) => setMachineNameDrafts(prev => ({
+                                            ...prev,
+                                            [machine.id]: event.target.value
+                                        }))}
+                                        placeholder={t('settings.machines.hostnamePlaceholder')}
+                                        className="min-w-0 flex-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => saveMachineDisplayName(machine.id)}
+                                        disabled={machineNameMutation.isPending}
+                                        className="rounded-md bg-[var(--app-button)] px-3 py-2 text-sm text-[var(--app-button-text)] disabled:opacity-50"
+                                    >
+                                        {t('button.save')}
+                                    </button>
+                                </div>
+                                <div className="mt-1.5 text-xs text-[var(--app-hint)]">
+                                    {t('settings.machines.hostnameHint')}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Cleanup section */}
+                    <div className="border-b border-[var(--app-divider)]">
+                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
+                            {t('settings.cleanup.title')}
+                        </div>
+                        <label className="flex w-full items-center justify-between gap-3 px-3 py-3">
+                            <span className="text-[var(--app-fg)]">{t('settings.cleanup.enabled')}</span>
+                            <input
+                                type="checkbox"
+                                checked={cleanupQuery.data?.autoCleanupEnabled ?? true}
+                                onChange={(event) => saveCleanupPreferences({ autoCleanupEnabled: event.target.checked })}
+                                disabled={cleanupMutation.isPending || cleanupQuery.isLoading}
+                                className="h-5 w-5"
+                            />
+                        </label>
+                        <div className="px-3 pb-3">
+                            <label className="mb-1 block text-sm text-[var(--app-fg)]">
+                                {t('settings.cleanup.retention')}
+                            </label>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="number"
+                                    min={1}
+                                    max={365}
+                                    value={cleanupDaysInput}
+                                    onChange={(event) => setCleanupDaysInput(event.target.value)}
+                                    onBlur={() => saveCleanupPreferences()}
+                                    disabled={cleanupMutation.isPending || cleanupQuery.isLoading}
+                                    className="min-w-0 flex-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => saveCleanupPreferences()}
+                                    disabled={cleanupMutation.isPending || cleanupQuery.isLoading}
+                                    className="rounded-md bg-[var(--app-button)] px-3 py-2 text-sm text-[var(--app-button-text)] disabled:opacity-50"
+                                >
+                                    {cleanupMutation.isPending ? t('settings.cleanup.saving') : t('button.save')}
+                                </button>
+                            </div>
+                            <div className="mt-1.5 text-xs text-[var(--app-hint)]">
+                                {t('settings.cleanup.defaultHint', { n: cleanupQuery.data?.defaultSessionRetentionDays ?? 30 })}
+                            </div>
+                            {cleanupMutation.error ? (
+                                <div className="mt-1.5 text-xs text-red-500">
+                                    {t('settings.cleanup.error')}
+                                </div>
+                            ) : null}
                         </div>
                     </div>
 

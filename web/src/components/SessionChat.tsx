@@ -15,6 +15,7 @@ import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
 import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
+import { searchChatBlocks } from '@/lib/message-search'
 import { HappyComposer } from '@/components/AssistantChat/HappyComposer'
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { useHappyRuntime } from '@/lib/assistant-runtime'
@@ -60,6 +61,9 @@ export function SessionChat(props: {
     const normalizedCacheRef = useRef<Map<string, { source: DecryptedMessage; normalized: NormalizedMessage | null }>>(new Map())
     const blocksByIdRef = useRef<Map<string, ChatBlock>>(new Map())
     const [forceScrollToken, setForceScrollToken] = useState(0)
+    const [searchOpen, setSearchOpen] = useState(false)
+    const [messageSearchQuery, setMessageSearchQuery] = useState('')
+    const [activeSearchIndex, setActiveSearchIndex] = useState(0)
     const agentFlavor = props.session.metadata?.flavor ?? null
     const controlledByUser = props.session.agentState?.controlledByUser === true
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
@@ -219,6 +223,40 @@ export function SessionChat(props: {
         blocksByIdRef.current = reconciled.byId
     }, [reconciled.byId])
 
+    const searchResults = useMemo(
+        () => searchChatBlocks(reconciled.blocks, messageSearchQuery),
+        [reconciled.blocks, messageSearchQuery]
+    )
+    const activeSearchResult = searchResults.length > 0
+        ? searchResults[Math.min(activeSearchIndex, searchResults.length - 1)] ?? null
+        : null
+
+    useEffect(() => {
+        setActiveSearchIndex(0)
+    }, [messageSearchQuery])
+
+    useEffect(() => {
+        setSearchOpen(false)
+        setMessageSearchQuery('')
+        setActiveSearchIndex(0)
+    }, [props.session.id])
+
+    useEffect(() => {
+        if (activeSearchIndex >= searchResults.length) {
+            setActiveSearchIndex(Math.max(0, searchResults.length - 1))
+        }
+    }, [activeSearchIndex, searchResults.length])
+
+    const handleSearchNext = useCallback(() => {
+        if (searchResults.length === 0) return
+        setActiveSearchIndex((index) => (index + 1) % searchResults.length)
+    }, [searchResults.length])
+
+    const handleSearchPrevious = useCallback(() => {
+        if (searchResults.length === 0) return
+        setActiveSearchIndex((index) => (index - 1 + searchResults.length) % searchResults.length)
+    }, [searchResults.length])
+
     // Permission mode change handler
     const handlePermissionModeChange = useCallback(async (mode: PermissionMode) => {
         try {
@@ -349,6 +387,15 @@ export function SessionChat(props: {
                 onViewFiles={props.session.metadata?.path ? handleViewFiles : undefined}
                 api={props.api}
                 onSessionDeleted={props.onBack}
+                searchOpen={searchOpen}
+                searchQuery={messageSearchQuery}
+                searchResultCount={searchResults.length}
+                activeSearchIndex={activeSearchResult ? activeSearchIndex : 0}
+                onSearchOpenChange={setSearchOpen}
+                onSearchQueryChange={setMessageSearchQuery}
+                onSearchPrev={handleSearchPrevious}
+                onSearchNext={handleSearchNext}
+                searchHint={props.hasMoreMessages ? t('session.search.loadedOnly') : null}
             />
 
             {props.session.teamState && (
@@ -385,6 +432,8 @@ export function SessionChat(props: {
                         normalizedMessagesCount={normalizedMessages.length}
                         messagesVersion={props.messagesVersion}
                         forceScrollToken={forceScrollToken}
+                        searchResults={searchResults}
+                        activeSearchResult={activeSearchResult}
                     />
 
                     <HappyComposer

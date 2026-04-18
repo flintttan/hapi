@@ -3,32 +3,41 @@ import { Hono } from 'hono'
 import type { WebAppEnv } from '../../middleware/auth'
 import { createSessionsRoutes } from '../sessions'
 
+function makeSession(id: string, overrides: Record<string, unknown> = {}) {
+    return {
+        id,
+        namespace: 'user-1',
+        seq: 0,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        active: false,
+        activeAt: Date.now(),
+        metadata: { path: '/tmp', host: 'test' },
+        metadataVersion: 1,
+        agentState: null,
+        agentStateVersion: 1,
+        thinking: false,
+        thinkingAt: 0,
+        permissionMode: null,
+        modelMode: null,
+        ...overrides,
+    }
+}
+
+function createApp(engine: any) {
+    const app = new Hono<WebAppEnv>()
+    app.use('*', async (c, next) => {
+        c.set('userId', 'user-1')
+        c.set('namespace', 'user-1')
+        await next()
+    })
+    app.route('/', createSessionsRoutes(() => engine))
+    return app
+}
+
 describe('Sessions routes - delete', () => {
     test('DELETE /sessions/:id returns 409 when active', async () => {
-        const app = new Hono<WebAppEnv>()
-        app.use('*', async (c, next) => {
-            c.set('userId', 'user-1')
-            c.set('namespace', 'user-1')
-            await next()
-        })
-
-        const session = {
-            id: 's1',
-            namespace: 'user-1',
-            seq: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            active: true,
-            activeAt: Date.now(),
-            metadata: { path: '/tmp', host: 'test' },
-            metadataVersion: 1,
-            agentState: null,
-            agentStateVersion: 1,
-            thinking: false,
-            thinkingAt: 0,
-            permissionMode: null,
-            modelMode: null
-        }
+        const session = makeSession('s1', { active: true })
         const engine = {
             getSession: (sessionId: string) => (sessionId === 's1' ? session : null),
             getSessionByNamespace: (sessionId: string, namespace: string) => sessionId === 's1' && namespace === 'user-1' ? session : undefined,
@@ -46,38 +55,13 @@ describe('Sessions routes - delete', () => {
             deleteSession: async () => {}
         } as any
 
-        app.route('/', createSessionsRoutes(() => engine))
-
-        const res = await app.request('/sessions/s1', { method: 'DELETE' })
+        const res = await createApp(engine).request('/sessions/s1', { method: 'DELETE' })
         expect(res.status).toBe(409)
     })
 
-    test('DELETE /sessions/:id returns 204 when deleted', async () => {
-        const app = new Hono<WebAppEnv>()
-        app.use('*', async (c, next) => {
-            c.set('userId', 'user-1')
-            c.set('namespace', 'user-1')
-            await next()
-        })
-
+    test('DELETE /sessions/:id returns 200 when deleted', async () => {
         let deletedSessionId = ''
-        const session = {
-            id: 's1',
-            namespace: 'user-1',
-            seq: 0,
-            createdAt: Date.now(),
-            updatedAt: Date.now(),
-            active: false,
-            activeAt: Date.now(),
-            metadata: { path: '/tmp', host: 'test' },
-            metadataVersion: 1,
-            agentState: null,
-            agentStateVersion: 1,
-            thinking: false,
-            thinkingAt: 0,
-            permissionMode: null,
-            modelMode: null
-        }
+        const session = makeSession('s1')
         const engine = {
             getSession: (sessionId: string) => (sessionId === 's1' ? session : null),
             getSessionByNamespace: (sessionId: string, namespace: string) => sessionId === 's1' && namespace === 'user-1' ? session : undefined,
@@ -97,10 +81,63 @@ describe('Sessions routes - delete', () => {
             }
         } as any
 
-        app.route('/', createSessionsRoutes(() => engine))
-
-        const res = await app.request('/sessions/s1', { method: 'DELETE' })
+        const res = await createApp(engine).request('/sessions/s1', { method: 'DELETE' })
         expect(res.status).toBe(200)
         expect(deletedSessionId).toBe('s1')
+    })
+
+    test('POST /sessions/bulk-delete deletes inactive sessions', async () => {
+        const sessions = new Map([
+            ['s1', makeSession('s1')],
+            ['s2', makeSession('s2')],
+        ])
+        const deleted: string[] = []
+        const engine = {
+            resolveSessionAccess: (sessionId: string, namespace: string) => {
+                const session = sessions.get(sessionId)
+                if (session && namespace === 'user-1') return { ok: true, sessionId, session }
+                return { ok: false, reason: 'not-found' as const }
+            },
+            deleteSession: async (sessionId: string) => {
+                deleted.push(sessionId)
+            }
+        } as any
+
+        const res = await createApp(engine).request('/sessions/bulk-delete', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ sessionIds: ['s1', 's1', 's2'] })
+        })
+
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ ok: true, deletedSessionIds: ['s1', 's2'] })
+        expect(deleted).toEqual(['s1', 's2'])
+    })
+
+    test('POST /sessions/bulk-delete rejects active sessions before deleting anything', async () => {
+        const sessions = new Map([
+            ['s1', makeSession('s1')],
+            ['s2', makeSession('s2', { active: true })],
+        ])
+        const deleted: string[] = []
+        const engine = {
+            resolveSessionAccess: (sessionId: string, namespace: string) => {
+                const session = sessions.get(sessionId)
+                if (session && namespace === 'user-1') return { ok: true, sessionId, session }
+                return { ok: false, reason: 'not-found' as const }
+            },
+            deleteSession: async (sessionId: string) => {
+                deleted.push(sessionId)
+            }
+        } as any
+
+        const res = await createApp(engine).request('/sessions/bulk-delete', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ sessionIds: ['s1', 's2'] })
+        })
+
+        expect(res.status).toBe(409)
+        expect(deleted).toEqual([])
     })
 })

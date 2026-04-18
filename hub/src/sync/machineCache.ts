@@ -78,6 +78,37 @@ export class MachineCache {
         return this.refreshMachine(stored.id) ?? (() => { throw new Error('Failed to load machine') })()
     }
 
+    updateMachineDisplayName(machineId: string, namespace: string, displayName: string | null): Machine | null {
+        const stored = this.store.machines.getMachineByNamespace(machineId, namespace)
+        if (!stored) {
+            return null
+        }
+
+        const currentMetadata = stored.metadata && typeof stored.metadata === 'object'
+            ? { ...(stored.metadata as Record<string, unknown>) }
+            : {}
+
+        if (displayName && displayName.trim()) {
+            currentMetadata.displayName = displayName.trim()
+        } else {
+            delete currentMetadata.displayName
+        }
+
+        const result = this.store.machines.updateMachineMetadata(
+            machineId,
+            currentMetadata,
+            stored.metadataVersion,
+            namespace
+        )
+        if (result.result !== 'success') {
+            throw new Error(result.result === 'version-mismatch'
+                ? 'Machine metadata was modified concurrently. Please try again.'
+                : 'Failed to update machine display name')
+        }
+
+        return this.refreshMachine(machineId)
+    }
+
     refreshMachine(machineId: string): Machine | null {
         const stored = this.store.machines.getMachine(machineId)
         if (!stored) {

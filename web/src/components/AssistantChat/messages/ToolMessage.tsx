@@ -10,6 +10,7 @@ import { MessageStatusIndicator } from '@/components/AssistantChat/messages/Mess
 import { ToolCard } from '@/components/ToolCard/ToolCard'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
+import { useMessageSearchContext } from '@/components/AssistantChat/messageSearchContext'
 
 function isToolCallBlock(value: unknown): value is ToolCallBlock {
     if (!isObject(value)) return false
@@ -159,6 +160,7 @@ function HappyNestedBlockList(props: {
 
 export function HappyToolMessage(props: ToolCallMessagePartProps) {
     const ctx = useHappyChatContext()
+    const search = useMessageSearchContext()
     const artifact = props.artifact
 
     if (!isToolCallBlock(artifact)) {
@@ -167,8 +169,18 @@ export function HappyToolMessage(props: ToolCallMessagePartProps) {
         const hasResult = props.result !== undefined
         const resultText = hasResult ? safeStringify(props.result) : ''
 
+        const searchId = typeof props.toolCallId === 'string' && props.toolCallId.length > 0
+            ? `tool-call:${props.toolCallId}`
+            : null
+        const isSearchMatch = typeof searchId === 'string' && search.resultIds.has(searchId)
+        const isActiveSearchMatch = typeof searchId === 'string' && search.activeId === searchId
+        const searchAttrs = searchId ? { 'data-message-search-id': searchId } : {}
+        const searchClass = isSearchMatch
+            ? (isActiveSearchMatch ? 'rounded-lg ring-2 ring-amber-400 bg-amber-400/15' : 'rounded-lg ring-1 ring-amber-300/70 bg-amber-300/10')
+            : ''
+
         return (
-            <div className="py-1 min-w-0 max-w-full overflow-x-hidden">
+            <div className={`py-1 min-w-0 max-w-full overflow-x-hidden ${searchClass}`} {...searchAttrs}>
                 <div className="rounded-xl bg-[var(--app-secondary-bg)] p-3 shadow-sm">
                     <div className="flex items-center gap-2 text-xs">
                         <div className="font-mono text-[var(--app-hint)]">
@@ -201,9 +213,15 @@ export function HappyToolMessage(props: ToolCallMessagePartProps) {
     const block = artifact
     const isTask = block.tool.name === 'Task'
     const taskChildren = isTask ? splitTaskChildren(block) : null
+    const searchId = `tool-call:${block.id}`
+    const isSearchMatch = search.resultIds.has(searchId)
+    const isActiveSearchMatch = search.activeId === searchId
+    const searchClass = isSearchMatch
+        ? (isActiveSearchMatch ? 'rounded-lg ring-2 ring-amber-400 bg-amber-400/15' : 'rounded-lg ring-1 ring-amber-300/70 bg-amber-300/10')
+        : ''
 
     return (
-        <div className="py-1 min-w-0 max-w-full overflow-x-hidden">
+        <div className={`py-1 min-w-0 max-w-full overflow-x-hidden ${searchClass}`} data-message-search-id={searchId}>
             <ToolCard
                 api={ctx.api}
                 sessionId={ctx.sessionId}

@@ -8,6 +8,7 @@ import { MessageStore } from './messageStore'
 import { PushStore } from './pushStore'
 import { SessionStore } from './sessionStore'
 import { UserStore } from './userStore'
+import { UserPreferenceStore } from './userPreferenceStore'
 
 export type {
     StoredMachine,
@@ -15,6 +16,7 @@ export type {
     StoredPushSubscription,
     StoredSession,
     StoredUser,
+    StoredUserPreferences,
     VersionedUpdateResult
 } from './types'
 export { MachineStore } from './machineStore'
@@ -22,6 +24,7 @@ export { MessageStore } from './messageStore'
 export { PushStore } from './pushStore'
 export { SessionStore } from './sessionStore'
 export { UserStore } from './userStore'
+export { UserPreferenceStore } from './userPreferenceStore'
 
 export type AppUser = {
     id: string
@@ -37,7 +40,7 @@ type DbCliTokenLookup = {
     user_id: string
 }
 
-const SCHEMA_VERSION: number = 7
+const SCHEMA_VERSION: number = 8
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -45,7 +48,8 @@ const REQUIRED_TABLES = [
     'users',
     'push_subscriptions',
     'app_users',
-    'cli_tokens'
+    'cli_tokens',
+    'user_preferences'
 ] as const
 
 function validateUserId(userId: string): void {
@@ -63,6 +67,7 @@ export class Store {
     readonly messages: MessageStore
     readonly users: UserStore
     readonly push: PushStore
+    readonly userPreferences: UserPreferenceStore
 
     constructor(dbPath: string) {
         this.dbPath = dbPath
@@ -104,6 +109,7 @@ export class Store {
         this.messages = new MessageStore(this.db)
         this.users = new UserStore(this.db)
         this.push = new PushStore(this.db)
+        this.userPreferences = new UserPreferenceStore(this.db)
     }
 
     private initSchema(): void {
@@ -111,6 +117,7 @@ export class Store {
         if (currentVersion === 0) {
             if (!this.hasAnyUserTables()) {
                 this.createSchema()
+                this.ensureUserPreferencesSchema()
                 this.ensureSystemUsers()
                 this.setUserVersion(SCHEMA_VERSION)
                 return
@@ -140,6 +147,7 @@ export class Store {
         this.ensureMachinesSchema()
         this.ensureMessagesSchema()
         this.ensureAppUsersSchema()
+        this.ensureUserPreferencesSchema()
         this.ensureSystemUsers()
     }
 
@@ -249,6 +257,13 @@ export class Store {
             );
             CREATE INDEX IF NOT EXISTS idx_cli_tokens_user_id ON cli_tokens(user_id);
             CREATE INDEX IF NOT EXISTS idx_cli_tokens_token ON cli_tokens(token);
+
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                namespace TEXT PRIMARY KEY,
+                auto_cleanup_enabled INTEGER NOT NULL DEFAULT 1,
+                session_retention_days INTEGER,
+                updated_at INTEGER NOT NULL
+            );
 
             CREATE TABLE IF NOT EXISTS push_subscriptions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -614,6 +629,31 @@ export class Store {
         const columns = this.getColumnNames('messages')
         if (!columns.has('local_id')) {
             this.db.exec('ALTER TABLE messages ADD COLUMN local_id TEXT')
+        }
+    }
+
+    private ensureUserPreferencesSchema(): void {
+        if (!this.hasTable('user_preferences')) {
+            this.db.exec(`
+                CREATE TABLE IF NOT EXISTS user_preferences (
+                    namespace TEXT PRIMARY KEY,
+                    auto_cleanup_enabled INTEGER NOT NULL DEFAULT 1,
+                    session_retention_days INTEGER,
+                    updated_at INTEGER NOT NULL
+                )
+            `)
+            return
+        }
+
+        const columns = this.getColumnNames('user_preferences')
+        if (!columns.has('auto_cleanup_enabled')) {
+            this.db.exec('ALTER TABLE user_preferences ADD COLUMN auto_cleanup_enabled INTEGER NOT NULL DEFAULT 1')
+        }
+        if (!columns.has('session_retention_days')) {
+            this.db.exec('ALTER TABLE user_preferences ADD COLUMN session_retention_days INTEGER')
+        }
+        if (!columns.has('updated_at')) {
+            this.db.exec('ALTER TABLE user_preferences ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0')
         }
     }
 

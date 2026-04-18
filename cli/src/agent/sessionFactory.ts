@@ -38,11 +38,14 @@ export type SessionBootstrapResult = {
     workingDirectory: string
 }
 
-export function buildMachineMetadata(): MachineMetadata {
+export async function buildMachineMetadata(): Promise<MachineMetadata> {
+    const settings = await readSettings()
+    const displayName = process.env.HAPI_MACHINE_DISPLAY_NAME || settings.machineDisplayName
     return {
         host: process.env.HAPI_HOSTNAME || os.hostname(),
         platform: os.platform(),
         happyCliVersion: packageJson.version,
+        displayName: displayName?.trim() || undefined,
         homeDir: os.homedir(),
         happyHomeDir: configuration.happyHomeDir,
         happyLibDir: runtimePath()
@@ -118,7 +121,7 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
     const machineId = await getMachineIdOrExit()
     await api.getOrCreateMachine({
         machineId,
-        metadata: buildMachineMetadata()
+        metadata: await buildMachineMetadata()
     })
 
     const metadata = buildSessionMetadata({
