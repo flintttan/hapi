@@ -41,9 +41,11 @@ export default {
   // Sessions page
   'sessions.count': '{n} 个会话，{m} 个项目',
   'sessions.new': '新建会话',
-  'sessions.bulk.manage': '管理',
   'sessions.bulk.selected': '已选择 {n} 个',
+  'sessions.bulk.select': '选择会话',
+  'sessions.bulk.deselect': '取消选择会话',
   'sessions.bulk.selectAll': '全选',
+  'sessions.bulk.archive': '归档',
   'sessions.bulk.delete': '删除',
 
   // Session list
@@ -91,6 +93,10 @@ export default {
   'dialog.delete.description': '确定要删除 "{name}" 吗？此操作无法撤销。',
   'dialog.delete.confirm': '删除',
   'dialog.delete.confirming': '删除中…',
+  'dialog.bulkArchive.title': '归档会话',
+  'dialog.bulkArchive.description': '确定归档选中的 {n} 个会话吗？',
+  'dialog.bulkArchive.confirm': '归档选中',
+  'dialog.bulkArchive.confirming': '归档中…',
   'dialog.bulkDelete.title': '删除会话',
   'dialog.bulkDelete.description': '确定删除选中的 {n} 个会话吗？此操作无法撤销。',
   'dialog.bulkDelete.confirm': '删除选中',

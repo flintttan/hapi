@@ -41,9 +41,11 @@ export default {
   // Sessions page
   'sessions.count': '{n} sessions in {m} projects',
   'sessions.new': 'New Session',
-  'sessions.bulk.manage': 'Manage',
   'sessions.bulk.selected': '{n} selected',
+  'sessions.bulk.select': 'Select session',
+  'sessions.bulk.deselect': 'Deselect session',
   'sessions.bulk.selectAll': 'Select all',
+  'sessions.bulk.archive': 'Archive',
   'sessions.bulk.delete': 'Delete',
 
   // Session list
@@ -89,6 +91,10 @@ export default {
   'dialog.delete.description': 'Are you sure you want to delete "{name}"? This action cannot be undone.',
   'dialog.delete.confirm': 'Delete',
   'dialog.delete.confirming': 'Deleting…',
+  'dialog.bulkArchive.title': 'Archive Sessions',
+  'dialog.bulkArchive.description': 'Archive {n} selected sessions?',
+  'dialog.bulkArchive.confirm': 'Archive selected',
+  'dialog.bulkArchive.confirming': 'Archiving…',
   'dialog.bulkDelete.title': 'Delete Sessions',
   'dialog.bulkDelete.description': 'Delete {n} selected sessions? This action cannot be undone.',
   'dialog.bulkDelete.confirm': 'Delete selected',

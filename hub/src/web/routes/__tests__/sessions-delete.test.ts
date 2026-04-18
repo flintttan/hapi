@@ -140,4 +140,32 @@ describe('Sessions routes - delete', () => {
         expect(res.status).toBe(409)
         expect(deleted).toEqual([])
     })
+
+    test('POST /sessions/bulk-archive archives sessions in batch', async () => {
+        const sessions = new Map([
+            ['s1', makeSession('s1')],
+            ['s2', makeSession('s2', { active: true })],
+        ])
+        const archived: string[] = []
+        const engine = {
+            resolveSessionAccess: (sessionId: string, namespace: string) => {
+                const session = sessions.get(sessionId)
+                if (session && namespace === 'user-1') return { ok: true, sessionId, session }
+                return { ok: false, reason: 'not-found' as const }
+            },
+            archiveSession: async (sessionId: string) => {
+                archived.push(sessionId)
+            }
+        } as any
+
+        const res = await createApp(engine).request('/sessions/bulk-archive', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ sessionIds: ['s1', 's1', 's2'] })
+        })
+
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ ok: true, archivedSessionIds: ['s1', 's2'] })
+        expect(archived).toEqual(['s1', 's2'])
+    })
 })

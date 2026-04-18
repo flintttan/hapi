@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { SessionSummary } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { useLongPress } from '@/hooks/useLongPress'
@@ -357,6 +357,7 @@ function SessionItem(props: {
     selectionMode?: boolean
     checked?: boolean
     onCheckedChange?: (sessionId: string, checked: boolean) => void
+    onEnterSelectionMode?: (sessionId: string) => void
 }) {
     const { t } = useTranslation()
     const {
@@ -367,7 +368,8 @@ function SessionItem(props: {
         selected = false,
         selectionMode = false,
         checked = false,
-        onCheckedChange
+        onCheckedChange,
+        onEnterSelectionMode
     } = props
     const { haptic } = usePlatform()
     const [menuOpen, setMenuOpen] = useState(false)
@@ -383,16 +385,26 @@ function SessionItem(props: {
     )
 
     const longPressHandlers = useLongPress({
-        onLongPress: (point) => {
+        onLongPress: () => {
+            haptic.impact('medium')
+            if (selectionMode) {
+                onCheckedChange?.(s.id, !checked)
+                return
+            }
+            onEnterSelectionMode?.(s.id)
+        },
+        onContextMenu: (point) => {
+            if (selectionMode) {
+                onCheckedChange?.(s.id, !checked)
+                return
+            }
             haptic.impact('medium')
             setMenuAnchorPoint(point)
             setMenuOpen(true)
         },
         onClick: () => {
             if (selectionMode) {
-                if (!s.active) {
-                    onCheckedChange?.(s.id, !checked)
-                }
+                onCheckedChange?.(s.id, !checked)
                 return
             }
             if (!menuOpen) {
@@ -404,26 +416,34 @@ function SessionItem(props: {
 
     const sessionName = getSessionTitle(s)
     const todoProgress = getTodoProgress(s)
-    const disabledSelection = selectionMode && s.active
     return (
         <>
-            <button
-                type="button"
+            <div
+                role="button"
+                tabIndex={0}
                 {...longPressHandlers}
-                className={`session-list-item flex w-full flex-col gap-1 px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none rounded-lg ${selected ? 'bg-[var(--app-secondary-bg)]' : ''} ${checked ? 'ring-1 ring-[var(--app-link)] bg-[var(--app-secondary-bg)]' : ''}`}
+                data-testid={`session-item-${s.id}`}
+                className={`session-list-item flex w-full cursor-pointer flex-col gap-1 rounded-lg px-2.5 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] select-none ${selected ? 'bg-[var(--app-secondary-bg)]' : ''} ${checked ? 'ring-1 ring-[var(--app-link)] bg-[var(--app-secondary-bg)]' : ''}`}
                 style={{ WebkitTouchCallout: 'none' }}
                 aria-current={selected ? 'page' : undefined}
-                aria-disabled={disabledSelection || undefined}
             >
                 <div className={`flex items-center justify-between gap-3 ${!s.active ? 'opacity-50' : ''}`}>
                     <div className="flex items-center gap-2 min-w-0">
                         {selectionMode ? (
-                            <span
-                                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] ${checked ? 'border-[var(--app-link)] bg-[var(--app-link)] text-white' : 'border-[var(--app-border)] bg-[var(--app-bg)] text-transparent'} ${disabledSelection ? 'opacity-40' : ''}`}
-                                aria-hidden="true"
+                            <button
+                                type="button"
+                                data-testid={`session-item-toggle-${s.id}`}
+                                className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[10px] transition-colors ${checked ? 'border-[var(--app-link)] bg-[var(--app-link)] text-white' : 'border-[var(--app-border)] bg-[var(--app-bg)] text-transparent'}`}
+                                aria-label={checked ? t('sessions.bulk.deselect') : t('sessions.bulk.select')}
+                                aria-pressed={checked}
+                                onClick={(event) => {
+                                    event.stopPropagation()
+                                    event.preventDefault()
+                                    onCheckedChange?.(s.id, !checked)
+                                }}
                             >
                                 ✓
-                            </span>
+                            </button>
                         ) : null}
                         <FlavorIcon flavor={s.metadata?.flavor} className="h-4 w-4 shrink-0" />
                         <div className={`truncate text-sm font-medium ${s.active ? 'text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}>
@@ -455,7 +475,7 @@ function SessionItem(props: {
                         {s.metadata?.path ?? s.id}
                     </div>
                 ) : null}
-            </button>
+            </div>
 
             <SessionActionMenu
                 isOpen={!selectionMode && menuOpen}
@@ -516,7 +536,7 @@ export function SessionList(props: {
 }) {
     const { t } = useTranslation()
     const { renderHeader = true, api, selectedSessionId, machineLabelsById = {} } = props
-    const { bulkDeleteSessions, isPending: isBulkDeletePending } = useBulkSessionActions(api)
+    const { bulkArchiveSessions, bulkDeleteSessions, isPending: isBulkActionPending } = useBulkSessionActions(api)
     const groups = useMemo(
         () => groupSessionsByDirectory(deduplicateSessionsByAgentId(props.sessions, selectedSessionId)),
         [props.sessions, selectedSessionId]
@@ -526,13 +546,26 @@ export function SessionList(props: {
     )
     const [selectionMode, setSelectionMode] = useState(false)
     const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+    const [bulkArchiveOpen, setBulkArchiveOpen] = useState(false)
     const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
-    const visibleDeletableSessionIds = useMemo(
-        () => groups.flatMap((group) => group.sessions.filter((session) => !session.active).map((session) => session.id)),
+    const visibleSessionIds = useMemo(
+        () => groups.flatMap((group) => group.sessions.map((session) => session.id)),
         [groups]
     )
+    const selectedSessions = useMemo(
+        () => groups.flatMap((group) => group.sessions.filter((session) => selectedIds.has(session.id))),
+        [groups, selectedIds]
+    )
+    const selectedActiveSessionIds = useMemo(
+        () => selectedSessions.filter((session) => session.active).map((session) => session.id),
+        [selectedSessions]
+    )
+    const selectedInactiveSessionIds = useMemo(
+        () => selectedSessions.filter((session) => !session.active).map((session) => session.id),
+        [selectedSessions]
+    )
     const selectedCount = selectedIds.size
-    const setSessionChecked = (sessionId: string, checked: boolean) => {
+    const setSessionChecked = useCallback((sessionId: string, checked: boolean) => {
         setSelectedIds(prev => {
             const next = new Set(prev)
             if (checked) {
@@ -542,27 +575,38 @@ export function SessionList(props: {
             }
             return next
         })
-    }
-    const exitSelectionMode = () => {
+    }, [])
+    const enterSelectionMode = useCallback((sessionId?: string) => {
+        setSelectionMode(true)
+        setSelectedIds(prev => {
+            if (!sessionId) return prev
+            if (prev.has(sessionId)) return prev
+            const next = new Set(prev)
+            next.add(sessionId)
+            return next
+        })
+    }, [])
+    const exitSelectionMode = useCallback(() => {
         setSelectionMode(false)
+        setBulkArchiveOpen(false)
+        setBulkDeleteOpen(false)
         setSelectedIds(new Set())
-    }
-    const toggleSelectionMode = () => {
-        if (selectionMode) {
-            exitSelectionMode()
-        } else {
-            setSelectionMode(true)
-        }
-    }
-    const selectAllVisible = () => {
-        setSelectedIds(new Set(visibleDeletableSessionIds))
-    }
-    const handleBulkDelete = async () => {
-        const ids = Array.from(selectedIds)
+    }, [])
+    const selectAllVisible = useCallback(() => {
+        setSelectedIds(new Set(visibleSessionIds))
+    }, [visibleSessionIds])
+    const handleBulkArchive = useCallback(async () => {
+        const ids = selectedActiveSessionIds
+        await bulkArchiveSessions(ids)
+        setBulkArchiveOpen(false)
+        exitSelectionMode()
+    }, [bulkArchiveSessions, exitSelectionMode, selectedActiveSessionIds])
+    const handleBulkDelete = useCallback(async () => {
+        const ids = selectedInactiveSessionIds
         await bulkDeleteSessions(ids)
         setBulkDeleteOpen(false)
         exitSelectionMode()
-    }
+    }, [bulkDeleteSessions, exitSelectionMode, selectedInactiveSessionIds])
     const isGroupCollapsed = (group: SessionGroup): boolean => {
         const override = collapseOverrides.get(group.key)
         if (override !== undefined) return override
@@ -681,9 +725,19 @@ export function SessionList(props: {
                                     variant="secondary"
                                     className="h-7 px-2 text-xs"
                                     onClick={selectAllVisible}
-                                    disabled={visibleDeletableSessionIds.length === 0}
+                                    disabled={visibleSessionIds.length === 0}
                                 >
                                     {t('sessions.bulk.selectAll')}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="secondary"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() => setBulkArchiveOpen(true)}
+                                    disabled={selectedActiveSessionIds.length === 0}
+                                >
+                                    {t('sessions.bulk.archive')}
                                 </Button>
                                 <Button
                                     type="button"
@@ -691,21 +745,23 @@ export function SessionList(props: {
                                     variant="destructive"
                                     className="h-7 px-2 text-xs"
                                     onClick={() => setBulkDeleteOpen(true)}
-                                    disabled={selectedCount === 0}
+                                    disabled={selectedInactiveSessionIds.length === 0}
                                 >
                                     {t('sessions.bulk.delete')}
                                 </Button>
                             </>
                         ) : null}
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            className="h-7 px-2 text-xs"
-                            onClick={toggleSelectionMode}
-                        >
-                            {selectionMode ? t('button.cancel') : t('sessions.bulk.manage')}
-                        </Button>
+                        {selectionMode ? (
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                className="h-7 px-2 text-xs"
+                                onClick={exitSelectionMode}
+                            >
+                                {t('button.cancel')}
+                            </Button>
+                        ) : null}
                         {!selectionMode ? (
                             <button
                                 type="button"
@@ -734,9 +790,19 @@ export function SessionList(props: {
                                     variant="secondary"
                                     className="h-7 px-2 text-xs"
                                     onClick={selectAllVisible}
-                                    disabled={visibleDeletableSessionIds.length === 0}
+                                    disabled={visibleSessionIds.length === 0}
                                 >
                                     {t('sessions.bulk.selectAll')}
+                                </Button>
+                                <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="secondary"
+                                    className="h-7 px-2 text-xs"
+                                    onClick={() => setBulkArchiveOpen(true)}
+                                    disabled={selectedActiveSessionIds.length === 0}
+                                >
+                                    {t('sessions.bulk.archive')}
                                 </Button>
                                 <Button
                                     type="button"
@@ -744,21 +810,23 @@ export function SessionList(props: {
                                     variant="destructive"
                                     className="h-7 px-2 text-xs"
                                     onClick={() => setBulkDeleteOpen(true)}
-                                    disabled={selectedCount === 0}
+                                    disabled={selectedInactiveSessionIds.length === 0}
                                 >
                                     {t('sessions.bulk.delete')}
                                 </Button>
                             </>
                         ) : null}
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            className="h-7 px-2 text-xs"
-                            onClick={toggleSelectionMode}
-                        >
-                            {selectionMode ? t('button.cancel') : t('sessions.bulk.manage')}
-                        </Button>
+                        {selectionMode ? (
+                            <Button
+                                type="button"
+                                size="sm"
+                                variant="secondary"
+                                className="h-7 px-2 text-xs"
+                                onClick={exitSelectionMode}
+                            >
+                                {t('button.cancel')}
+                            </Button>
+                        ) : null}
                     </div>
                 </div>
             )}
@@ -818,6 +886,7 @@ export function SessionList(props: {
                                                                 selectionMode={selectionMode}
                                                                 checked={selectedIds.has(s.id)}
                                                                 onCheckedChange={setSessionChecked}
+                                                                onEnterSelectionMode={enterSelectionMode}
                                                             />
                                                         ))}
                                                     </div>
@@ -834,14 +903,25 @@ export function SessionList(props: {
                 })}
             </div>
             <ConfirmDialog
+                isOpen={bulkArchiveOpen}
+                onClose={() => setBulkArchiveOpen(false)}
+                title={t('dialog.bulkArchive.title')}
+                description={t('dialog.bulkArchive.description', { n: selectedActiveSessionIds.length })}
+                confirmLabel={t('dialog.bulkArchive.confirm')}
+                confirmingLabel={t('dialog.bulkArchive.confirming')}
+                onConfirm={handleBulkArchive}
+                isPending={isBulkActionPending}
+                destructive
+            />
+            <ConfirmDialog
                 isOpen={bulkDeleteOpen}
                 onClose={() => setBulkDeleteOpen(false)}
                 title={t('dialog.bulkDelete.title')}
-                description={t('dialog.bulkDelete.description', { n: selectedCount })}
+                description={t('dialog.bulkDelete.description', { n: selectedInactiveSessionIds.length })}
                 confirmLabel={t('dialog.bulkDelete.confirm')}
                 confirmingLabel={t('dialog.bulkDelete.confirming')}
                 onConfirm={handleBulkDelete}
-                isPending={isBulkDeletePending}
+                isPending={isBulkActionPending}
                 destructive
             />
         </div>

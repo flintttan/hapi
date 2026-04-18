@@ -97,6 +97,7 @@ export type MessagesResponse = {
 
 export type MachinesResponse = { machines: Machine[] }
 export type MachinePathsExistsResponse = { exists: Record<string, boolean> }
+export type BulkArchiveSessionsResponse = { ok: boolean; archivedSessionIds: string[] }
 export type BulkDeleteSessionsResponse = { ok: boolean; deletedSessionIds: string[] }
 export type CleanupPreferencesResponse = {
     autoCleanupEnabled: boolean

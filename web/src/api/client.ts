@@ -22,6 +22,7 @@ import type {
     SpawnResponse,
     UploadFileResponse,
     VisibilityPayload,
+    BulkArchiveSessionsResponse,
     BulkDeleteSessionsResponse,
     CleanupPreferencesResponse,
     SessionResponse,
@@ -241,6 +242,13 @@ export class ApiClient {
 
     async bulkDeleteSessions(sessionIds: string[]): Promise<BulkDeleteSessionsResponse> {
         return await this.request<BulkDeleteSessionsResponse>('/api/sessions/bulk-delete', {
+            method: 'POST',
+            body: JSON.stringify({ sessionIds })
+        })
+    }
+
+    async bulkArchiveSessions(sessionIds: string[]): Promise<BulkArchiveSessionsResponse> {
+        return await this.request<BulkArchiveSessionsResponse>('/api/sessions/bulk-archive', {
             method: 'POST',
             body: JSON.stringify({ sessionIds })
         })

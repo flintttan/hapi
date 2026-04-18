@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import type { SessionSummary } from '@/types/api'
@@ -78,6 +78,19 @@ function renderWithProviders(ui: ReactNode) {
     )
 }
 
+async function triggerLongPress(element: HTMLElement) {
+    vi.useFakeTimers()
+    fireEvent.mouseDown(element, { button: 0 })
+    await act(async () => {
+        vi.advanceTimersByTime(550)
+    })
+    fireEvent.mouseUp(element, { button: 0 })
+    await act(async () => {
+        await Promise.resolve()
+    })
+    vi.useRealTimers()
+}
+
 describe('deduplicateSessionsByAgentId', () => {
     it('deduplicates sessions with the same agentSessionId', () => {
         const sessions = [
@@ -143,7 +156,7 @@ describe('deduplicateSessionsByAgentId', () => {
 })
 
 describe('SessionList bulk selection', () => {
-    it('renders bulk manage controls when header is visible', async () => {
+    it('enters selection mode via long press when header is visible', async () => {
         const sessions = [
             makeSession({ id: 'inactive-1', active: false, metadata: { path: '/root/p1' } }),
             makeSession({ id: 'active-1', active: true, metadata: { path: '/root/p2' } }),
@@ -161,14 +174,44 @@ describe('SessionList bulk selection', () => {
             />
         )
 
-        fireEvent.click(screen.getByRole('button', { name: 'Manage' }))
+        await triggerLongPress(screen.getByTestId('session-item-inactive-1'))
 
-        expect(screen.getByRole('button', { name: 'Select all' })).toBeInTheDocument()
-        expect(screen.getByRole('button', { name: 'Delete' })).toBeDisabled()
+        expect(await screen.findByRole('button', { name: 'Select all' })).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'Archive' })).toBeDisabled()
+        expect(screen.getByRole('button', { name: 'Delete' })).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Select all' }))
 
         await waitFor(() => {
             expect(screen.getByRole('button', { name: 'Delete' })).not.toBeDisabled()
+        })
+    })
+
+    it('toggles selection from the checkbox button', async () => {
+        const sessions = [
+            makeSession({ id: 'inactive-1', active: false, metadata: { path: '/root/p1' } }),
+        ]
+
+        renderWithProviders(
+            <SessionList
+                sessions={sessions}
+                onSelect={vi.fn()}
+                onNewSession={vi.fn()}
+                onRefresh={vi.fn()}
+                isLoading={false}
+                api={null}
+                renderHeader
+            />
+        )
+
+        await triggerLongPress(screen.getByTestId('session-item-inactive-1'))
+
+        const toggle = await screen.findByTestId('session-item-toggle-inactive-1')
+        expect(toggle).toHaveAttribute('aria-pressed', 'true')
+
+        fireEvent.click(toggle)
+
+        await waitFor(() => {
+            expect(toggle).toHaveAttribute('aria-pressed', 'false')
         })
     })
 })

@@ -4,6 +4,7 @@ import { useCallback, useRef } from 'react'
 type UseLongPressOptions = {
     onLongPress: (point: { x: number; y: number }) => void
     onClick?: () => void
+    onContextMenu?: (point: { x: number; y: number }) => void
     threshold?: number
     disabled?: boolean
 }
@@ -20,7 +21,7 @@ type UseLongPressHandlers = {
 }
 
 export function useLongPress(options: UseLongPressOptions): UseLongPressHandlers {
-    const { onLongPress, onClick, threshold = 500, disabled = false } = options
+    const { onLongPress, onClick, onContextMenu: onContextMenuPress, threshold = 500, disabled = false } = options
 
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const isLongPressRef = useRef(false)
@@ -94,9 +95,14 @@ export function useLongPress(options: UseLongPressOptions): UseLongPressHandlers
             e.preventDefault()
             clearTimer()
             isLongPressRef.current = true
-            onLongPress({ x: e.clientX, y: e.clientY })
+            const point = { x: e.clientX, y: e.clientY }
+            if (onContextMenuPress) {
+                onContextMenuPress(point)
+            } else {
+                onLongPress(point)
+            }
         }
-    }, [disabled, clearTimer, onLongPress])
+    }, [disabled, clearTimer, onContextMenuPress, onLongPress])
 
     const onKeyDown = useCallback<React.KeyboardEventHandler>((e) => {
         if (disabled) return

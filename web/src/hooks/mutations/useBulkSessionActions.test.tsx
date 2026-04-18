@@ -20,6 +20,23 @@ function createWrapper() {
 }
 
 describe('useBulkSessionActions', () => {
+    it('deduplicates ids when bulk archiving', async () => {
+        const bulkArchiveSessions = vi.fn(async () => ({ ok: true, archivedSessionIds: ['s1', 's2'] }))
+        const api = { bulkArchiveSessions } as unknown as ApiClient
+
+        const { result } = renderHook(() => useBulkSessionActions(api), { wrapper: createWrapper() })
+
+        let archived: string[] = []
+        await act(async () => {
+            archived = await result.current.bulkArchiveSessions(['s1', 's1', 's2'])
+        })
+
+        await waitFor(() => {
+            expect(bulkArchiveSessions).toHaveBeenCalledWith(['s1', 's2'])
+        })
+        expect(archived).toEqual(['s1', 's2'])
+    })
+
     it('deduplicates ids and clears deleted session windows', async () => {
         const bulkDeleteSessions = vi.fn(async () => ({ ok: true, deletedSessionIds: ['s1', 's2'] }))
         const api = { bulkDeleteSessions } as unknown as ApiClient
