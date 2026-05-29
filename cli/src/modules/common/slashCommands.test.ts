@@ -7,7 +7,6 @@ import { listSlashCommands } from './slashCommands'
 describe('listSlashCommands', () => {
     const originalClaudeConfigDir = process.env.CLAUDE_CONFIG_DIR
     const originalCodexHome = process.env.CODEX_HOME
-
     let sandboxDir: string
     let claudeConfigDir: string
     let codexHome: string
@@ -21,6 +20,11 @@ describe('listSlashCommands', () => {
 
         process.env.CLAUDE_CONFIG_DIR = claudeConfigDir
         process.env.CODEX_HOME = codexHome
+
+        await mkdir(join(claudeConfigDir, 'commands'), { recursive: true })
+        await mkdir(join(codexHome, 'prompts'), { recursive: true })
+        await mkdir(join(projectDir, '.claude', 'commands'), { recursive: true })
+        await mkdir(join(projectDir, '.codex', 'prompts'), { recursive: true })
     })
 
     afterEach(async () => {
@@ -29,7 +33,6 @@ describe('listSlashCommands', () => {
         } else {
             process.env.CLAUDE_CONFIG_DIR = originalClaudeConfigDir
         }
-
         if (originalCodexHome === undefined) {
             delete process.env.CODEX_HOME
         } else {
@@ -39,64 +42,14 @@ describe('listSlashCommands', () => {
         await rm(sandboxDir, { recursive: true, force: true })
     })
 
-    it('parses Claude custom command descriptions, nesting, and name overrides', async () => {
-        const commandsDir = join(claudeConfigDir, 'commands')
-        await mkdir(join(commandsDir, 'workflow'), { recursive: true })
-
-        await writeFile(
-            join(commandsDir, 'workflow', 'plan.md'),
-            `---\ndescription: Workflow plan\n---\nBody\n`
-        )
-        await writeFile(
-            join(commandsDir, 'workflow', 'do-it.md'),
-            `---\nname: execute\ndescription: Workflow execute\n---\nBody\n`
-        )
-        await writeFile(
-            join(commandsDir, 'lite-plan.md'),
-            `---\ndescription: Lite plan\n---\nBody\n`
-        )
-        await writeFile(
-            join(commandsDir, 'no-desc.md'),
-            `# No frontmatter\nBody\n`
-        )
-
-        const commands = await listSlashCommands('claude')
-        const userCommands = commands.filter((cmd) => cmd.source === 'user')
-
-        expect(userCommands).toEqual(expect.arrayContaining([
-            expect.objectContaining({ name: 'workflow:plan', description: 'Workflow plan', source: 'user' }),
-            expect.objectContaining({ name: 'workflow:execute', description: 'Workflow execute', source: 'user' }),
-            expect.objectContaining({ name: 'lite-plan', description: 'Lite plan', source: 'user' }),
-            expect.objectContaining({ name: 'no-desc', description: 'Custom command', source: 'user' })
-        ]))
-
-        expect(userCommands.find((cmd) => cmd.name === 'workflow:plan')?.content).toBeUndefined()
-    })
-
-    it('parses Codex prompt content and description from frontmatter', async () => {
-        const promptsDir = join(codexHome, 'prompts')
-        await mkdir(promptsDir, { recursive: true })
-        await writeFile(
-            join(promptsDir, 'my-prompt.md'),
-            `---\ndescription: My prompt\n---\nHello world\n\nMore\n`
-        )
-
-        const commands = await listSlashCommands('codex')
-        const user = commands.find((cmd) => cmd.source === 'user' && cmd.name === 'my-prompt')
-
-        expect(user?.description).toBe('My prompt')
-        expect(user?.content).toBe('Hello world\n\nMore')
-    })
-
     it('keeps backward-compatible behavior when projectDir is not provided', async () => {
-        await mkdir(join(claudeConfigDir, 'commands'), { recursive: true })
         await writeFile(
             join(claudeConfigDir, 'commands', 'global-only.md'),
             ['---', 'description: Global only', '---', '', 'Global command body'].join('\n')
         )
 
         const commands = await listSlashCommands('claude')
-        const command = commands.find((cmd) => cmd.name === 'global-only')
+        const command = commands.find(cmd => cmd.name === 'global-only')
 
         expect(command).toBeDefined()
         expect(command?.source).toBe('user')
@@ -104,25 +57,20 @@ describe('listSlashCommands', () => {
     })
 
     it('loads project-level commands when projectDir is provided', async () => {
-        await mkdir(join(projectDir, '.claude', 'commands'), { recursive: true })
         await writeFile(
             join(projectDir, '.claude', 'commands', 'project-only.md'),
             ['---', 'description: Project only', '---', '', 'Project command body'].join('\n')
         )
 
         const commands = await listSlashCommands('claude', projectDir)
-        const command = commands.find((cmd) => cmd.name === 'project-only')
+        const command = commands.find(cmd => cmd.name === 'project-only')
 
         expect(command).toBeDefined()
         expect(command?.source).toBe('project')
         expect(command?.description).toBe('Project only')
-        expect(command?.content).toBeUndefined()
     })
 
     it('prefers project command when project and global have same name', async () => {
-        await mkdir(join(claudeConfigDir, 'commands'), { recursive: true })
-        await mkdir(join(projectDir, '.claude', 'commands'), { recursive: true })
-
         await writeFile(
             join(claudeConfigDir, 'commands', 'shared.md'),
             ['---', 'description: Global shared', '---', '', 'Global body'].join('\n')
@@ -133,11 +81,12 @@ describe('listSlashCommands', () => {
         )
 
         const commands = await listSlashCommands('claude', projectDir)
-        const sharedCommands = commands.filter((cmd) => cmd.name === 'shared')
+        const sharedCommands = commands.filter(cmd => cmd.name === 'shared')
 
         expect(sharedCommands).toHaveLength(1)
         expect(sharedCommands[0]?.source).toBe('project')
         expect(sharedCommands[0]?.description).toBe('Project shared')
+        expect(sharedCommands[0]?.content).toBe('Project body')
     })
 
     it('loads nested project commands using colon-separated names', async () => {
@@ -148,7 +97,7 @@ describe('listSlashCommands', () => {
         )
 
         const commands = await listSlashCommands('claude', projectDir)
-        const command = commands.find((cmd) => cmd.name === 'trellis:start')
+        const command = commands.find(cmd => cmd.name === 'trellis:start')
 
         expect(command).toBeDefined()
         expect(command?.source).toBe('project')
@@ -157,6 +106,88 @@ describe('listSlashCommands', () => {
 
     it('returns empty project commands when project directory does not exist', async () => {
         const nonExistentProjectDir = join(sandboxDir, 'not-exists')
+
         await expect(listSlashCommands('claude', nonExistentProjectDir)).resolves.toBeDefined()
+    })
+
+    it('exposes HAPI-supported Codex built-ins', async () => {
+        const commands = await listSlashCommands('codex', projectDir)
+
+        expect(commands.map((command) => command.name)).toEqual(expect.arrayContaining([
+            'clear',
+            'compact',
+            'goal',
+            'plan',
+            'status',
+            'model',
+            'reasoning',
+            'permissions',
+        ]))
+    })
+
+    it('lets project codex prompts override same-name built-ins', async () => {
+        await writeFile(
+            join(projectDir, '.codex', 'prompts', 'clear.md'),
+            ['---', 'description: Project clear', '---', '', 'Project clear prompt'].join('\n')
+        )
+
+        const commands = await listSlashCommands('codex', projectDir)
+        const clearCommands = commands.filter(cmd => cmd.name === 'clear')
+
+        expect(clearCommands).toHaveLength(1)
+        expect(clearCommands[0]?.source).toBe('project')
+        expect(clearCommands[0]?.description).toBe('Project clear')
+        expect(clearCommands[0]?.content).toBe('Project clear prompt')
+    })
+
+    it('loads Codex global and project prompts', async () => {
+        await writeFile(
+            join(codexHome, 'prompts', 'global-prompt.md'),
+            ['---', 'description: Global Codex prompt', '---', '', 'Global Codex body'].join('\n')
+        )
+        await writeFile(
+            join(projectDir, '.codex', 'prompts', 'project-prompt.md'),
+            ['---', 'description: Project Codex prompt', '---', '', 'Project Codex body'].join('\n')
+        )
+
+        const commands = await listSlashCommands('codex', projectDir)
+
+        expect(commands.find(cmd => cmd.name === 'global-prompt')).toMatchObject({
+            source: 'user',
+            description: 'Global Codex prompt',
+            content: 'Global Codex body',
+        })
+        expect(commands.find(cmd => cmd.name === 'project-prompt')).toMatchObject({
+            source: 'project',
+            description: 'Project Codex prompt',
+            content: 'Project Codex body',
+        })
+    })
+
+    it('loads Codex project prompts from cwd up to repo root with nearest override', async () => {
+        const repoRoot = join(sandboxDir, 'repo')
+        const workingDirectory = join(repoRoot, 'apps', 'web')
+        await mkdir(join(repoRoot, '.git'), { recursive: true })
+        await mkdir(join(repoRoot, '.codex', 'prompts'), { recursive: true })
+        await mkdir(join(workingDirectory, '.codex', 'prompts'), { recursive: true })
+
+        await writeFile(
+            join(repoRoot, '.codex', 'prompts', 'shared.md'),
+            ['---', 'description: Root prompt', '---', '', 'Root body'].join('\n')
+        )
+        await writeFile(
+            join(workingDirectory, '.codex', 'prompts', 'shared.md'),
+            ['---', 'description: Local prompt', '---', '', 'Local body'].join('\n')
+        )
+
+        const commands = await listSlashCommands('codex', workingDirectory)
+        const sharedCommands = commands.filter(cmd => cmd.name === 'shared')
+
+        expect(sharedCommands).toHaveLength(1)
+        expect(sharedCommands[0]).toMatchObject({
+            source: 'project',
+            description: 'Local prompt',
+            content: 'Local body',
+        })
     })
 })

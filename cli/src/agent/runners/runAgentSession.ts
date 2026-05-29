@@ -14,6 +14,8 @@ import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 import { PermissionModeSchema } from '@hapi/protocol/schemas';
 import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
+import type { SessionEndReason } from '@hapi/protocol';
 
 function emitReadyIfIdle(props: {
     queueSize: () => number;
@@ -50,9 +52,15 @@ export async function runAgentSession(opts: {
 
     const messageQueue = new MessageQueue2<Record<string, never>>(() => hashObject({}));
 
-    session.onUserMessage((message) => {
+    session.onUserMessage((message, localId) => {
         const formattedText = formatMessageWithAttachments(message.content.text, message.content.attachments);
-        messageQueue.push(formattedText, {});
+        messageQueue.push(formattedText, {}, localId);
+    });
+
+    session.onCancelQueuedMessage((localId) => {
+        const removed = messageQueue.cancelByLocalId(localId);
+        logger.debug(`[agent] cancelByLocalId(${localId}): ${removed ? 'removed' : 'not found (best-effort)'}`);
+        return removed;
     });
 
     let currentPermissionMode: SessionPermissionMode = opts.permissionMode ?? sessionInfo.permissionMode ?? 'default';
@@ -96,7 +104,7 @@ export async function runAgentSession(opts: {
         return parsed.data as SessionPermissionMode;
     };
 
-    session.rpcHandlerManager.registerHandler('set-session-config', async (payload: unknown) => {
+    session.rpcHandlerManager.registerHandler(RPC_METHODS.SetSessionConfig, async (payload: unknown) => {
         if (!payload || typeof payload !== 'object') {
             throw new Error('Invalid session config payload');
         }
@@ -131,7 +139,7 @@ export async function runAgentSession(opts: {
         }
     };
 
-    session.rpcHandlerManager.registerHandler('abort', async () => {
+    session.rpcHandlerManager.registerHandler(RPC_METHODS.Abort, async () => {
         await handleAbort();
     });
 
@@ -146,6 +154,7 @@ export async function runAgentSession(opts: {
 
     registerKillSessionHandler(session.rpcHandlerManager, handleKillSession);
 
+    let sessionEndReason: SessionEndReason = 'completed';
     try {
         while (!shouldExit) {
             waitAbortController = new AbortController();
@@ -191,10 +200,16 @@ export async function runAgentSession(opts: {
                 });
             }
         }
+        if (shouldExit) {
+            sessionEndReason = 'terminated';
+        }
+    } catch (error) {
+        sessionEndReason = 'error';
+        throw error;
     } finally {
         clearInterval(keepAliveInterval);
         await permissionAdapter.cancelAll('Session ended');
-        session.sendSessionDeath();
+        session.sendSessionDeath(sessionEndReason);
         await session.flush();
         session.close();
         await backend.disconnect();

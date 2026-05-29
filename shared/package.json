@@ -7,13 +7,20 @@
     "types": "./src/index.ts",
     "exports": {
         ".": "./src/index.ts",
+        "./apiTypes": "./src/apiTypes.ts",
         "./messages": "./src/messages.ts",
+        "./slashCommands": "./src/slashCommands.ts",
+        "./buildInfo": "./src/buildInfo.ts",
         "./modes": "./src/modes.ts",
+        "./rpcMethods": "./src/rpcMethods.ts",
         "./schemas": "./src/schemas.ts",
         "./types": "./src/types.ts",
         "./voice": "./src/voice.ts"
     },
     "sideEffects": false,
+    "scripts": {
+        "test": "bun test"
+    },
     "dependencies": {
         "zod": "^4.2.1"
     }

@@ -426,6 +426,131 @@ describe('MessageQueue2', () => {
         expect(batch3?.mode.type).toBe('A');
     });
 
+    it('should call onBatchConsumed with collected localIds', async () => {
+        const queue = new MessageQueue2<string>(mode => mode);
+        const received: string[][] = [];
+        queue.onBatchConsumed = (localIds) => { received.push(localIds); };
+
+        queue.push('message1', 'local', 'id1');
+        queue.push('message2', 'local', 'id2');
+
+        await queue.waitForMessagesAndGetAsString();
+        expect(received).toEqual([['id1', 'id2']]);
+
+        // Push more with a different mode and consume again
+        queue.push('message3', 'remote', 'id3');
+        await queue.waitForMessagesAndGetAsString();
+        expect(received).toEqual([['id1', 'id2'], ['id3']]);
+    });
+
+    it('should report localIds batch-by-batch when modes differ', async () => {
+        const queue = new MessageQueue2<string>(mode => mode);
+        const received: string[][] = [];
+        queue.onBatchConsumed = (localIds) => { received.push(localIds); };
+
+        // Two messages land in different batches because their mode hashes differ.
+        queue.push('first', 'A', 'id1');
+        queue.push('second', 'B', 'id2');
+
+        const batch1 = await queue.waitForMessagesAndGetAsString();
+        expect(batch1?.message).toBe('first');
+        expect(received).toEqual([['id1']]);
+        // Second message still waiting in the queue.
+        expect(queue.size()).toBe(1);
+
+        const batch2 = await queue.waitForMessagesAndGetAsString();
+        expect(batch2?.message).toBe('second');
+        expect(received).toEqual([['id1'], ['id2']]);
+        expect(queue.size()).toBe(0);
+    });
+
+    it('should skip onBatchConsumed when batch has no localIds', async () => {
+        const queue = new MessageQueue2<string>(mode => mode);
+        let called = false;
+        queue.onBatchConsumed = () => { called = true; };
+
+        // Push without localIds (e.g., internal commands that do not need UI ack)
+        queue.push('internal', 'local');
+        await queue.waitForMessagesAndGetAsString();
+        expect(called).toBe(false);
+    });
+
+    it('should not call onBatchConsumed when collectBatch returns null', async () => {
+        const queue = new MessageQueue2<string>(mode => mode);
+        let consumedCount = 0;
+        queue.onBatchConsumed = () => { consumedCount++; };
+
+        // Close queue while waiting — should return null
+        const waitPromise = queue.waitForMessagesAndGetAsString();
+        queue.close();
+        const result = await waitPromise;
+
+        expect(result).toBeNull();
+        expect(consumedCount).toBe(0);
+    });
+
+    describe('cancelByLocalId', () => {
+        it('should remove the message with matching localId and return true', () => {
+            const queue = new MessageQueue2<string>(mode => mode);
+            queue.push('msg1', 'local', 'id-abc');
+            queue.push('msg2', 'local', 'id-def');
+
+            const removed = queue.cancelByLocalId('id-abc');
+            expect(removed).toBe(true);
+            expect(queue.size()).toBe(1);
+            expect(queue.queue[0].localId).toBe('id-def');
+        });
+
+        it('should return false when localId is not found', () => {
+            const queue = new MessageQueue2<string>(mode => mode);
+            queue.push('msg1', 'local', 'id-abc');
+
+            const removed = queue.cancelByLocalId('id-nonexistent');
+            expect(removed).toBe(false);
+            expect(queue.size()).toBe(1);
+        });
+
+        it('should return false when queue is empty', () => {
+            const queue = new MessageQueue2<string>(mode => mode);
+            const removed = queue.cancelByLocalId('id-abc');
+            expect(removed).toBe(false);
+        });
+
+        it('should not remove a message without localId even if localId param matches empty string', () => {
+            const queue = new MessageQueue2<string>(mode => mode);
+            queue.push('msg-no-localid', 'local'); // no localId
+
+            const removed = queue.cancelByLocalId('');
+            expect(removed).toBe(false);
+            expect(queue.size()).toBe(1);
+        });
+
+        it('should only remove the first matching localId when duplicates exist', () => {
+            const queue = new MessageQueue2<string>(mode => mode);
+            queue.push('msg1', 'local', 'id-dup');
+            queue.push('msg2', 'local', 'id-dup');
+
+            const removed = queue.cancelByLocalId('id-dup');
+            expect(removed).toBe(true);
+            expect(queue.size()).toBe(1);
+            // msg2 still remains
+            expect(queue.queue[0].message).toBe('msg2');
+        });
+
+        it('should not affect messages without localId when cancelling by id', () => {
+            const queue = new MessageQueue2<string>(mode => mode);
+            queue.push('msg-no-id', 'local');
+            queue.push('msg-with-id', 'local', 'target-id');
+            queue.push('msg-no-id-2', 'local');
+
+            const removed = queue.cancelByLocalId('target-id');
+            expect(removed).toBe(true);
+            expect(queue.size()).toBe(2);
+            expect(queue.queue[0].message).toBe('msg-no-id');
+            expect(queue.queue[1].message).toBe('msg-no-id-2');
+        });
+    });
+
     it('should differentiate between pushImmediate and pushIsolateAndClear behavior', async () => {
         const queue = new MessageQueue2<{ type: string }>((mode) => mode.type);
         

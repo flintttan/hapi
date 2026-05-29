@@ -33,7 +33,8 @@ export const hubCommand: CommandDefinition = {
             if (port) {
                 process.env.WEBAPP_PORT = port
             }
-            await import('../../../hub/src/index')
+            const importHub = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<unknown>
+            await importHub('../../../hub/src/index')
         } catch (error) {
             console.error(chalk.red('Error:'), error instanceof Error ? error.message : 'Unknown error')
             if (process.env.DEBUG) {

@@ -1,32 +1,185 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { buildMachineMetadata, buildSessionMetadata } from './sessionFactory'
-import { readSettings } from '@/persistence'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Session } from '@/api/types'
 
-vi.mock('@/persistence', () => ({
-    readSettings: vi.fn(async () => ({})),
+const {
+    getSessionMock,
+    getOrCreateMachineMock,
+    sessionSyncClientMock,
+    notifyRunnerSessionStartedMock,
+    readSettingsMock
+} = vi.hoisted(() => ({
+    getSessionMock: vi.fn(),
+    getOrCreateMachineMock: vi.fn(),
+    sessionSyncClientMock: vi.fn(),
+    notifyRunnerSessionStartedMock: vi.fn(async () => ({})),
+    readSettingsMock: vi.fn()
 }))
 
-describe('buildSessionMetadata', () => {
-    const originalHostname = process.env.HAPI_HOSTNAME
-    const originalDisplayName = process.env.HAPI_MACHINE_DISPLAY_NAME
+vi.mock('@/api/api', () => ({
+    ApiClient: {
+        create: async () => ({
+            getSession: getSessionMock,
+            getOrCreateMachine: getOrCreateMachineMock,
+            sessionSyncClient: sessionSyncClientMock
+        })
+    }
+}))
 
-    afterEach(() => {
-        if (originalHostname === undefined) {
-            delete process.env.HAPI_HOSTNAME
-        } else {
-            process.env.HAPI_HOSTNAME = originalHostname
-        }
-        if (originalDisplayName === undefined) {
-            delete process.env.HAPI_MACHINE_DISPLAY_NAME
-        } else {
-            process.env.HAPI_MACHINE_DISPLAY_NAME = originalDisplayName
-        }
-        vi.mocked(readSettings).mockResolvedValue({})
+vi.mock('@/runner/controlClient', () => ({
+    notifyRunnerSessionStarted: notifyRunnerSessionStartedMock
+}))
+
+vi.mock('@/persistence', () => ({
+    readSettings: readSettingsMock
+}))
+
+vi.mock('@/configuration', () => ({
+    configuration: {
+        happyHomeDir: '/tmp/.hapi',
+        logsDir: '/tmp/.hapi/logs',
+        isRunnerProcess: false
+    }
+}))
+
+vi.mock('@/ui/logger', () => ({
+    logger: {
+        debug: vi.fn()
+    }
+}))
+
+import { bootstrapExistingSession, buildSessionMetadata } from './sessionFactory'
+
+function createSession(): Session {
+    return {
+        id: 'hapi-session-1',
+        namespace: 'default',
+        seq: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        active: false,
+        activeAt: 1,
+        metadata: {
+            path: '/tmp/project',
+            host: 'localhost',
+            machineId: 'machine-1',
+            flavor: 'codex',
+            codexSessionId: 'codex-thread-1'
+        },
+        metadataVersion: 1,
+        agentState: { controlledByUser: false },
+        agentStateVersion: 1,
+        thinking: false,
+        thinkingAt: 1,
+        todos: [],
+        model: null,
+        modelReasoningEffort: null,
+        effort: null,
+        permissionMode: undefined,
+        collaborationMode: undefined
+    }
+}
+
+describe('bootstrapExistingSession', () => {
+    beforeEach(() => {
+        getSessionMock.mockReset()
+        getOrCreateMachineMock.mockReset()
+        sessionSyncClientMock.mockReset()
+        notifyRunnerSessionStartedMock.mockClear()
+        readSettingsMock.mockReset()
     })
 
-    it('uses HAPI_HOSTNAME for session metadata host when provided', () => {
-        process.env.HAPI_HOSTNAME = 'custom-session-host'
+    it('loads an existing HAPI session and reports it to the runner', async () => {
+        const session = createSession()
+        const sessionClient = {
+            updateMetadata: vi.fn()
+        }
+        getSessionMock.mockResolvedValue(session)
+        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue(sessionClient)
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
 
+        const result = await bootstrapExistingSession({
+            sessionId: 'hapi-session-1',
+            flavor: 'codex',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(result.sessionInfo.id).toBe('hapi-session-1')
+        expect(result.workingDirectory).toBe('/tmp/project')
+        expect(sessionSyncClientMock).toHaveBeenCalledWith(session)
+        expect(sessionClient.updateMetadata).toHaveBeenCalledOnce()
+        expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
+            'hapi-session-1',
+            expect.objectContaining({
+                path: '/tmp/project',
+                flavor: 'codex',
+                startedBy: 'terminal',
+                startedFromRunner: false,
+                machineId: 'machine-1'
+            })
+        )
+    })
+
+    it('preserves existing native resume metadata when reactivating a session', async () => {
+        const session = createSession()
+        const existingMetadata = session.metadata
+        if (!existingMetadata) throw new Error('expected test session metadata')
+
+        session.metadata = {
+            ...existingMetadata,
+            claudeSessionId: 'claude-thread-1',
+            codexSessionId: 'codex-thread-1',
+            geminiSessionId: 'gemini-thread-1',
+            opencodeSessionId: 'opencode-thread-1',
+            cursorSessionId: 'cursor-thread-1',
+            summary: {
+                text: 'resume me',
+                updatedAt: 100
+            },
+            tools: ['read_file'],
+            slashCommands: ['/compact']
+        }
+        const sessionClient = {
+            updateMetadata: vi.fn()
+        }
+        getSessionMock.mockResolvedValue(session)
+        getOrCreateMachineMock.mockResolvedValue({ id: 'machine-1' })
+        sessionSyncClientMock.mockReturnValue(sessionClient)
+        readSettingsMock.mockResolvedValue({ machineId: 'machine-1' })
+
+        const result = await bootstrapExistingSession({
+            sessionId: 'hapi-session-1',
+            flavor: 'codex',
+            workingDirectory: '/tmp/project'
+        })
+
+        expect(result.metadata).toEqual(expect.objectContaining({
+            claudeSessionId: 'claude-thread-1',
+            codexSessionId: 'codex-thread-1',
+            geminiSessionId: 'gemini-thread-1',
+            opencodeSessionId: 'opencode-thread-1',
+            cursorSessionId: 'cursor-thread-1',
+            summary: {
+                text: 'resume me',
+                updatedAt: 100
+            },
+            tools: ['read_file'],
+            slashCommands: ['/compact']
+        }))
+        expect(sessionClient.updateMetadata).toHaveBeenCalledOnce()
+        const updateHandler = sessionClient.updateMetadata.mock.calls[0][0]
+        expect(updateHandler(session.metadata)).toEqual(expect.objectContaining({
+            codexSessionId: 'codex-thread-1'
+        }))
+        expect(notifyRunnerSessionStartedMock).toHaveBeenCalledWith(
+            'hapi-session-1',
+            expect.objectContaining({
+                codexSessionId: 'codex-thread-1'
+            })
+        )
+    })
+
+    it('advertises remote terminal capability in session metadata', () => {
         const metadata = buildSessionMetadata({
             flavor: 'codex',
             startedBy: 'terminal',
@@ -35,24 +188,6 @@ describe('buildSessionMetadata', () => {
             now: 123
         })
 
-        expect(metadata.host).toBe('custom-session-host')
-    })
-
-    it('uses custom machine displayName without overriding real host', async () => {
-        process.env.HAPI_HOSTNAME = 'real-host'
-        process.env.HAPI_MACHINE_DISPLAY_NAME = 'Desk Mac'
-
-        const metadata = await buildMachineMetadata()
-
-        expect(metadata.host).toBe('real-host')
-        expect(metadata.displayName).toBe('Desk Mac')
-    })
-
-    it('reads machine displayName from persisted settings', async () => {
-        vi.mocked(readSettings).mockResolvedValue({ machineDisplayName: 'Lab Mini' })
-
-        const metadata = await buildMachineMetadata()
-
-        expect(metadata.displayName).toBe('Lab Mini')
+        expect(metadata.capabilities?.terminal).toBe(true)
     })
 })

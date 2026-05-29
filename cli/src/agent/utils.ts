@@ -19,6 +19,7 @@ export function deriveToolNameWithSource(input: {
     title?: string | null;
     kind?: string | null;
     rawInput?: unknown;
+    metaKind?: string | null;
 }): { name: string; source: ToolNameSource } {
     const title = normalizeToolName(input.title);
     if (title) {
@@ -37,6 +38,21 @@ export function deriveToolNameWithSource(input: {
         }
     }
 
+    // ACP agents (Gemini, Kimi) use kind=edit/write/replace with _meta.kind to
+    // distinguish write_file (add) from replace (modify). Normalise the kind
+    // so aliases like 'write', 'replace', 'modify' are handled the same way.
+    const normalizedKind = typeof input.kind === 'string'
+        ? input.kind.toLowerCase().trim()
+        : null;
+    if (normalizedKind === 'edit' || normalizedKind === 'write' || normalizedKind === 'write_file' || normalizedKind === 'replace' || normalizedKind === 'modify' || normalizedKind === 'file_edit') {
+        if (input.metaKind === 'add') {
+            return { name: 'Write', source: 'kind' };
+        }
+        if (input.metaKind === 'modify') {
+            return { name: 'Edit', source: 'kind' };
+        }
+    }
+
     const kind = normalizeToolName(input.kind);
     if (kind && !isPlaceholderToolName(kind)) {
         return { name: kind, source: 'kind' };
@@ -49,6 +65,7 @@ export function deriveToolName(input: {
     title?: string | null;
     kind?: string | null;
     rawInput?: unknown;
+    metaKind?: string | null;
 }): string {
     return deriveToolNameWithSource(input).name;
 }

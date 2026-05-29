@@ -10,6 +10,7 @@ import { AsyncLock } from '@/utils/lock'
 import type { RawJSONLines } from '@/claude/types'
 import { configuration } from '@/configuration'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from "@hapi/protocol"
+import type { SessionEndReason } from '@hapi/protocol'
 import type { ClientToServerEvents, ServerToClientEvents, Update } from '@hapi/protocol'
 import {
     TerminalClosePayloadSchema,
@@ -47,6 +48,28 @@ const SYSTEM_INJECTION_PREFIXES = [
     '<system-reminder>',
 ]
 
+function extractRawUserTextContent(content: unknown): string | null {
+    if (typeof content === 'string') {
+        return content
+    }
+
+    if (!Array.isArray(content)) {
+        return null
+    }
+
+    const parts = content
+        .map((block) => {
+            if (!block || typeof block !== 'object' || Array.isArray(block)) return null
+            const record = block as Record<string, unknown>
+            return record.type === 'text' && typeof record.text === 'string'
+                ? record.text
+                : null
+        })
+        .filter((text): text is string => text !== null)
+
+    return parts.length > 0 ? parts.join('\n') : null
+}
+
 /**
  * Returns true if a JSONL message should be classified as a user-role message
  * (i.e., text typed by a real human) rather than an agent-role message.
@@ -57,17 +80,76 @@ const SYSTEM_INJECTION_PREFIXES = [
  * genuine user messages, so the only reliable signal is the message content
  * itself: injected messages always start with a well-known XML tag.
  */
-export function isExternalUserMessage(body: RawJSONLines): body is Extract<RawJSONLines, { type: 'user' }> & { message: { content: string } } {
+export function isExternalUserMessage(body: RawJSONLines): body is Extract<RawJSONLines, { type: 'user' }> {
     if (body.type !== 'user') return false
-    if (typeof body.message.content !== 'string') return false
+    const text = extractRawUserTextContent(body.message.content)
+    if (text === null) return false
     if (body.isSidechain === true) return false
     if (body.isMeta === true) return false
 
-    const trimmed = body.message.content.trimStart()
+    const trimmed = text.trimStart()
     for (const prefix of SYSTEM_INJECTION_PREFIXES) {
         if (trimmed.startsWith(prefix)) return false
     }
     return true
+}
+
+/**
+ * Dedup filter for messages arriving on the realtime socket and via reconnect
+ * backfill.  Keyed by message id (with a bounded LRU) and falls back to the
+ * legacy seq cursor for messages that lack an id.
+ *
+ * Why id-first: scheduled messages keep the seq assigned at insertion time, so
+ * a row scheduled for T+1h (seq=10) can be released after a later immediate
+ * message (seq=11) has already advanced the cursor.  A pure seq <= cursor
+ * filter would silently drop the mature emit.  See HAPI Bot R3 finding #1.
+ */
+export class IncomingMessageFilter {
+    private readonly seenIds = new Set<string>()
+    private readonly capacity: number
+    private lastSeenSeq: number | null = null
+
+    constructor(capacity = 256) {
+        this.capacity = capacity
+    }
+
+    cursorSeq(): number | null {
+        return this.lastSeenSeq
+    }
+
+    /** Returns true if this message should be processed; false to drop as a duplicate. */
+    accept(message: { id?: string | null; seq?: number | null }): boolean {
+        const id = typeof message.id === 'string' && message.id.length > 0 ? message.id : null
+        if (id && this.seenIds.has(id)) {
+            // Refresh recency: the hub re-emits the same id every 5 s until the
+            // CLI acks (releaseMatureScheduledMessages contract).  Without a
+            // delete+re-add the entry stays at its first-insert position and can
+            // be evicted by a burst of unrelated ids before the ack lands —
+            // the next re-emit would then be treated as new and double-deliver.
+            this.seenIds.delete(id)
+            this.seenIds.add(id)
+            return false
+        }
+
+        const seq = typeof message.seq === 'number' ? message.seq : null
+        if (!id && seq !== null && this.lastSeenSeq !== null && seq <= this.lastSeenSeq) {
+            return false
+        }
+
+        if (id) {
+            this.seenIds.add(id)
+            if (this.seenIds.size > this.capacity) {
+                // Set iteration is insertion-ordered; with delete+re-add on dedup hit
+                // (above) this becomes a true LRU eviction.
+                const oldest = this.seenIds.values().next().value
+                if (oldest !== undefined) this.seenIds.delete(oldest)
+            }
+        }
+        if (seq !== null) {
+            this.lastSeenSeq = Math.max(this.lastSeenSeq ?? 0, seq)
+        }
+        return true
+    }
 }
 
 export class ApiSessionClient extends EventEmitter {
@@ -78,9 +160,10 @@ export class ApiSessionClient extends EventEmitter {
     private agentState: AgentState | null
     private agentStateVersion: number
     private readonly socket: Socket<ServerToClientEvents, ClientToServerEvents>
-    private pendingMessages: UserMessage[] = []
-    private pendingMessageCallback: ((message: UserMessage) => void) | null = null
-    private lastSeenMessageSeq: number | null = null
+    private pendingMessages: { message: UserMessage; localId?: string }[] = []
+    private pendingMessageCallback: ((message: UserMessage, localId?: string) => void) | null = null
+    private cancelQueuedMessageCallback: ((localId: string) => boolean) | null = null
+    private readonly incomingFilter = new IncomingMessageFilter()
     private backfillInFlight: Promise<void> | null = null
     private needsBackfill = false
     private hasConnectedOnce = false
@@ -199,12 +282,20 @@ export class ApiSessionClient extends EventEmitter {
             this.terminalManager.close(payload.terminalId)
         }))
 
-        this.socket.on('update', (data: Update) => {
+        this.socket.on('update', (data: Update, ack?: (response: { removed: boolean }) => void) => {
             try {
                 if (!data.body) return
 
                 if (data.body.t === 'new-message') {
                     this.handleIncomingMessage(data.body.message)
+                    return
+                }
+
+                if (data.body.t === 'cancel-queued-message') {
+                    const removed = (data.body.localId && this.cancelQueuedMessageCallback)
+                        ? this.cancelQueuedMessageCallback(data.body.localId)
+                        : false
+                    ack?.({ removed })
                     return
                 }
 
@@ -244,33 +335,34 @@ export class ApiSessionClient extends EventEmitter {
         this.socket.connect()
     }
 
-    onUserMessage(callback: (data: UserMessage) => void): void {
+    onUserMessage(callback: (data: UserMessage, localId?: string) => void): void {
         this.pendingMessageCallback = callback
         while (this.pendingMessages.length > 0) {
-            callback(this.pendingMessages.shift()!)
+            const pending = this.pendingMessages.shift()!
+            callback(pending.message, pending.localId)
         }
     }
 
-    private enqueueUserMessage(message: UserMessage): void {
+    onCancelQueuedMessage(callback: (localId: string) => boolean): void {
+        this.cancelQueuedMessageCallback = callback
+    }
+
+    private enqueueUserMessage(message: UserMessage, localId?: string): void {
         if (this.pendingMessageCallback) {
-            this.pendingMessageCallback(message)
+            this.pendingMessageCallback(message, localId)
         } else {
-            this.pendingMessages.push(message)
+            this.pendingMessages.push({ message, localId })
         }
     }
 
-    private handleIncomingMessage(message: { seq?: number; content: unknown }): void {
-        const seq = typeof message.seq === 'number' ? message.seq : null
-        if (seq !== null) {
-            if (this.lastSeenMessageSeq !== null && seq <= this.lastSeenMessageSeq) {
-                return
-            }
-            this.lastSeenMessageSeq = seq
+    private handleIncomingMessage(message: { id?: string; seq?: number; localId?: string | null; content: unknown }): void {
+        if (!this.incomingFilter.accept({ id: message.id, seq: message.seq })) {
+            return
         }
 
         const userResult = UserMessageSchema.safeParse(message.content)
         if (userResult.success) {
-            this.enqueueUserMessage(userResult.data)
+            this.enqueueUserMessage(userResult.data, message.localId ?? undefined)
             return
         }
 
@@ -296,7 +388,7 @@ export class ApiSessionClient extends EventEmitter {
             return
         }
 
-        const startSeq = this.lastSeenMessageSeq
+        const startSeq = this.incomingFilter.cursorSeq()
         if (startSeq === null) {
             logger.debug('[API] Skipping backfill because no last-seen message sequence is available')
             return
@@ -338,7 +430,7 @@ export class ApiSessionClient extends EventEmitter {
                     this.handleIncomingMessage(message)
                 }
 
-                const observedSeq = this.lastSeenMessageSeq ?? maxSeq
+                const observedSeq = this.incomingFilter.cursorSeq() ?? maxSeq
                 const nextCursor = Math.max(maxSeq, observedSeq)
                 if (nextCursor <= cursor) {
                     logger.debug('[API] Backfill stopped due to non-advancing cursor', {
@@ -371,7 +463,7 @@ export class ApiSessionClient extends EventEmitter {
                 role: 'user',
                 content: {
                     type: 'text',
-                    text: body.message.content
+                    text: extractRawUserTextContent(body.message.content) ?? ''
                 },
                 meta: {
                     sentFrom: 'cli'
@@ -493,9 +585,14 @@ export class ApiSessionClient extends EventEmitter {
         })
     }
 
-    sendSessionDeath(): void {
+    emitMessagesConsumed(localIds: string[]): void {
+        if (localIds.length === 0) return
+        this.socket.emit('messages-consumed', { sid: this.sessionId, localIds })
+    }
+
+    sendSessionDeath(reason?: SessionEndReason): void {
         void cleanupUploadDir(this.sessionId)
-        this.socket.emit('session-end', { sid: this.sessionId, time: Date.now() })
+        this.socket.emit('session-end', { sid: this.sessionId, time: Date.now(), reason })
     }
 
     updateMetadata(handler: (metadata: Metadata) => Metadata): void {

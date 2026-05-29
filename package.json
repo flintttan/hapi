@@ -5,8 +5,8 @@
     "scripts": {
         "build:site": "bun run --cwd website build && bun run --cwd docs docs:build && cp -r docs/.vitepress/dist website/dist/public/docs",
         "dev": "concurrently \"bun run dev:hub\" \"bun run dev:web\" --kill-others-on-exit",
-        "build": "bun run build:cli && bun run build:hub && bun run build:web",
-        "build:cli": "cd cli && bun run build",
+        "build": "bun run build:cli && bun run build:web && (cd hub && bun run generate:embedded-web-assets) && bun run build:hub",
+        "build:cli": "bun run typecheck:cli",
         "build:single-exe": "bun run download:tunwg && bun run build:web && (cd hub && bun run generate:embedded-web-assets) && (cd cli && bun run build:exe:allinone)",
         "build:single-exe:all": "bun run download:tunwg && bun run build:web && (cd hub && bun run generate:embedded-web-assets) && (cd cli && bun run build:exe:allinone:all)",
         "download:tunwg": "bun run hub/scripts/download-tunwg.ts",
@@ -18,10 +18,11 @@
         "typecheck:cli": "cd cli && bun run typecheck",
         "typecheck:hub": "cd hub && bun run typecheck",
         "typecheck:web": "cd web && bun run typecheck",
-        "test": "bun run test:cli && bun run test:hub && bun run test:web",
+        "test": "bun run test:cli && bun run test:hub && bun run test:web && bun run test:shared",
         "test:cli": "cd cli && bun run test",
         "test:hub": "cd hub && bun run test",
         "test:web": "cd web && bun run test",
+        "test:shared": "cd shared && bun run test",
         "clean-session": "bun run hub/scripts/cleanup-sessions.ts",
         "bump-version": "bun scripts/bump-version.ts",
         "sync-version": "bun scripts/sync-version.ts",
@@ -29,6 +30,7 @@
     },
     "devDependencies": {
         "concurrently": "^9.2.1",
+        "playwright": "1.49.1",
         "react-devtools-core": "^7.0.1",
         "vite-plugin-pwa": "^1.2.0"
     }

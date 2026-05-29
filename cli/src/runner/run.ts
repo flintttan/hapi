@@ -11,7 +11,6 @@ import { configuration } from '@/configuration';
 import packageJson from '../../package.json';
 import { getEnvironmentInfo } from '@/ui/doctor';
 import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
-import { isBunCompiled, projectPath } from '@/projectPath';
 import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
 import { isProcessAlive, isWindows, killProcess, killProcessByChildProcess } from '@/utils/process';
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
@@ -23,9 +22,10 @@ import { startRunnerControlServer } from './controlServer';
 import { createWorktree, removeWorktree, type WorktreeInfo } from './worktree';
 import { join } from 'path';
 import { buildMachineMetadata } from '@/agent/sessionFactory';
+import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken } from './runnerIdentity';
 
-export async function startRunner(): Promise<void> {
+export async function startRunner(options: { workspaceRoots?: string[] } = {}): Promise<void> {
   // We don't have cleanup function at the time of server construction
   // Control flow is:
   // 1. Create promise that will resolve when shutdown is requested
@@ -129,6 +129,18 @@ export async function startRunner(): Promise<void> {
     // Setup state - key by PID
     const pidToTrackedSession = new Map<number, TrackedSession>();
 
+    // Webhook timeout tolerance. Opus 1M + --resume can legitimately take
+    // longer than the default 15s to reach the "Session started" webhook
+    // (observed real-world durations of 30s – 60min under rate-limit /
+    // heavy session restore). Allow advanced users to raise this ceiling
+    // so that slow starts no longer leave orphaned child processes which
+    // later report back as ghost sessions.
+    const envWebhookTimeout = Number(process.env.HAPI_RUNNER_WEBHOOK_TIMEOUT_MS);
+    const webhookTimeoutMs =
+      Number.isFinite(envWebhookTimeout) && envWebhookTimeout > 0
+        ? envWebhookTimeout
+        : 15_000;
+
     // Session spawning awaiter system
     const pidToAwaiter = new Map<number, (session: TrackedSession) => void>();
     const pidToErrorAwaiter = new Map<number, (errorMessage: string) => void>();
@@ -180,7 +192,32 @@ export async function startRunner(): Promise<void> {
           logger.debug(`[RUNNER RUN] Resolved session awaiter for PID ${pid}`);
         }
       } else if (!existingSession) {
-        // New session started externally
+        // No tracked session for this PID. Two possibilities:
+        //  1. The child was spawned externally from a terminal (legitimate).
+        //  2. The child was runner-spawned but already had its tracking
+        //     entry removed because its webhook arrived after the timeout
+        //     (orphaned / ghost-session case).
+        //
+        // Differentiate via the webhook's own `startedBy` field: genuine
+        // terminal-launched children report `startedBy: 'terminal'`, so
+        // anything claiming `'runner'` here must be the second case and
+        // should be ignored + terminated instead of silently promoted.
+        if (sessionMetadata.startedBy === 'runner') {
+          logger.debug(
+            `[RUNNER RUN] Ignoring late webhook from orphaned runner-spawned PID ${pid} (session ${sessionId}). Terminating child.`
+          );
+          // Use killProcess (SIGTERM → SIGKILL escalation) rather than a
+          // bare process.kill() so the orphan is reliably reaped even if
+          // it ignores SIGTERM.  We don't have a ChildProcess reference
+          // here (tracking entry was already removed by the timeout
+          // handler), so tree-kill via killProcessByChildProcess is not
+          // available — but the timeout handler should have already
+          // tree-killed the process group; this is defence-in-depth.
+          void killProcess(pid);
+          return;
+        }
+
+        // New session started externally (terminal)
         const trackedSession: TrackedSession = {
           startedBy: 'hapi directly - likely by user from terminal',
           happySessionId: sessionId,
@@ -341,11 +378,6 @@ export async function startRunner(): Promise<void> {
           };
         }
 
-        extraEnv = {
-          ...extraEnv,
-          HAPI_SESSION_CWD: spawnDirectory
-        };
-
         const args = buildCliArgs(agent, options, yolo);
 
         // sessionId reserved for future use
@@ -367,11 +399,8 @@ export async function startRunner(): Promise<void> {
           logger.debug('[RUNNER RUN] Child stderr tail', trimmed);
         };
 
-        const cliProjectRoot = !isBunCompiled() ? projectPath() : null;
-        const processCwd = cliProjectRoot ?? spawnDirectory;
-
         happyProcess = spawnHappyCLI(args, {
-          cwd: processCwd,
+          cwd: spawnDirectory,
           detached: true,  // Sessions stay alive when runner stops
           stdio: ['ignore', 'pipe', 'pipe'],  // Capture stdout/stderr for debugging
           env: {
@@ -393,7 +422,7 @@ export async function startRunner(): Promise<void> {
         if (!happyProcess.pid) {
           // Allow the async 'error' event to fire before we read it
           await new Promise((resolve) => setImmediate(resolve));
-          const details = [`cwd=${processCwd}`, `sessionCwd=${spawnDirectory}`];
+          const details = [`cwd=${spawnDirectory}`];
           if (spawnErrorBeforePidCheck) {
             details.push(formatSpawnError(spawnErrorBeforePidCheck));
           }
@@ -486,19 +515,44 @@ export async function startRunner(): Promise<void> {
         logger.debug(`[RUNNER RUN] Waiting for session webhook for PID ${pid}`);
 
         const spawnResult = await new Promise<SpawnSessionResult>((resolve) => {
-          // Set timeout for webhook
+          // Set timeout for webhook. Default is 15s but can be raised via
+          // HAPI_RUNNER_WEBHOOK_TIMEOUT_MS for users on slow models
+          // (e.g. opus[1m] --resume).
           const timeout = setTimeout(() => {
             pidToAwaiter.delete(pid);
             pidToErrorAwaiter.delete(pid);
+
+            // Remove the tracked session entry so a late-arriving webhook
+            // from this orphaned PID cannot be silently promoted into a
+            // ghost session by onHappySessionWebhook().
+            pidToTrackedSession.delete(pid);
+
+            // Terminate the entire process tree (wrapper + agent
+            // grandchildren).  Using killProcessByChildProcess instead of
+            // a bare SIGTERM ensures that detached grandchild processes
+            // (the actual claude/codex agent) are also reaped, and that
+            // SIGTERM → SIGKILL escalation kicks in if needed.
+            if (happyProcess) {
+              void killProcessByChildProcess(happyProcess);
+            }
+
+            // If this was a worktree session, the worktree can only be
+            // safely removed after the child has actually exited (the
+            // child may still be writing to it).  Register a one-shot
+            // exit listener so cleanup happens once the tree-kill lands.
+            if (worktreeInfo && happyProcess) {
+              happyProcess.once('exit', () => {
+                void cleanupWorktree();
+              });
+            }
+
             logger.debug(`[RUNNER RUN] Session webhook timeout for PID ${pid}`);
             logStderrTail();
             resolve({
               type: 'error',
               errorMessage: buildWebhookFailureMessage('timeout')
             });
-            // 15 second timeout - I have seen timeouts on 10 seconds
-            // even though session was still created successfully in ~2 more seconds
-          }, 15_000);
+          }, webhookTimeoutMs);
 
           // Register awaiter
           pidToAwaiter.set(pid, (completedSession) => {
@@ -631,7 +685,10 @@ export async function startRunner(): Promise<void> {
     // Create API client
     const api = await ApiClient.create();
 
-    const machineMetadata = await buildMachineMetadata();
+    const workspaceRoots = resolveWorkspaceRoots(options.workspaceRoots);
+    logger.debug(`[RUNNER RUN] Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set)'}`);
+
+    const machineMetadata = await buildMachineMetadata({ workspaceRoots });
 
     // Get or create machine (with retry for transient connection errors)
     const machine = await withRetry(
@@ -654,7 +711,7 @@ export async function startRunner(): Promise<void> {
     logger.debug(`[RUNNER RUN] Machine registered: ${machine.id}`);
 
     // Create realtime machine session
-    const apiMachine = api.machineSyncClient(machine);
+    const apiMachine = api.machineSyncClient(machine, { workspaceRoots });
 
     // Set RPC handlers
     apiMachine.setRPCHandlers({
@@ -665,6 +722,17 @@ export async function startRunner(): Promise<void> {
 
     // Connect to server
     apiMachine.connect();
+
+    // Visible startup banner. Use console.log so it always appears on stdout,
+    // regardless of the verbose/quiet logger setting.
+    console.log('');
+    console.log('Hapi runner started.');
+    console.log(`  Workspace roots: ${workspaceRoots?.join(', ') ?? '(not set — browse disabled; pass --workspace-root to enable)'}`);
+    console.log(`  Hub URL:        ${configuration.apiUrl}`);
+    console.log(`  Machine ID:     ${machine.id}`);
+    console.log(`  Control port:   ${controlPort}`);
+    console.log('Waiting for sessions. Press Ctrl+C to stop.');
+    console.log('');
 
     reportSpawnOutcomeToHub = (outcome) => {
       void apiMachine.updateRunnerState((state: RunnerState | null) => {
@@ -845,9 +913,11 @@ export function buildCliArgs(
       ? 'cursor'
       : agent === 'gemini'
         ? 'gemini'
-        : agent === 'opencode'
-          ? 'opencode'
-          : 'claude';
+        : agent === 'kimi'
+          ? 'kimi'
+          : agent === 'opencode'
+            ? 'opencode'
+            : 'claude';
   const args = [agentCommand];
   if (options.resumeSessionId) {
     if (agent === 'codex') {
@@ -859,13 +929,13 @@ export function buildCliArgs(
     }
   }
   args.push('--hapi-starting-mode', 'remote', '--started-by', 'runner');
-  if (options.model && agent !== 'opencode') {
+  if (options.model) {
     args.push('--model', options.model);
   }
   if (options.effort && agent === 'claude') {
     args.push('--effort', options.effort);
   }
-  if (options.modelReasoningEffort && agent === 'codex') {
+  if (options.modelReasoningEffort && (agent === 'codex' || agent === 'opencode')) {
     args.push('--model-reasoning-effort', options.modelReasoningEffort);
   }
   if (options.permissionMode && (PERMISSION_MODES as readonly string[]).includes(options.permissionMode)) {

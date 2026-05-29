@@ -10,6 +10,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const rootDir = join(__dirname, '..');
 const versionFile = join(rootDir, 'version.json');
+const buildInfoFile = join(rootDir, 'shared', 'src', 'buildInfo.ts');
 
 // Read central version
 const { version } = JSON.parse(readFileSync(versionFile, 'utf-8'));
@@ -53,3 +54,17 @@ for (const pkgPath of packages) {
 }
 
 console.log(`\n✓ Successfully updated ${updateCount} package.json files to version ${version}`);
+
+const buildInfoContent = readFileSync(buildInfoFile, 'utf-8');
+const updatedBuildInfoContent = buildInfoContent.replace(
+  /export const APP_VERSION = ['"][^'"]+['"]/,
+  `export const APP_VERSION = '${version}'`,
+);
+
+if (updatedBuildInfoContent === buildInfoContent) {
+  console.error(`✗ Failed to update ${buildInfoFile}: APP_VERSION not found`);
+  process.exit(1);
+}
+
+writeFileSync(buildInfoFile, updatedBuildInfoContent);
+console.log(`✓ Updated shared/src/buildInfo.ts → ${version}`);

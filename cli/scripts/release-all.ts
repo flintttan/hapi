@@ -5,7 +5,7 @@
  * 2. Build binaries (with embedded web assets)
  * 3. Publish platform packages first (so lockfile can resolve them)
  * 4. Publish main package
- * 5. bun install (to get complete lockfile with published packages)
+ * 5. bun install --lockfile-only --os=* --cpu=* (to lock all platform packages)
  * 6. Git commit + tag + push
  */
 
@@ -16,6 +16,7 @@ import { join } from 'node:path';
 const scriptDir = import.meta.dir;
 const projectRoot = join(scriptDir, '..');
 const repoRoot = join(projectRoot, '..');
+const buildInfoPath = join(repoRoot, 'shared', 'src', 'buildInfo.ts');
 
 // 解析参数
 const args = process.argv.slice(2);
@@ -38,6 +39,22 @@ function run(cmd: string, cwd = projectRoot): void {
     console.log(`\n$ ${cmd}`);
     if (!dryRun) {
         execSync(cmd, { cwd, stdio: 'inherit' });
+    }
+}
+
+function updateBuildInfoVersion(nextVersion: string): void {
+    const content = readFileSync(buildInfoPath, 'utf-8');
+    const updated = content.replace(
+        /export const APP_VERSION = ['"][^'"]+['"]/,
+        `export const APP_VERSION = '${nextVersion}'`
+    );
+
+    if (updated === content) {
+        throw new Error(`Could not update APP_VERSION in ${buildInfoPath}`);
+    }
+
+    if (!dryRun) {
+        writeFileSync(buildInfoPath, updated);
     }
 }
 
@@ -93,6 +110,7 @@ async function main(): Promise<void> {
     if (!dryRun) {
         writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
     }
+    updateBuildInfoVersion(version);
     console.log(`   ${oldVersion} → ${version}`);
 
     // Step 2: Build all platform binaries (with embedded web assets)
@@ -124,9 +142,9 @@ async function main(): Promise<void> {
     }
 
     // Step 5: bun install to get complete lockfile
-    console.log('\n📥 Step 5: Updating lockfile...');
+    console.log('\n📥 Step 5: Updating lockfile for all platform packages...');
 
-    await runWithTimeoutRetry('bun install', repoRoot);
+    await runWithTimeoutRetry('bun install --lockfile-only --os=* --cpu=*', repoRoot);
     // Step 6: Git commit + tag + push
     console.log('\n📝 Step 6: Creating git commit and tag...');
     run(`git add .`, repoRoot);

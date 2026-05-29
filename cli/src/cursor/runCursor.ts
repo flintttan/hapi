@@ -5,10 +5,10 @@ import { hashObject } from '@/utils/deterministicJson';
 import { registerKillSessionHandler } from '@/claude/registerKillSessionHandler';
 import type { AgentState } from '@/api/types';
 import type { CursorSession } from './session';
-import { bootstrapSession } from '@/agent/sessionFactory';
+import { bootstrapExistingSession, bootstrapSession } from '@/agent/sessionFactory';
+import { registerLocalHandoffHandler } from '@/agent/localHandoff';
 import { createModeChangeHandler, createRunnerLifecycle, setControlledByUser } from '@/agent/runnerLifecycle';
-import { isPermissionModeAllowedForFlavor } from '@hapi/protocol';
-import { PermissionModeSchema } from '@hapi/protocol/schemas';
+import { registerSessionConfigRpc } from '@/agent/sessionConfigRpc';
 import { formatMessageWithAttachments } from '@/utils/attachmentFormatter';
 import { getInvokedCwd } from '@/utils/invokedCwd';
 
@@ -26,8 +26,10 @@ export async function runCursor(opts: {
     permissionMode?: PermissionMode;
     resumeSessionId?: string;
     model?: string;
+    existingSessionId?: string;
+    workingDirectory?: string;
 }): Promise<void> {
-    const workingDirectory = getInvokedCwd();
+    const workingDirectory = opts.workingDirectory ?? getInvokedCwd();
     const startedBy = opts.startedBy ?? 'terminal';
 
     logger.debug(`[cursor] Starting with options: startedBy=${startedBy}`);
@@ -35,13 +37,21 @@ export async function runCursor(opts: {
     const state: AgentState = {
         controlledByUser: false
     };
-    const { api, session } = await bootstrapSession({
-        flavor: 'cursor',
-        startedBy,
-        workingDirectory,
-        agentState: state,
-        model: opts.model
-    });
+    const bootstrap = opts.existingSessionId
+        ? await bootstrapExistingSession({
+            sessionId: opts.existingSessionId,
+            flavor: 'cursor',
+            startedBy,
+            workingDirectory
+        })
+        : await bootstrapSession({
+            flavor: 'cursor',
+            startedBy,
+            workingDirectory,
+            agentState: state,
+            model: opts.model
+        });
+    const { api, session } = bootstrap;
 
     const startingMode: 'local' | 'remote' = startedBy === 'runner' ? 'remote' : 'local';
 
@@ -57,7 +67,7 @@ export async function runCursor(opts: {
     const sessionWrapperRef: { current: CursorSession | null } = { current: null };
 
     let currentPermissionMode: PermissionMode = opts.permissionMode ?? 'default';
-    const currentModel = opts.model;
+    let currentModel = opts.model;
 
     const lifecycle = createRunnerLifecycle({
         session,
@@ -67,6 +77,7 @@ export async function runCursor(opts: {
 
     lifecycle.registerProcessHandlers();
     registerKillSessionHandler(session.rpcHandlerManager, lifecycle.cleanupAndExit);
+    registerLocalHandoffHandler(session.rpcHandlerManager, lifecycle);
 
     const syncSessionMode = () => {
         const sessionInstance = sessionWrapperRef.current;
@@ -74,39 +85,43 @@ export async function runCursor(opts: {
             return;
         }
         sessionInstance.setPermissionMode(currentPermissionMode);
-        logger.debug(`[cursor] Synced session permission mode: ${currentPermissionMode}`);
+        sessionInstance.setModel(currentModel);
+        sessionInstance.pushKeepAlive();
+        logger.debug(`[cursor] Synced session mode: permissionMode=${currentPermissionMode}, model=${currentModel}`);
     };
 
-    session.onUserMessage((message) => {
+    session.onUserMessage((message, localId) => {
         const enhancedMode: EnhancedMode = {
             permissionMode: currentPermissionMode ?? 'default',
             model: currentModel
         };
         const formattedText = formatMessageWithAttachments(message.content.text, message.content.attachments);
-        messageQueue.push(formattedText, enhancedMode);
+        messageQueue.push(formattedText, enhancedMode, localId);
     });
 
-    const resolvePermissionMode = (value: unknown): PermissionMode => {
-        const parsed = PermissionModeSchema.safeParse(value);
-        if (!parsed.success || !isPermissionModeAllowedForFlavor(parsed.data, 'cursor')) {
-            throw new Error('Invalid permission mode');
-        }
-        return parsed.data as PermissionMode;
-    };
-
-    session.rpcHandlerManager.registerHandler('set-session-config', async (payload: unknown) => {
-        if (!payload || typeof payload !== 'object') {
-            throw new Error('Invalid session config payload');
-        }
-        const config = payload as { permissionMode?: unknown };
-
-        if (config.permissionMode !== undefined) {
-            currentPermissionMode = resolvePermissionMode(config.permissionMode);
-        }
-
-        syncSessionMode();
-        return { applied: { permissionMode: currentPermissionMode } };
+    session.onCancelQueuedMessage((localId) => {
+        const removed = messageQueue.cancelByLocalId(localId);
+        logger.debug(`[cursor] cancelByLocalId(${localId}): ${removed ? 'removed' : 'not found (best-effort)'}`);
+        return removed;
     });
+
+    registerSessionConfigRpc<PermissionMode>({
+        rpcHandlerManager: session.rpcHandlerManager,
+        flavor: 'cursor',
+        modelMode: 'nullable',
+        appliedFallback: () => ({ permissionMode: currentPermissionMode }),
+        onApply: (config) => {
+            if (config.permissionMode !== undefined) {
+                currentPermissionMode = config.permissionMode;
+            }
+            if (config.model !== undefined) {
+                currentModel = config.model ?? undefined;
+            }
+        },
+        onAfterApply: syncSessionMode
+    });
+
+    let crashed = false;
 
     try {
         await loop({
@@ -127,6 +142,7 @@ export async function runCursor(opts: {
             }
         });
     } catch (error) {
+        crashed = true;
         lifecycle.markCrash(error);
         logger.debug('[cursor] Loop error:', error);
     } finally {
@@ -134,6 +150,9 @@ export async function runCursor(opts: {
         if (localFailure?.exitReason === 'exit') {
             lifecycle.setExitCode(1);
             lifecycle.setArchiveReason(`Local launch failed: ${formatFailureReason(localFailure.message)}`);
+            lifecycle.setSessionEndReason('error');
+        } else if (!crashed) {
+            lifecycle.setSessionEndReason('completed');
         }
         await lifecycle.cleanupAndExit();
     }

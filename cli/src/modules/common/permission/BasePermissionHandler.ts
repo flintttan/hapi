@@ -1,5 +1,6 @@
 import type { AgentState } from "@/api/types";
 import type { PermissionMode } from "@hapi/protocol/types";
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 
 type RpcHandlerManagerLike = {
     registerHandler<TRequest = unknown, TResponse = unknown>(
@@ -204,7 +205,7 @@ export abstract class BasePermissionHandler<TResponse extends { id: string }, TR
     }
 
     private setupRpcHandler(): void {
-        this.client.rpcHandlerManager.registerHandler<TResponse, void>('permission', async (response) => {
+        this.client.rpcHandlerManager.registerHandler<TResponse, void>(RPC_METHODS.Permission, async (response) => {
             const pending = this.pendingRequests.get(response.id);
 
             if (!pending) {

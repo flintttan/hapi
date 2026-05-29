@@ -1,9 +1,15 @@
+import { z } from 'zod'
+
 /**
  * @description The legacy payload type identifier used for all generic agent messages.
  * Changing this value will affect the communication schema between CLI, Hub, and Web.
  * A migration plan is required if this literal is ever modified.
  */
 export const AGENT_MESSAGE_PAYLOAD_TYPE = 'codex' as const
+
+export const AGENT_FLAVORS = ['claude', 'codex', 'cursor', 'gemini', 'kimi', 'opencode'] as const
+export type AgentFlavor = typeof AGENT_FLAVORS[number]
+export const AgentFlavorSchema = z.enum(AGENT_FLAVORS)
 
 export const CLAUDE_PERMISSION_MODES = ['default', 'acceptEdits', 'bypassPermissions', 'plan'] as const
 export type ClaudePermissionMode = typeof CLAUDE_PERMISSION_MODES[number]
@@ -17,7 +23,10 @@ export type CodexCollaborationMode = typeof CODEX_COLLABORATION_MODES[number]
 export const GEMINI_PERMISSION_MODES = ['default', 'read-only', 'safe-yolo', 'yolo'] as const
 export type GeminiPermissionMode = typeof GEMINI_PERMISSION_MODES[number]
 
-export const OPENCODE_PERMISSION_MODES = ['default', 'yolo'] as const
+export const KIMI_PERMISSION_MODES = ['default', 'read-only', 'safe-yolo', 'yolo'] as const
+export type KimiPermissionMode = typeof KIMI_PERMISSION_MODES[number]
+
+export const OPENCODE_PERMISSION_MODES = ['default', 'plan', 'yolo'] as const
 export type OpencodePermissionMode = typeof OPENCODE_PERMISSION_MODES[number]
 
 export const CURSOR_PERMISSION_MODES = ['default', 'plan', 'ask', 'yolo'] as const
@@ -35,7 +44,6 @@ export const PERMISSION_MODES = [
 ] as const
 export type PermissionMode = typeof PERMISSION_MODES[number]
 
-export type AgentFlavor = 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor'
 
 export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
     default: 'Default',
@@ -95,6 +103,9 @@ export function getPermissionModesForFlavor(flavor?: string | null): readonly Pe
     }
     if (flavor === 'gemini') {
         return GEMINI_PERMISSION_MODES
+    }
+    if (flavor === 'kimi') {
+        return KIMI_PERMISSION_MODES
     }
     if (flavor === 'opencode') {
         return OPENCODE_PERMISSION_MODES

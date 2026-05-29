@@ -1,12 +1,24 @@
 import {
     AgentStateSchema,
     AttachmentMetadataSchema,
-    CodexCollaborationModeSchema,
+    MachineMetadataSchema,
     MetadataSchema,
-    PermissionModeSchema,
-    TodosSchema
+    RunnerStateSchema
 } from '@hapi/protocol/schemas'
-import type { CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
+import {
+    CliMessagesResponseSchema,
+    CreateMachineResponseSchema,
+    CreateSessionResponseSchema,
+    GetSessionResponseSchema,
+    LocalHandoffResponseSchema,
+    LocalResumeTargetResponseSchema,
+    ResumableSessionsResponseSchema,
+    type CliMessagesResponse,
+    type CreateMachineResponse,
+    type CreateSessionResponse,
+    type GetSessionResponse
+} from '@hapi/protocol'
+import type { CodexCollaborationMode, Machine, MachineMetadata, PermissionMode, RunnerState } from '@hapi/protocol/types'
 import { z } from 'zod'
 import { UsageSchema } from '@/claude/types'
 
@@ -18,7 +30,10 @@ export type {
     ClaudePermissionMode,
     CodexCollaborationMode,
     CodexPermissionMode,
+    Machine,
+    MachineMetadata,
     Metadata,
+    RunnerState,
     Session
 } from '@hapi/protocol/types'
 export type SessionPermissionMode = PermissionMode
@@ -27,105 +42,24 @@ export type SessionModel = string | null
 export type SessionModelReasoningEffort = string | null
 export type SessionEffort = string | null
 
-export { AgentStateSchema, AttachmentMetadataSchema, MetadataSchema }
+export { AgentStateSchema, AttachmentMetadataSchema, MachineMetadataSchema, MetadataSchema, RunnerStateSchema }
 
-export const MachineMetadataSchema = z.object({
-    host: z.string(),
-    platform: z.string(),
-    happyCliVersion: z.string(),
-    displayName: z.string().optional(),
-    homeDir: z.string(),
-    happyHomeDir: z.string(),
-    happyLibDir: z.string()
-})
-
-export type MachineMetadata = z.infer<typeof MachineMetadataSchema>
-
-export const RunnerStateSchema = z.object({
-    status: z.union([z.enum(['running', 'shutting-down']), z.string()]),
-    pid: z.number().optional(),
-    httpPort: z.number().optional(),
-    startedAt: z.number().optional(),
-    shutdownRequestedAt: z.number().optional(),
-    shutdownSource: z.union([z.enum(['mobile-app', 'cli', 'os-signal', 'unknown']), z.string()]).optional(),
-    lastSpawnError: z.object({
-        message: z.string(),
-        pid: z.number().optional(),
-        exitCode: z.number().nullable().optional(),
-        signal: z.string().nullable().optional(),
-        at: z.number()
-    }).nullable().optional()
-})
-
-export type RunnerState = z.infer<typeof RunnerStateSchema>
-
-export type Machine = {
-    id: string
-    seq: number
-    createdAt: number
-    updatedAt: number
-    active: boolean
-    activeAt: number
-    metadata: MachineMetadata | null
-    metadataVersion: number
-    runnerState: RunnerState | null
-    runnerStateVersion: number
+export {
+    CliMessagesResponseSchema,
+    CreateMachineResponseSchema,
+    CreateSessionResponseSchema,
+    GetSessionResponseSchema,
+    LocalHandoffResponseSchema,
+    LocalResumeTargetResponseSchema,
+    ResumableSessionsResponseSchema
 }
 
-export const CliMessagesResponseSchema = z.object({
-    messages: z.array(z.object({
-        id: z.string(),
-        seq: z.number(),
-        createdAt: z.number(),
-        localId: z.string().nullable().optional(),
-        content: z.unknown()
-    }))
-})
-
-export type CliMessagesResponse = z.infer<typeof CliMessagesResponseSchema>
-
-export const CreateSessionResponseSchema = z.object({
-    session: z.object({
-        id: z.string(),
-        namespace: z.string().optional(),
-        seq: z.number(),
-        createdAt: z.number(),
-        updatedAt: z.number(),
-        active: z.boolean(),
-        activeAt: z.number(),
-        metadata: z.unknown().nullable(),
-        metadataVersion: z.number(),
-        agentState: z.unknown().nullable(),
-        agentStateVersion: z.number(),
-        thinking: z.boolean(),
-        thinkingAt: z.number(),
-        todos: TodosSchema.optional(),
-        model: z.string().nullable().optional().default(null),
-        modelReasoningEffort: z.string().nullable().optional().default(null),
-        effort: z.string().nullable().optional().default(null),
-        permissionMode: PermissionModeSchema.optional(),
-        collaborationMode: CodexCollaborationModeSchema.optional()
-    })
-})
-
-export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>
-
-export const CreateMachineResponseSchema = z.object({
-    machine: z.object({
-        id: z.string(),
-        seq: z.number(),
-        createdAt: z.number(),
-        updatedAt: z.number(),
-        active: z.boolean(),
-        activeAt: z.number(),
-        metadata: z.unknown().nullable(),
-        metadataVersion: z.number(),
-        runnerState: z.unknown().nullable(),
-        runnerStateVersion: z.number()
-    })
-})
-
-export type CreateMachineResponse = z.infer<typeof CreateMachineResponseSchema>
+export type {
+    CliMessagesResponse,
+    CreateMachineResponse,
+    CreateSessionResponse,
+    GetSessionResponse
+}
 
 export const MessageMetaSchema = z.object({
     sentFrom: z.string().optional(),

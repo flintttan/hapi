@@ -1,25 +1,14 @@
 import { logger } from '@/ui/logger'
 import { readdir, stat } from 'fs/promises'
 import { basename, join, resolve } from 'path'
+import type { DirectoryEntry, ListDirectoryResponse } from '@hapi/protocol/apiTypes'
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import { validatePath } from '../pathSecurity'
 import { getErrorMessage, rpcError } from '../rpcResponses'
 
 interface ListDirectoryRequest {
     path: string
-}
-
-interface DirectoryEntry {
-    name: string
-    type: 'file' | 'directory' | 'other'
-    size?: number
-    modified?: number
-}
-
-interface ListDirectoryResponse {
-    success: boolean
-    entries?: DirectoryEntry[]
-    error?: string
 }
 
 interface GetDirectoryTreeRequest {
@@ -43,7 +32,7 @@ interface GetDirectoryTreeResponse {
 }
 
 export function registerDirectoryHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {
-    rpcHandlerManager.registerHandler<ListDirectoryRequest, ListDirectoryResponse>('listDirectory', async (data) => {
+    rpcHandlerManager.registerHandler<ListDirectoryRequest, ListDirectoryResponse>(RPC_METHODS.ListDirectory, async (data) => {
         logger.debug('List directory request:', data.path)
 
         const targetPath = data.path || '.'
@@ -104,7 +93,7 @@ export function registerDirectoryHandlers(rpcHandlerManager: RpcHandlerManager, 
         }
     })
 
-    rpcHandlerManager.registerHandler<GetDirectoryTreeRequest, GetDirectoryTreeResponse>('getDirectoryTree', async (data) => {
+    rpcHandlerManager.registerHandler<GetDirectoryTreeRequest, GetDirectoryTreeResponse>(RPC_METHODS.GetDirectoryTree, async (data) => {
         logger.debug('Get directory tree request:', data.path, 'maxDepth:', data.maxDepth)
 
         const targetPath = data.path || '.'

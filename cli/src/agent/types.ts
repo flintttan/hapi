@@ -1,3 +1,5 @@
+import type { AgentFlavor } from '@hapi/protocol';
+
 export type McpEnvVar = {
     name: string;
     value: string;
@@ -28,8 +30,19 @@ export type PlanItem = {
 
 export type AgentMessage =
     | { type: 'text'; text: string }
+    | { type: 'reasoning'; text: string; id?: string; live?: boolean }
     | { type: 'tool_call'; id: string; name: string; input: unknown; status: 'pending' | 'in_progress' | 'completed' | 'failed' }
     | { type: 'tool_result'; id: string; output: unknown; status: 'completed' | 'failed' }
+    | {
+        type: 'usage';
+        inputTokens: number;
+        outputTokens: number;
+        totalTokens?: number;
+        thoughtTokens?: number;
+        cacheReadTokens?: number;
+        contextTokens?: number;
+        contextWindow?: number;
+    }
     | { type: 'plan'; items: PlanItem[] }
     | { type: 'turn_complete'; stopReason: string }
     | { type: 'error'; message: string };
@@ -55,9 +68,30 @@ export type PermissionResponse =
     | { outcome: 'selected'; optionId: string }
     | { outcome: 'cancelled' };
 
+export type AgentSessionModelDescriptor = {
+    modelId: string;
+    name?: string;
+};
+
+export type AgentSessionModelsMetadata = {
+    availableModels: AgentSessionModelDescriptor[];
+    currentModelId: string | null;
+};
+
+export type AgentSessionConfigOptionDescriptor = {
+    id: string;
+    category?: string;
+    currentValue?: string;
+    options: Array<{ value: string; name?: string }>;
+};
+
 export interface AgentBackend {
     initialize(): Promise<void>;
     newSession(config: AgentSessionConfig): Promise<string>;
+    setModel?(sessionId: string, modelId: string, opts?: { flavor?: AgentFlavor }): Promise<void>;
+    setConfigOption?(sessionId: string, configId: string, value: string): Promise<void>;
+    getSessionModelsMetadata?(sessionId: string): AgentSessionModelsMetadata | undefined;
+    getThoughtLevelConfigOption?(sessionId: string): AgentSessionConfigOptionDescriptor | undefined;
     prompt(sessionId: string, content: PromptContent[], onUpdate: (msg: AgentMessage) => void): Promise<void>;
     cancelPrompt(sessionId: string): Promise<void>;
     respondToPermission(sessionId: string, request: PermissionRequest, response: PermissionResponse): Promise<void>;

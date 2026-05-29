@@ -1,5 +1,7 @@
 import { execFile, type ExecFileOptions } from 'child_process'
 import { promisify } from 'util'
+import type { CommandResponse } from '@hapi/protocol/apiTypes'
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import { validatePath } from '../pathSecurity'
 import { rpcError } from '../rpcResponses'
@@ -24,13 +26,7 @@ interface GitDiffFileRequest {
     timeout?: number
 }
 
-interface GitCommandResponse {
-    success: boolean
-    stdout?: string
-    stderr?: string
-    exitCode?: number
-    error?: string
-}
+type GitCommandResponse = CommandResponse
 
 function resolveCwd(requestedCwd: string | undefined, workingDirectory: string): { cwd: string; error?: string } {
     const cwd = requestedCwd ?? workingDirectory
@@ -91,7 +87,7 @@ async function runGitCommand(
 }
 
 export function registerGitHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {
-    rpcHandlerManager.registerHandler<GitStatusRequest, GitCommandResponse>('git-status', async (data) => {
+    rpcHandlerManager.registerHandler<GitStatusRequest, GitCommandResponse>(RPC_METHODS.GitStatus, async (data) => {
         const resolved = resolveCwd(data.cwd, workingDirectory)
         if (resolved.error) {
             return rpcError(resolved.error)
@@ -103,7 +99,7 @@ export function registerGitHandlers(rpcHandlerManager: RpcHandlerManager, workin
         )
     })
 
-    rpcHandlerManager.registerHandler<GitDiffNumstatRequest, GitCommandResponse>('git-diff-numstat', async (data) => {
+    rpcHandlerManager.registerHandler<GitDiffNumstatRequest, GitCommandResponse>(RPC_METHODS.GitDiffNumstat, async (data) => {
         const resolved = resolveCwd(data.cwd, workingDirectory)
         if (resolved.error) {
             return rpcError(resolved.error)
@@ -114,7 +110,7 @@ export function registerGitHandlers(rpcHandlerManager: RpcHandlerManager, workin
         return await runGitCommand(args, resolved.cwd, data.timeout)
     })
 
-    rpcHandlerManager.registerHandler<GitDiffFileRequest, GitCommandResponse>('git-diff-file', async (data) => {
+    rpcHandlerManager.registerHandler<GitDiffFileRequest, GitCommandResponse>(RPC_METHODS.GitDiffFile, async (data) => {
         const resolved = resolveCwd(data.cwd, workingDirectory)
         if (resolved.error) {
             return rpcError(resolved.error)

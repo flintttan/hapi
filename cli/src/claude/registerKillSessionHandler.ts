@@ -1,5 +1,6 @@
 import { RpcHandlerManager } from "@/api/rpc/RpcHandlerManager";
 import { logger } from "@/lib";
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 
 interface KillSessionRequest {
     // No parameters needed
@@ -15,7 +16,7 @@ export function registerKillSessionHandler(
     rpcHandlerManager: RpcHandlerManager,
     killThisHappy: () => Promise<void>
 ) {
-    rpcHandlerManager.registerHandler<KillSessionRequest, KillSessionResponse>('killSession', async () => {
+    rpcHandlerManager.registerHandler<KillSessionRequest, KillSessionResponse>(RPC_METHODS.KillSession, async () => {
         logger.debug('Kill session request received');
 
         // This will start the cleanup process

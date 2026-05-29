@@ -15,6 +15,9 @@ function makeSession(overrides: Partial<SessionSummary> & { id: string }): Sessi
         metadata: { path: '/repo/app', machineId: 'machine-1' },
         todoProgress: null,
         pendingRequestsCount: 0,
+        pendingRequestKinds: [],
+        backgroundTaskCount: 0,
+        futureScheduledMessageCount: 0,
         model: null,
         effort: null,
         ...overrides

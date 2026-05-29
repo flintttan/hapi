@@ -11,6 +11,18 @@ import type {
 } from '../appServerTypes';
 import { resolveCodexPermissionModeConfig } from './permissionModeConfig';
 
+export const codexCollaborationSpawnAgentInstructions = [
+    'Codex sub-agent spawning rules:',
+    '- Treat omitted fork_context the same as fork_context: true: a full-history fork inherits the parent agent type, model, and reasoning effort.',
+    '- If you call spawn_agent with fork_context omitted or true, do not set agent_type, model, or reasoning_effort.',
+    '- If you need a specific agent_type, model, or reasoning_effort, set fork_context: false and include only the necessary context in the message.',
+    '- Do not rely on parent turn reasoning settings for spawned agents; only set reasoning_effort on spawn_agent when the chosen child model supports it.'
+].join('\n');
+
+const MODELS_WITHOUT_REASONING_SUMMARY = new Set([
+    'gpt-5.3-codex-spark'
+]);
+
 function resolveApprovalPolicy(mode: EnhancedMode): ApprovalPolicy {
     return resolveCodexPermissionModeConfig(mode.permissionMode).approvalPolicy;
 }
@@ -34,6 +46,13 @@ function resolveSandboxPolicyOverride(value: CodexCliOverrides['sandbox'] | unde
         default:
             return undefined;
     }
+}
+
+export function supportsReasoningSummary(model: string | undefined): boolean {
+    const normalized = model?.trim().toLowerCase();
+    if (!normalized) return true;
+    const modelName = normalized.split('/').pop() ?? normalized;
+    return !MODELS_WITHOUT_REASONING_SUMMARY.has(modelName);
 }
 
 function buildMcpServerConfig(mcpServers: McpServersConfig): Record<string, unknown> {
@@ -61,6 +80,10 @@ function resolveInstructions(args: {
         baseInstructions,
         developerInstructions
     };
+}
+
+function appendCollaborationInstructions(developerInstructions: string): string {
+    return `${developerInstructions}\n\n${codexCollaborationSpawnAgentInstructions}`;
 }
 
 export function buildThreadStartParams(args: {
@@ -117,6 +140,7 @@ export function buildTurnStartParams(args: {
         approvalPolicy?: TurnStartParams['approvalPolicy'];
         sandboxPolicy?: TurnStartParams['sandboxPolicy'];
         model?: string;
+        suppressCollaborationMode?: boolean;
     };
 }): TurnStartParams {
     const params: TurnStartParams = {
@@ -141,8 +165,19 @@ export function buildTurnStartParams(args: {
         params.sandboxPolicy = sandboxPolicy;
     }
 
-    const collaborationMode = args.mode?.collaborationMode;
+    const collaborationMode = args.overrides?.suppressCollaborationMode
+        ? undefined
+        : args.mode?.collaborationMode;
     const model = args.overrides?.model ?? args.mode?.model;
+    const modelReasoningEffort = args.mode?.modelReasoningEffort;
+
+    if (modelReasoningEffort) {
+        params.effort = modelReasoningEffort;
+        if (!collaborationMode && supportsReasoningSummary(model)) {
+            params.summary = 'detailed';
+        }
+    }
+
     if (collaborationMode) {
         if (!model) {
             throw new Error(`Collaboration mode '${collaborationMode}' requires a resolved model`);
@@ -152,8 +187,8 @@ export function buildTurnStartParams(args: {
             mode: collaborationMode,
             settings: {
                 model,
-                ...(args.mode?.modelReasoningEffort ? { reasoning_effort: args.mode.modelReasoningEffort } : {}),
-                developer_instructions: developerInstructions
+                reasoning_effort: modelReasoningEffort ?? null,
+                developer_instructions: appendCollaborationInstructions(developerInstructions)
             }
         };
     } else if (model) {

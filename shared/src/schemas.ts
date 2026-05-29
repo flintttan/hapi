@@ -3,10 +3,16 @@ import { CODEX_COLLABORATION_MODES, PERMISSION_MODES } from './modes'
 
 export const PermissionModeSchema = z.enum(PERMISSION_MODES)
 export const CodexCollaborationModeSchema = z.enum(CODEX_COLLABORATION_MODES)
+export const SessionEndReasonSchema = z.enum(['completed', 'terminated', 'error', 'handoff'])
+export type SessionEndReason = z.infer<typeof SessionEndReasonSchema>
 
 const MetadataSummarySchema = z.object({
     text: z.string(),
     updatedAt: z.number()
+})
+
+const SessionCapabilitiesSchema = z.object({
+    terminal: z.boolean().optional()
 })
 
 export const WorktreeMetadataSchema = z.object({
@@ -32,6 +38,7 @@ export const MetadataSchema = z.object({
     geminiSessionId: z.string().optional(),
     opencodeSessionId: z.string().optional(),
     cursorSessionId: z.string().optional(),
+    kimiSessionId: z.string().optional(),
     tools: z.array(z.string()).optional(),
     slashCommands: z.array(z.string()).optional(),
     homeDir: z.string().optional(),
@@ -45,7 +52,9 @@ export const MetadataSchema = z.object({
     lifecycleStateSince: z.number().optional(),
     archivedBy: z.string().optional(),
     archiveReason: z.string().optional(),
+    preferredPermissionMode: PermissionModeSchema.optional(),
     flavor: z.string().nullish(),
+    capabilities: SessionCapabilitiesSchema.optional(),
     worktree: WorktreeMetadataSchema.optional()
 })
 
@@ -90,8 +99,9 @@ export type AgentState = z.infer<typeof AgentStateSchema>
 export const TodoItemSchema = z.object({
     content: z.string(),
     status: z.enum(['pending', 'in_progress', 'completed']),
-    priority: z.enum(['high', 'medium', 'low']),
-    id: z.string()
+    priority: z.enum(['high', 'medium', 'low']).optional().default('medium'),
+    id: z.string().optional().default(''),
+    activeForm: z.string().optional()
 })
 
 export type TodoItem = z.infer<typeof TodoItemSchema>
@@ -137,6 +147,22 @@ export const TeamStateSchema = z.object({
 
 export type TeamState = z.infer<typeof TeamStateSchema>
 
+export const ThreadGoalStatusSchema = z.enum(['active', 'paused', 'budgetLimited', 'complete'])
+export type ThreadGoalStatus = z.infer<typeof ThreadGoalStatusSchema>
+
+export const ThreadGoalSchema = z.object({
+    threadId: z.string(),
+    objective: z.string(),
+    status: ThreadGoalStatusSchema,
+    tokenBudget: z.number().nullable().optional(),
+    tokensUsed: z.number().optional().default(0),
+    timeUsedSeconds: z.number().optional().default(0),
+    createdAt: z.number().optional().default(0),
+    updatedAt: z.number().optional().default(0)
+})
+
+export type ThreadGoal = z.infer<typeof ThreadGoalSchema>
+
 export const AttachmentMetadataSchema = z.object({
     id: z.string(),
     filename: z.string(),
@@ -153,7 +179,9 @@ export const DecryptedMessageSchema = z.object({
     seq: z.number().nullable(),
     localId: z.string().nullable(),
     content: z.unknown(),
-    createdAt: z.number()
+    createdAt: z.number(),
+    invokedAt: z.number().nullable().optional(),
+    scheduledAt: z.number().nullable().optional()
 })
 
 export type DecryptedMessage = z.infer<typeof DecryptedMessageSchema>
@@ -184,6 +212,82 @@ export const SessionSchema = z.object({
 
 export type Session = z.infer<typeof SessionSchema>
 
+export const SessionPatchSchema = z.object({
+    active: z.boolean().optional(),
+    thinking: z.boolean().optional(),
+    activeAt: z.number().optional(),
+    updatedAt: z.number().optional(),
+    model: z.string().nullable().optional(),
+    modelReasoningEffort: z.string().nullable().optional(),
+    effort: z.string().nullable().optional(),
+    permissionMode: PermissionModeSchema.optional(),
+    collaborationMode: CodexCollaborationModeSchema.optional(),
+    backgroundTaskCount: z.number().optional()
+}).strict()
+
+export type SessionPatch = z.infer<typeof SessionPatchSchema>
+
+export const MachineMetadataSchema = z.object({
+    host: z.string(),
+    platform: z.string(),
+    happyCliVersion: z.string(),
+    displayName: z.string().optional(),
+    homeDir: z.string().optional(),
+    happyHomeDir: z.string().optional(),
+    happyLibDir: z.string().optional(),
+    workspaceRoots: z.array(z.string()).optional()
+})
+
+export type MachineMetadata = z.infer<typeof MachineMetadataSchema>
+
+export const RunnerStateSchema = z.object({
+    status: z.union([z.enum(['running', 'shutting-down']), z.string()]),
+    pid: z.number().optional(),
+    httpPort: z.number().optional(),
+    startedAt: z.number().optional(),
+    shutdownRequestedAt: z.number().optional(),
+    shutdownSource: z.union([z.enum(['mobile-app', 'cli', 'os-signal', 'unknown']), z.string()]).optional(),
+    lastSpawnError: z.object({
+        message: z.string(),
+        pid: z.number().optional(),
+        exitCode: z.number().nullable().optional(),
+        signal: z.string().nullable().optional(),
+        at: z.number()
+    }).nullable().optional()
+})
+
+export type RunnerState = z.infer<typeof RunnerStateSchema>
+
+export const MachineSchema = z.object({
+    id: z.string(),
+    namespace: z.string(),
+    seq: z.number(),
+    createdAt: z.number(),
+    updatedAt: z.number(),
+    active: z.boolean(),
+    activeAt: z.number(),
+    metadata: MachineMetadataSchema.nullable(),
+    metadataVersion: z.number(),
+    runnerState: RunnerStateSchema.nullable(),
+    runnerStateVersion: z.number()
+})
+
+export type Machine = z.infer<typeof MachineSchema>
+
+export const MachinePatchSchema = z.object({
+    active: z.boolean().optional(),
+    activeAt: z.number().optional(),
+    updatedAt: z.number().optional()
+}).strict()
+
+export type MachinePatch = z.infer<typeof MachinePatchSchema>
+
+export const SessionUpdatedDataSchema = z.union([SessionSchema, SessionPatchSchema])
+export type SessionUpdatedData = z.infer<typeof SessionUpdatedDataSchema>
+
+export const MachineUpdatedDataSchema = z.union([MachineSchema, MachinePatchSchema, z.null()])
+export type MachineUpdatedData = z.infer<typeof MachineUpdatedDataSchema>
+
 const SessionEventBaseSchema = z.object({
     namespace: z.string().optional()
 })
@@ -203,7 +307,7 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
     }),
     SessionChangedSchema.extend({
         type: z.literal('session-updated'),
-        data: z.unknown().optional()
+        data: SessionUpdatedDataSchema.optional()
     }),
     SessionEventBaseSchema.extend({
         type: z.literal('session-removed'),
@@ -213,9 +317,19 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
         type: z.literal('message-received'),
         message: DecryptedMessageSchema
     }),
+    SessionChangedSchema.extend({
+        type: z.literal('messages-invalidated')
+    }),
+    SessionChangedSchema.extend({
+        type: z.literal('scheduled-matured')
+    }),
+    SessionChangedSchema.extend({
+        type: z.literal('session-ended'),
+        reason: SessionEndReasonSchema.optional()
+    }),
     MachineChangedSchema.extend({
         type: z.literal('machine-updated'),
-        data: z.unknown().optional()
+        data: MachineUpdatedDataSchema.optional()
     }),
     SessionEventBaseSchema.extend({
         type: z.literal('toast'),
@@ -225,6 +339,16 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
             sessionId: z.string(),
             url: z.string()
         })
+    }),
+    SessionChangedSchema.extend({
+        type: z.literal('messages-consumed'),
+        localIds: z.array(z.string()),
+        invokedAt: z.number()
+    }),
+    SessionChangedSchema.extend({
+        type: z.literal('message-cancelled'),
+        messageId: z.string(),
+        localId: z.string().optional()
     }),
     SessionEventBaseSchema.extend({
         type: z.literal('heartbeat'),
@@ -242,3 +366,10 @@ export const SyncEventSchema = z.discriminatedUnion('type', [
 ])
 
 export type SyncEvent = z.infer<typeof SyncEventSchema>
+
+export const CancelMessageResponseSchema = z.discriminatedUnion('status', [
+    z.object({ status: z.literal('cancelled'), localId: z.string().nullable() }),
+    z.object({ status: z.literal('invoked'), message: DecryptedMessageSchema }),
+])
+
+export type CancelMessageResponse = z.infer<typeof CancelMessageResponseSchema>

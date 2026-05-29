@@ -2,6 +2,7 @@ import { logger } from '@/ui/logger'
 import { Future } from '@/utils/future'
 import { getLocalLaunchExitReason } from '@/agent/localLaunchPolicy'
 import type { LocalLaunchExitReason, StartedBy } from '@/agent/localLaunchPolicy'
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 
 type QueueLike = {
     size(): number
@@ -88,8 +89,8 @@ export class BaseLocalLauncher {
                 await abortProcess()
             }
 
-            rpcHandlerManager.registerHandler('abort', doAbort)
-            rpcHandlerManager.registerHandler('switch', doSwitch)
+            rpcHandlerManager.registerHandler(RPC_METHODS.Abort, doAbort)
+            rpcHandlerManager.registerHandler(RPC_METHODS.Switch, doSwitch)
             queue.setOnMessage(() => {
                 void doSwitch()
             })
@@ -139,8 +140,8 @@ export class BaseLocalLauncher {
             }
         } finally {
             this.exitFuture.resolve(undefined)
-            rpcHandlerManager.registerHandler('abort', async () => {})
-            rpcHandlerManager.registerHandler('switch', async () => {})
+            rpcHandlerManager.registerHandler(RPC_METHODS.Abort, async () => {})
+            rpcHandlerManager.registerHandler(RPC_METHODS.Switch, async () => {})
             queue.setOnMessage(null)
         }
 

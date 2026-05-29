@@ -38,7 +38,7 @@ export type SessionBootstrapResult = {
     workingDirectory: string
 }
 
-export async function buildMachineMetadata(): Promise<MachineMetadata> {
+export async function buildMachineMetadata(options?: { workspaceRoots?: string[] }): Promise<MachineMetadata> {
     const settings = await readSettings()
     const displayName = process.env.HAPI_MACHINE_DISPLAY_NAME || settings.machineDisplayName
     return {
@@ -48,7 +48,8 @@ export async function buildMachineMetadata(): Promise<MachineMetadata> {
         displayName: displayName?.trim() || undefined,
         homeDir: os.homedir(),
         happyHomeDir: configuration.happyHomeDir,
-        happyLibDir: runtimePath()
+        happyLibDir: runtimePath(),
+        workspaceRoots: options?.workspaceRoots
     }
 }
 
@@ -80,9 +81,32 @@ export function buildSessionMetadata(options: {
         lifecycleState: 'running',
         lifecycleStateSince: now,
         flavor: options.flavor,
+        capabilities: {
+            terminal: true
+        },
         worktree: worktreeInfo ?? undefined,
         ...options.metadataOverrides
     }
+}
+
+function pickExistingSessionMetadata(metadata: Metadata | null | undefined): Partial<Metadata> {
+    if (!metadata) return {}
+
+    const preserved: Partial<Metadata> = {}
+
+    if (metadata.name !== undefined) preserved.name = metadata.name
+    if (metadata.summary !== undefined) preserved.summary = metadata.summary
+    if (metadata.claudeSessionId !== undefined) preserved.claudeSessionId = metadata.claudeSessionId
+    if (metadata.codexSessionId !== undefined) preserved.codexSessionId = metadata.codexSessionId
+    if (metadata.geminiSessionId !== undefined) preserved.geminiSessionId = metadata.geminiSessionId
+    if (metadata.opencodeSessionId !== undefined) preserved.opencodeSessionId = metadata.opencodeSessionId
+    if (metadata.cursorSessionId !== undefined) preserved.cursorSessionId = metadata.cursorSessionId
+    if (metadata.kimiSessionId !== undefined) preserved.kimiSessionId = metadata.kimiSessionId
+    if (metadata.tools !== undefined) preserved.tools = metadata.tools
+    if (metadata.slashCommands !== undefined) preserved.slashCommands = metadata.slashCommands
+    if (metadata.worktree !== undefined) preserved.worktree = metadata.worktree
+
+    return preserved
 }
 
 async function getMachineIdOrExit(): Promise<string> {
@@ -153,5 +177,55 @@ export async function bootstrapSession(options: SessionBootstrapOptions): Promis
         machineId,
         startedBy,
         workingDirectory
+    }
+}
+
+export async function bootstrapExistingSession(options: {
+    sessionId: string
+    flavor: string
+    startedBy?: SessionStartedBy
+    workingDirectory: string
+    metadataOverrides?: Partial<Metadata>
+}): Promise<SessionBootstrapResult> {
+    const startedBy = options.startedBy ?? 'terminal'
+    const api = await ApiClient.create()
+    const machineId = await getMachineIdOrExit()
+
+    await api.getOrCreateMachine({
+        machineId,
+        metadata: await buildMachineMetadata()
+    })
+
+    const sessionInfo = await api.getSession(options.sessionId)
+    const baseMetadata = buildSessionMetadata({
+        flavor: options.flavor,
+        startedBy,
+        workingDirectory: options.workingDirectory,
+        machineId
+    })
+    const metadata = {
+        ...baseMetadata,
+        ...pickExistingSessionMetadata(sessionInfo.metadata),
+        ...options.metadataOverrides
+    }
+
+    const buildUpdatedMetadata = (current: Metadata): Metadata => ({
+        ...baseMetadata,
+        ...pickExistingSessionMetadata(current),
+        ...options.metadataOverrides
+    })
+
+    const session = api.sessionSyncClient(sessionInfo)
+    session.updateMetadata(buildUpdatedMetadata)
+    await reportSessionStarted(sessionInfo.id, metadata)
+
+    return {
+        api,
+        session,
+        sessionInfo,
+        metadata,
+        machineId,
+        startedBy,
+        workingDirectory: options.workingDirectory
     }
 }

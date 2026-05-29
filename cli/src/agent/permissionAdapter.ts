@@ -3,6 +3,7 @@ import type { AgentState, SessionPermissionMode } from '@/api/types';
 import type { ApiSessionClient } from '@/api/apiSession';
 import { logger } from '@/ui/logger';
 import { deriveToolName } from '@/agent/utils';
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import {
     resolveToolAutoApprovalDecision,
     type AutoApprovalDecision
@@ -46,7 +47,7 @@ export class PermissionAdapter {
     ) {
         this.backend.onPermissionRequest((request) => this.handlePermissionRequest(request));
         this.session.rpcHandlerManager.registerHandler<PermissionResponseMessage, void>(
-            'permission',
+            RPC_METHODS.Permission,
             async (response) => {
                 await this.handlePermissionResponse(response);
             }

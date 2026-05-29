@@ -22,18 +22,18 @@ describe('hasCapability', () => {
         expect(hasCapability('gemini', Capabilities.Effort)).toBe(false)
     })
 
-    test('codex has no capabilities', () => {
-        expect(hasCapability('codex', Capabilities.ModelChange)).toBe(false)
+    test('codex supports model-change but not effort', () => {
+        expect(hasCapability('codex', Capabilities.ModelChange)).toBe(true)
         expect(hasCapability('codex', Capabilities.Effort)).toBe(false)
     })
 
-    test('cursor has no capabilities', () => {
-        expect(hasCapability('cursor', Capabilities.ModelChange)).toBe(false)
+    test('cursor supports model-change but not effort', () => {
+        expect(hasCapability('cursor', Capabilities.ModelChange)).toBe(true)
         expect(hasCapability('cursor', Capabilities.Effort)).toBe(false)
     })
 
-    test('opencode has no capabilities', () => {
-        expect(hasCapability('opencode', Capabilities.ModelChange)).toBe(false)
+    test('opencode supports model-change but not effort', () => {
+        expect(hasCapability('opencode', Capabilities.ModelChange)).toBe(true)
         expect(hasCapability('opencode', Capabilities.Effort)).toBe(false)
     })
 
@@ -86,7 +86,9 @@ describe('convenience functions', () => {
     test('supportsModelChange matches hasCapability', () => {
         expect(supportsModelChange('claude')).toBe(true)
         expect(supportsModelChange('gemini')).toBe(true)
-        expect(supportsModelChange('cursor')).toBe(false)
+        expect(supportsModelChange('codex')).toBe(true)
+        expect(supportsModelChange('opencode')).toBe(true)
+        expect(supportsModelChange('cursor')).toBe(true)
         expect(supportsModelChange(null)).toBe(false)
     })
 

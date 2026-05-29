@@ -1,10 +1,11 @@
 import { logger } from '@/ui/logger'
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type { RpcHandlerManager } from '@/api/rpc/RpcHandlerManager'
 import { listSlashCommands, type ListSlashCommandsRequest, type ListSlashCommandsResponse } from '../slashCommands'
 import { getErrorMessage, rpcError } from '../rpcResponses'
 
 export function registerSlashCommandHandlers(rpcHandlerManager: RpcHandlerManager, workingDirectory: string): void {
-    rpcHandlerManager.registerHandler<ListSlashCommandsRequest, ListSlashCommandsResponse>('listSlashCommands', async (data) => {
+    rpcHandlerManager.registerHandler<ListSlashCommandsRequest, ListSlashCommandsResponse>(RPC_METHODS.ListSlashCommands, async (data) => {
         logger.debug('List slash commands request for agent:', data.agent)
 
         try {

@@ -89,7 +89,7 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
                 }
             }
             socket.to(`machine:${id}`).emit('update', update)
-            onWebappEvent?.({ type: 'machine-updated', machineId: id, data: { id } })
+            onWebappEvent?.({ type: 'machine-updated', machineId: id, data: { updatedAt: Date.now() } })
         }
     }
 
@@ -134,7 +134,7 @@ export function registerMachineHandlers(socket: CliSocketWithData, deps: Machine
                 }
             }
             socket.to(`machine:${id}`).emit('update', update)
-            onWebappEvent?.({ type: 'machine-updated', machineId: id, data: { id } })
+            onWebappEvent?.({ type: 'machine-updated', machineId: id, data: { updatedAt: Date.now() } })
         }
     }
 

@@ -6,7 +6,7 @@
       "es2022"
     ],
     "jsx": "react",
-    "rootDir": "..",
+    "rootDir": "src",
     "experimentalDecorators": true,
     "outDir": "dist",
     "noEmit": true,
@@ -26,8 +26,6 @@
   "include": [
     "src/**/*.ts",
     "src/**/*.tsx",
-    "src/**/*.d.ts",
-    "../hub/src/**/*.ts",
-    "../hub/src/**/*.d.ts"
+    "src/**/*.d.ts"
   ]
 }

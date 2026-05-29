@@ -6,10 +6,15 @@ import type { AgentMessage, McpServerStdio, PromptContent } from '@/agent/types'
 import { RemoteLauncherBase, type RemoteLauncherDisplayContext, type RemoteLauncherExitReason } from '@/modules/common/remote/RemoteLauncherBase';
 import { OpencodeDisplay } from '@/ui/ink/OpencodeDisplay';
 import type { OpencodeSession } from './session';
-import type { PermissionMode } from './types';
+import type { OpencodeMode, PermissionMode } from './types';
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import { createOpencodeBackend } from './utils/opencodeBackend';
 import { OpencodePermissionHandler } from './utils/permissionHandler';
-import { TITLE_INSTRUCTION } from './utils/systemPrompt';
+import { PLAN_MODE_INSTRUCTION, TITLE_INSTRUCTION } from './utils/systemPrompt';
+
+type OpencodeRemoteLauncherOptions = {
+    onReasoningEffortRollback?: (effort: string | null) => void;
+};
 
 class OpencodeRemoteLauncher extends RemoteLauncherBase {
     private readonly session: OpencodeSession;
@@ -19,8 +24,16 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
     private abortController = new AbortController();
     private displayPermissionMode: PermissionMode | null = null;
     private instructionsSent = false;
+    private currentBackendModel: string | null = null;
+    private currentBackendEffort: string | null = null;
+    private defaultBackendEffort: string | null = null;
+    private setModelSupported: boolean | undefined = undefined;
+    private setEffortSupported: boolean | undefined = undefined;
 
-    constructor(session: OpencodeSession) {
+    constructor(
+        session: OpencodeSession,
+        private readonly options: OpencodeRemoteLauncherOptions = {}
+    ) {
         super(process.env.DEBUG ? session.logPath : undefined);
         this.session = session;
     }
@@ -85,6 +98,29 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         }
         session.onSessionFound(acpSessionId);
 
+        // Seed currentBackendModel from the ACP session metadata so the first
+        // batch — whose model the hub mirrors from the just-discovered session —
+        // does not trigger a redundant setModel on the very first turn.
+        const initialMetadata = backend.getSessionModelsMetadata?.(acpSessionId);
+        this.currentBackendModel = initialMetadata?.currentModelId ?? null;
+        const thoughtLevelOption = backend.getThoughtLevelConfigOption?.(acpSessionId);
+        this.currentBackendEffort = thoughtLevelOption?.currentValue ?? null;
+        this.defaultBackendEffort = this.currentBackendEffort;
+
+        // Expose the cached models metadata via per-session RPC so the hub can
+        // forward it to the web UI's model selector without round-tripping ACP.
+        session.client.rpcHandlerManager.registerHandler(RPC_METHODS.ListOpencodeModels, async () => {
+            const metadata = backend.getSessionModelsMetadata?.(acpSessionId);
+            if (!metadata) {
+                return { success: false, error: 'OpenCode model metadata is not available' };
+            }
+            return {
+                success: true,
+                availableModels: metadata.availableModels,
+                currentModelId: metadata.currentModelId
+            };
+        });
+
         this.permissionHandler = new OpencodePermissionHandler(
             session.client,
             backend,
@@ -111,13 +147,90 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                 break;
             }
 
+            // Inline model change via ACP RPC (session/set_model — see ACP SDK
+            // schema `x-method: session/set_model`). Mirrors the Gemini pattern
+            // from PR #543: if the running OpenCode build does not implement the
+            // RPC, we learn that from the first method-not-found response and stop
+            // attempting it for the rest of this session.
+            //
+            // The very first batch seeds currentBackendModel — the OpenCode CLI was
+            // launched with that model via --model and there is nothing to switch yet.
+            if (batch.mode.model && this.currentBackendModel === null) {
+                this.currentBackendModel = batch.mode.model;
+            } else if (batch.mode.model && batch.mode.model !== this.currentBackendModel) {
+                if (!backend.setModel || this.setModelSupported === false) {
+                    batch.mode.model = this.currentBackendModel ?? undefined;
+                } else {
+                    logger.debug(`[opencode-remote] Switching model inline: ${this.currentBackendModel} -> ${batch.mode.model}`);
+                    try {
+                        await backend.setModel(acpSessionId, batch.mode.model, { flavor: 'opencode' });
+                        this.currentBackendModel = batch.mode.model;
+                        this.setModelSupported = true;
+                    } catch (error) {
+                        const message = error instanceof Error ? error.message : String(error);
+                        const methodNotFound = /method not found/i.test(message);
+                        if (methodNotFound && this.setModelSupported === undefined) {
+                            this.setModelSupported = false;
+                            logger.warn('[opencode-remote] OpenCode build does not support session/set_model; inline switching disabled for this session');
+                            session.sendSessionEvent({
+                                type: 'message',
+                                message: 'This OpenCode build does not support inline model switching. Restart the session to apply a different model.'
+                            });
+                        } else {
+                            logger.warn('[opencode-remote] Inline model switch failed', error);
+                            session.sendSessionEvent({
+                                type: 'message',
+                                message: `Failed to switch model to ${batch.mode.model}. Continuing with ${this.currentBackendModel ?? '(default)'}.`
+                            });
+                        }
+                        batch.mode.model = this.currentBackendModel ?? undefined;
+                    }
+                }
+            }
+
+            const requestedEffort = batch.mode.modelReasoningEffort ?? this.defaultBackendEffort;
+            if (requestedEffort && requestedEffort !== this.currentBackendEffort) {
+                const thoughtLevelOption = backend.getThoughtLevelConfigOption?.(acpSessionId);
+                if (!backend.setConfigOption || !thoughtLevelOption || this.setEffortSupported === false) {
+                    this.rollbackReasoningEffort(batch, this.currentBackendEffort);
+                } else {
+                    logger.debug(`[opencode-remote] Switching effort inline: ${this.currentBackendEffort ?? '(default)'} -> ${requestedEffort}`);
+                    try {
+                        await backend.setConfigOption(acpSessionId, thoughtLevelOption.id, requestedEffort);
+                        this.currentBackendEffort = requestedEffort;
+                        this.setEffortSupported = true;
+                    } catch (error) {
+                        const message = error instanceof Error ? error.message : String(error);
+                        const methodNotFound = /method not found/i.test(message);
+                        if (methodNotFound && this.setEffortSupported === undefined) {
+                            this.setEffortSupported = false;
+                            logger.warn('[opencode-remote] OpenCode build does not support session/set_config_option; inline effort switching disabled for this session');
+                            session.sendSessionEvent({
+                                type: 'message',
+                                message: 'This OpenCode build does not support inline reasoning effort switching.'
+                            });
+                        } else {
+                            logger.warn('[opencode-remote] Inline effort switch failed', error);
+                            session.sendSessionEvent({
+                                type: 'message',
+                                message: `Failed to switch reasoning effort to ${requestedEffort}. Continuing with ${this.currentBackendEffort ?? '(default)'}.`
+                            });
+                        }
+                        this.rollbackReasoningEffort(batch, this.currentBackendEffort);
+                    }
+                }
+            }
+
             this.applyDisplayMode(batch.mode.permissionMode);
             messageBuffer.addMessage(batch.message, 'user');
 
             // Inject title instructions on first prompt
             let messageText = batch.message;
+            if (batch.mode.permissionMode === 'plan') {
+                messageText = `${PLAN_MODE_INSTRUCTION}\n\n${messageText}`;
+            }
             if (!this.instructionsSent) {
-                messageText = `${TITLE_INSTRUCTION}\n\n${batch.message}`;
+                messageText = `${TITLE_INSTRUCTION}\n\n${messageText}`;
                 this.instructionsSent = true;
             }
 
@@ -168,6 +281,13 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         }
     }
 
+    private rollbackReasoningEffort(batch: { mode: OpencodeMode }, effort: string | null): void {
+        batch.mode.modelReasoningEffort = effort;
+        this.session.setModelReasoningEffort(effort);
+        this.session.pushKeepAlive();
+        this.options.onReasoningEffortRollback?.(effort);
+    }
+
     private handleAgentMessage(message: AgentMessage): void {
         const converted = convertAgentMessage(message);
         if (converted) {
@@ -178,11 +298,19 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             case 'text':
                 this.messageBuffer.addMessage(message.text, 'assistant');
                 break;
+            case 'reasoning':
+                if (message.live) {
+                    break;
+                }
+                this.messageBuffer.addMessage(`[Thinking] ${message.text.substring(0, 100)}...`, 'system');
+                break;
             case 'tool_call':
                 this.messageBuffer.addMessage(`Tool call: ${message.name}`, 'tool');
                 break;
             case 'tool_result':
                 this.messageBuffer.addMessage('Tool result received', 'result');
+                break;
+            case 'usage':
                 break;
             case 'plan':
                 this.messageBuffer.addMessage('Plan updated', 'status');
@@ -243,8 +371,9 @@ function toAcpMcpServers(config: Record<string, { command: string; args: string[
 }
 
 export async function opencodeRemoteLauncher(
-    session: OpencodeSession
+    session: OpencodeSession,
+    options: OpencodeRemoteLauncherOptions = {}
 ): Promise<'switch' | 'exit'> {
-    const launcher = new OpencodeRemoteLauncher(session);
+    const launcher = new OpencodeRemoteLauncher(session, options);
     return launcher.launch();
 }

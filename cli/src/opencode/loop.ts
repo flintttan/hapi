@@ -17,10 +17,13 @@ interface OpencodeLoopOptions {
     session: ApiSessionClient;
     api: ApiClient;
     permissionMode?: PermissionMode;
+    model?: string;
+    modelReasoningEffort?: string | null;
     resumeSessionId?: string;
     hookServer: OpencodeHookServer;
     hookUrl: string;
     onSessionReady?: (session: OpencodeSession) => void;
+    onReasoningEffortRollback?: (effort: string | null) => void;
 }
 
 export async function opencodeLoop(opts: OpencodeLoopOptions): Promise<void> {
@@ -39,7 +42,8 @@ export async function opencodeLoop(opts: OpencodeLoopOptions): Promise<void> {
         mode: startingMode,
         startedBy,
         startingMode,
-        permissionMode: opts.permissionMode ?? 'default'
+        permissionMode: opts.permissionMode ?? 'default',
+        modelReasoningEffort: opts.modelReasoningEffort
     });
 
     if (opts.resumeSessionId) {
@@ -54,7 +58,9 @@ export async function opencodeLoop(opts: OpencodeLoopOptions): Promise<void> {
             hookServer: opts.hookServer,
             hookUrl: opts.hookUrl
         }),
-        runRemote: (instance) => opencodeRemoteLauncher(instance),
+        runRemote: (instance) => opencodeRemoteLauncher(instance, {
+            onReasoningEffortRollback: opts.onReasoningEffortRollback
+        }),
         onSessionReady: opts.onSessionReady
     });
 }
