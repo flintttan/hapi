@@ -35,7 +35,7 @@ export type SessionMetadataSummary = {
     worktree?: WorktreeMetadata
 }
 
-export type MessageStatus = 'sending' | 'sent' | 'failed'
+export type MessageStatus = 'sending' | 'sent' | 'failed' | 'queued'
 
 export type DecryptedMessage = ProtocolDecryptedMessage & {
     status?: MessageStatus
@@ -89,11 +89,15 @@ export type MessagesResponse = {
     messages: DecryptedMessage[]
     page: {
         limit: number
-        beforeSeq: number | null
         nextBeforeSeq: number | null
+        nextBeforeAt: number | null
         hasMore: boolean
     }
 }
+
+export type CancelMessageResponse =
+    | { status: 'cancelled'; localId: string | null }
+    | { status: 'invoked'; message: DecryptedMessage }
 
 export type MachinesResponse = { machines: Machine[] }
 export type MachinePathsExistsResponse = { exists: Record<string, boolean> }

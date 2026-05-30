@@ -16,6 +16,7 @@ type SendMessageInput = {
     localId: string
     createdAt: number
     attachments?: AttachmentMetadata[]
+    scheduledAt?: number | null
 }
 
 type BlockedReason = 'no-api' | 'no-session' | 'pending'
@@ -25,6 +26,7 @@ type UseSendMessageOptions = {
     onSessionResolved?: (sessionId: string) => void
     onBlocked?: (reason: BlockedReason) => void
     onSuccess?: (sessionId: string) => void
+    isSessionThinking?: boolean
 }
 
 function findMessageByLocalId(
@@ -46,22 +48,25 @@ export function useSendMessage(
     sessionId: string | null,
     options?: UseSendMessageOptions
 ): {
-    sendMessage: (text: string, attachments?: AttachmentMetadata[]) => void
-    retryMessage: (localId: string) => void
+    sendMessage: (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => Promise<boolean>
+    retryMessage: (localId: string) => boolean
     isSending: boolean
 } {
     const { haptic } = usePlatform()
     const [isResolving, setIsResolving] = useState(false)
     const resolveGuardRef = useRef(false)
+    const isSessionThinkingRef = useRef(options?.isSessionThinking ?? false)
+    isSessionThinkingRef.current = options?.isSessionThinking ?? false
 
     const mutation = useMutation({
         mutationFn: async (input: SendMessageInput) => {
             if (!api) {
                 throw new Error('API unavailable')
             }
-            await api.sendMessage(input.sessionId, input.text, input.localId, input.attachments)
+            await api.sendMessage(input.sessionId, input.text, input.localId, input.attachments, input.scheduledAt)
         },
         onMutate: async (input) => {
+            const status = isSessionThinkingRef.current ? 'queued' as const : 'sending' as const
             const optimisticMessage: DecryptedMessage = {
                 id: input.localId,
                 seq: null,
@@ -75,14 +80,17 @@ export function useSendMessage(
                     }
                 },
                 createdAt: input.createdAt,
-                status: 'sending',
+                invokedAt: null,
+                scheduledAt: input.scheduledAt ?? null,
+                status,
                 originalText: input.text,
             }
 
             appendOptimisticMessage(input.sessionId, optimisticMessage)
+            return { status }
         },
-        onSuccess: (_, input) => {
-            updateMessageStatus(input.sessionId, input.localId, 'sent')
+        onSuccess: (_, input, context) => {
+            updateMessageStatus(input.sessionId, input.localId, context?.status === 'queued' ? 'queued' : 'sent')
             haptic.notification('success')
             options?.onSuccess?.(input.sessionId)
         },
@@ -92,71 +100,71 @@ export function useSendMessage(
         },
     })
 
-    const sendMessage = (text: string, attachments?: AttachmentMetadata[]) => {
+    const sendMessage = async (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null): Promise<boolean> => {
         if (!api) {
             options?.onBlocked?.('no-api')
             haptic.notification('error')
-            return
+            return false
         }
         if (!sessionId) {
             options?.onBlocked?.('no-session')
             haptic.notification('error')
-            return
+            return false
         }
         if (mutation.isPending || resolveGuardRef.current) {
             options?.onBlocked?.('pending')
-            return
+            return false
         }
         const localId = makeClientSideId('local')
         const createdAt = Date.now()
-        void (async () => {
-            let targetSessionId = sessionId
-            if (options?.resolveSessionId) {
-                resolveGuardRef.current = true
-                setIsResolving(true)
-                try {
-                    const resolved = await options.resolveSessionId(sessionId)
-                    if (resolved && resolved !== sessionId) {
-                        options.onSessionResolved?.(resolved)
-                        targetSessionId = resolved
-                    }
-                } catch (error) {
-                    haptic.notification('error')
-                    console.error('Failed to resolve session before send:', error)
-                    return
-                } finally {
-                    resolveGuardRef.current = false
-                    setIsResolving(false)
+        let targetSessionId = sessionId
+        if (options?.resolveSessionId) {
+            resolveGuardRef.current = true
+            setIsResolving(true)
+            try {
+                const resolved = await options.resolveSessionId(sessionId)
+                if (resolved && resolved !== sessionId) {
+                    options.onSessionResolved?.(resolved)
+                    targetSessionId = resolved
                 }
+            } catch (error) {
+                haptic.notification('error')
+                console.error('Failed to resolve session before send:', error)
+                return false
+            } finally {
+                resolveGuardRef.current = false
+                setIsResolving(false)
             }
-            mutation.mutate({
-                sessionId: targetSessionId,
-                text,
-                localId,
-                createdAt,
-                attachments,
-            })
-        })()
+        }
+        mutation.mutate({
+            sessionId: targetSessionId,
+            text,
+            localId,
+            createdAt,
+            attachments,
+            scheduledAt,
+        })
+        return true
     }
 
-    const retryMessage = (localId: string) => {
+    const retryMessage = (localId: string): boolean => {
         if (!api) {
             options?.onBlocked?.('no-api')
             haptic.notification('error')
-            return
+            return false
         }
         if (!sessionId) {
             options?.onBlocked?.('no-session')
             haptic.notification('error')
-            return
+            return false
         }
         if (mutation.isPending || resolveGuardRef.current) {
             options?.onBlocked?.('pending')
-            return
+            return false
         }
 
         const message = findMessageByLocalId(sessionId, localId)
-        if (!message?.originalText) return
+        if (!message?.originalText) return false
 
         updateMessageStatus(sessionId, localId, 'sending')
 
@@ -165,7 +173,9 @@ export function useSendMessage(
             text: message.originalText,
             localId,
             createdAt: message.createdAt,
+            scheduledAt: message.scheduledAt ?? null,
         })
+        return true
     }
 
     return {

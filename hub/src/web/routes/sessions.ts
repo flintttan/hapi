@@ -81,7 +81,10 @@ export function createSessionsRoutes(getSyncEngine: () => SyncEngine | null): Ho
                 }
                 return b.updatedAt - a.updatedAt
             })
-            .map(toSessionSummary)
+            .map((session) => ({
+                ...toSessionSummary(session),
+                futureScheduledMessageCount: engine.getFutureScheduledMessageCounts([session.id]).get(session.id) ?? 0,
+            }))
 
         return c.json({ sessions })
     })

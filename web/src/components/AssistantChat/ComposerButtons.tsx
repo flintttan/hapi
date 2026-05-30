@@ -175,6 +175,15 @@ function AbortIcon(props: { spinning: boolean }) {
     )
 }
 
+function ClockIcon() {
+    return (
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+        </svg>
+    )
+}
+
 function SendIcon() {
     return (
         <svg
@@ -319,6 +328,9 @@ export function ComposerButtons(props: {
     onVoiceToggle: () => void
     onVoiceMicToggle?: () => void
     onSend: () => void
+    showScheduleButton?: boolean
+    hasPendingSchedule?: boolean
+    onScheduleToggle?: () => void
 }) {
     const { t } = useTranslation()
     const isVoiceConnected = props.voiceStatus === 'connected'
@@ -358,6 +370,19 @@ export function ComposerButtons(props: {
                         disabled={props.terminalDisabled}
                     >
                         <TerminalIcon />
+                    </button>
+                ) : null}
+
+                {props.showScheduleButton && props.onScheduleToggle ? (
+                    <button
+                        type="button"
+                        aria-label={props.hasPendingSchedule ? t('composer.schedule.edit') : t('composer.schedule.button')}
+                        title={props.hasPendingSchedule ? t('composer.schedule.edit') : t('composer.schedule.button')}
+                        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${props.hasPendingSchedule ? 'text-[var(--app-link)] hover:bg-[var(--app-link)]/10' : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'} disabled:cursor-not-allowed disabled:opacity-50`}
+                        onClick={props.onScheduleToggle}
+                        disabled={props.controlsDisabled}
+                    >
+                        <ClockIcon />
                     </button>
                 ) : null}
 

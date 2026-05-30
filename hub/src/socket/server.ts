@@ -41,6 +41,8 @@ export type SocketServerDeps = {
     onSessionEnd?: (payload: { sid: string; time: number }) => void
     onMachineAlive?: (payload: { machineId: string; time: number }) => void
     onBackgroundTaskDelta?: (sessionId: string, delta: { started: number; completed: number }) => void
+    onSessionActivity?: (sessionId: string, updatedAt: number) => void
+    onSweepImmediateQueued?: (sessionId: string, now: number) => void
 }
 
 export function createSocketServer(deps: SocketServerDeps): {
@@ -129,7 +131,9 @@ export function createSocketServer(deps: SocketServerDeps): {
         onSessionEnd: deps.onSessionEnd,
         onMachineAlive: deps.onMachineAlive,
         onWebappEvent: deps.onWebappEvent,
-        onBackgroundTaskDelta: deps.onBackgroundTaskDelta
+        onBackgroundTaskDelta: deps.onBackgroundTaskDelta,
+        onSessionActivity: deps.onSessionActivity,
+        onSweepImmediateQueued: deps.onSweepImmediateQueued
     }))
 
     terminalNs.use(async (socket, next) => {

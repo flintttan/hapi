@@ -68,14 +68,14 @@ describe('Web routes call SyncEngine with userId', () => {
                 }
                 return { ok: false, reason: 'not-found' as const }
             },
-            getMessagesPage: (sessionId: string, options: { limit: number; beforeSeq: number | null }) => {
+            getMessagesPage: (sessionId: string, options: { limit: number; before: { at: number; seq: number } | null }) => {
                 calls.push({ method: 'getMessagesPage', sessionId, options })
                 return {
                     messages: [],
-                    page: { limit: 50, beforeSeq: null, nextBeforeSeq: null, hasMore: false }
+                    page: { limit: 50, nextBeforeSeq: null, nextBeforeAt: null, hasMore: false }
                 }
             },
-            sendMessage: async (sessionId: string, payload: { text: string; localId?: string; sentFrom?: string }) => {
+            sendMessage: async (sessionId: string, payload: { text: string; localId?: string; sentFrom?: string; attachments?: unknown; scheduledAt?: number | null }) => {
                 calls.push({ method: 'sendMessage', sessionId, payload })
             }
         } as any
@@ -93,8 +93,8 @@ describe('Web routes call SyncEngine with userId', () => {
         expect(postRes.status).toBe(200)
 
         expect(calls).toEqual([
-            { method: 'getMessagesPage', sessionId: 's1', options: { limit: 50, beforeSeq: null } },
-            { method: 'sendMessage', sessionId: 's1', payload: { text: 'hi', localId: undefined, sentFrom: 'webapp' } }
+            { method: 'getMessagesPage', sessionId: 's1', options: { limit: 50, before: null } },
+            { method: 'sendMessage', sessionId: 's1', payload: { text: 'hi', localId: undefined, attachments: undefined, sentFrom: 'webapp', scheduledAt: undefined } }
         ])
     })
 })

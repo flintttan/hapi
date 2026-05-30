@@ -163,7 +163,11 @@ export function createCliRoutes(getSyncEngine: () => SyncEngine | null, store: S
         }
 
         const limit = parsed.data.limit ?? 200
-        const messages = engine.getMessagesAfter(resolved.sessionId, { afterSeq: parsed.data.afterSeq, limit })
+        const messages = engine.getDeliverableMessagesAfter(resolved.sessionId, {
+            afterSeq: parsed.data.afterSeq,
+            limit,
+            now: Date.now()
+        })
         return c.json({ messages })
     })
 

@@ -11,7 +11,7 @@ import type {
     SyncEvent
 } from '@/types/api'
 import { queryKeys } from '@/lib/query-keys'
-import { clearMessageWindow, ingestIncomingMessages } from '@/lib/message-window-store'
+import { clearMessageWindow, ingestIncomingMessages, markMessagesConsumed, removeOptimisticMessage } from '@/lib/message-window-store'
 
 type SSESubscription = {
     all?: boolean
@@ -20,6 +20,19 @@ type SSESubscription = {
 }
 
 type VisibilityState = 'visible' | 'hidden'
+
+export type SSEScope = 'global' | 'full'
+
+const MESSAGE_STREAM_EVENT_TYPES = new Set<SyncEvent['type']>([
+    'message-received',
+    'messages-consumed',
+    'message-cancelled',
+    'scheduled-matured'
+])
+
+export function isGlobalScopedMessageStreamEvent(scope: SSEScope, eventType: SyncEvent['type']): boolean {
+    return scope === 'global' && MESSAGE_STREAM_EVENT_TYPES.has(eventType)
+}
 
 type ToastEvent = Extract<SyncEvent, { type: 'toast' }>
 
@@ -177,6 +190,7 @@ export function useSSE(options: {
     token: string
     baseUrl: string
     subscription?: SSESubscription
+    scope?: SSEScope
     onEvent: (event: SyncEvent) => void
     onConnect?: () => void
     onDisconnect?: (reason: string) => void
@@ -223,10 +237,11 @@ export function useSSE(options: {
     }, [options.onToast])
 
     const subscription = options.subscription ?? {}
+    const scope = options.scope ?? 'full'
 
     const subscriptionKey = useMemo(() => {
-        return `${subscription.all ? '1' : '0'}|${subscription.sessionId ?? ''}|${subscription.machineId ?? ''}`
-    }, [subscription.all, subscription.sessionId, subscription.machineId])
+        return `${scope}|${subscription.all ? '1' : '0'}|${subscription.sessionId ?? ''}|${subscription.machineId ?? ''}`
+    }, [scope, subscription.all, subscription.sessionId, subscription.machineId])
 
     useEffect(() => {
         if (!options.enabled) {
@@ -497,8 +512,36 @@ export function useSSE(options: {
                 return
             }
 
+            if (scope === 'global' && MESSAGE_STREAM_EVENT_TYPES.has(event.type)) {
+                if (event.type === 'message-received' && event.message.scheduledAt != null) {
+                    queueSessionListInvalidation()
+                }
+                if (event.type === 'message-cancelled' || event.type === 'messages-consumed' || event.type === 'scheduled-matured') {
+                    queueSessionListInvalidation()
+                }
+                onEventRef.current(event)
+                return
+            }
+
+            if (event.type === 'messages-consumed') {
+                markMessagesConsumed(event.sessionId, event.localIds, event.invokedAt)
+                queueSessionListInvalidation()
+            }
+
+            if (event.type === 'message-cancelled') {
+                removeOptimisticMessage(event.sessionId, event.messageId)
+                queueSessionListInvalidation()
+            }
+
             if (event.type === 'message-received') {
                 ingestIncomingMessages(event.sessionId, [event.message])
+                if (event.message.scheduledAt != null) {
+                    queueSessionListInvalidation()
+                }
+            }
+
+            if (event.type === 'scheduled-matured') {
+                queueSessionListInvalidation()
             }
 
             if (event.type === 'session-added' || event.type === 'session-updated' || event.type === 'session-removed') {

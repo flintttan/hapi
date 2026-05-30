@@ -95,6 +95,9 @@ export function SessionHeader(props: {
     onSearchPrev?: () => void
     onSearchNext?: () => void
     searchHint?: string | null
+    outlineOpen?: boolean
+    outlineCount?: number
+    onOutlineOpenChange?: (open: boolean) => void
 }) {
     const { t } = useTranslation()
     const { session, api, onSessionDeleted } = props
@@ -203,6 +206,19 @@ export function SessionHeader(props: {
                             ) : null}
                         </div>
                     </div>
+
+                    {props.onOutlineOpenChange ? (
+                        <button
+                            type="button"
+                            onClick={() => props.onOutlineOpenChange?.(!props.outlineOpen)}
+                            className={`flex h-8 items-center gap-1 rounded-full px-2 text-xs transition-colors ${props.outlineOpen ? 'bg-[var(--app-secondary-bg)] text-[var(--app-fg)]' : 'text-[var(--app-hint)] hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]'}`}
+                            title={t('session.outline.title')}
+                        >
+                            <span>≡</span>
+                            <span>{t('session.outline.trigger')}</span>
+                            {typeof props.outlineCount === 'number' ? <span>({props.outlineCount})</span> : null}
+                        </button>
+                    ) : null}
 
                     <button
                         type="button"

@@ -13,10 +13,14 @@ import type {
 import type { ChatBlock, NormalizedMessage } from '@/chat/types'
 import type { Suggestion } from '@/hooks/useActiveSuggestions'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
+import { buildConversationOutline, getConversationMessageAnchorId } from '@/chat/outline'
+import { buildVisibleChatBlocks, type ToolGroupBlock, type VisibleChatBlock } from '@/chat/toolGroups'
 import { reduceChatBlocks } from '@/chat/reducer'
 import { reconcileChatBlocks } from '@/chat/reconcile'
 import { searchChatBlocks } from '@/lib/message-search'
 import { HappyComposer } from '@/components/AssistantChat/HappyComposer'
+import { QueuedMessagesBar } from '@/components/AssistantChat/QueuedMessagesBar'
+import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { useHappyRuntime } from '@/lib/assistant-runtime'
 import { createAttachmentAdapter } from '@/lib/attachmentAdapter'
@@ -45,7 +49,7 @@ export function SessionChat(props: {
     onBack: () => void
     onRefresh: () => void
     onLoadMore: () => Promise<unknown>
-    onSend: (text: string, attachments?: AttachmentMetadata[]) => void
+    onSend: (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => Promise<boolean> | void
     onFlushPending: () => void
     onAtBottomChange: (atBottom: boolean) => void
     onRetryMessage?: (localId: string) => void
@@ -64,6 +68,9 @@ export function SessionChat(props: {
     const [searchOpen, setSearchOpen] = useState(false)
     const [messageSearchQuery, setMessageSearchQuery] = useState('')
     const [activeSearchIndex, setActiveSearchIndex] = useState(0)
+    const [pendingSchedule, setPendingSchedule] = useState<PendingSchedule | null>(null)
+    const [outlineOpen, setOutlineOpen] = useState(false)
+    const previousToolGroupsRef = useRef<ToolGroupBlock[]>([])
     const agentFlavor = props.session.metadata?.flavor ?? null
     const controlledByUser = props.session.agentState?.controlledByUser === true
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
@@ -223,6 +230,14 @@ export function SessionChat(props: {
         blocksByIdRef.current = reconciled.byId
     }, [reconciled.byId])
 
+    const visibleBlocks = useMemo<VisibleChatBlock[]>(() => buildVisibleChatBlocks(reconciled.blocks, { hasMoreMessages: props.hasMoreMessages, previousGroups: previousToolGroupsRef.current }), [reconciled.blocks, props.hasMoreMessages])
+
+    useEffect(() => {
+        previousToolGroupsRef.current = visibleBlocks.filter((block): block is ToolGroupBlock => block.kind === 'tool-group')
+    }, [visibleBlocks])
+
+    const outlineItems = useMemo(() => buildConversationOutline(reconciled.blocks), [reconciled.blocks])
+
     const searchResults = useMemo(
         () => searchChatBlocks(reconciled.blocks, messageSearchQuery),
         [reconciled.blocks, messageSearchQuery]
@@ -239,6 +254,8 @@ export function SessionChat(props: {
         setSearchOpen(false)
         setMessageSearchQuery('')
         setActiveSearchIndex(0)
+        setPendingSchedule(null)
+        setOutlineOpen(false)
     }, [props.session.id])
 
     useEffect(() => {
@@ -258,6 +275,32 @@ export function SessionChat(props: {
     }, [searchResults.length])
 
     // Permission mode change handler
+
+    const locateOutlineMessage = useCallback(async (targetMessageId: string) => {
+        const anchorId = getConversationMessageAnchorId(targetMessageId)
+        const findTarget = () => document.getElementById(anchorId)
+        if (findTarget()) {
+            return true
+        }
+
+        while (props.hasMoreMessages) {
+            try {
+                await props.onLoadMore()
+            } catch (error) {
+                console.error('Failed to locate outline target message:', error)
+                return false
+            }
+            if (findTarget()) {
+                return true
+            }
+            if (!props.hasMoreMessages) {
+                break
+            }
+        }
+
+        return Boolean(findTarget())
+    }, [props.hasMoreMessages, props.onLoadMore])
+
     const handlePermissionModeChange = useCallback(async (mode: PermissionMode) => {
         try {
             await setPermissionMode(mode)
@@ -340,7 +383,7 @@ export function SessionChat(props: {
         })
     }, [navigate, props.session.id])
 
-    const handleSend = useCallback((text: string, attachments?: AttachmentMetadata[]) => {
+    const handleSend = useCallback((text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => {
         if (agentFlavor === 'codex') {
             const unsupportedCommand = findUnsupportedCodexBuiltinSlashCommand(
                 text,
@@ -358,9 +401,22 @@ export function SessionChat(props: {
             }
         }
 
-        props.onSend(text, attachments)
+        void props.onSend(text, attachments, scheduledAt)
         setForceScrollToken((token) => token + 1)
     }, [agentFlavor, props.availableSlashCommands, props.onSend, props.session.id, addToast, haptic, t])
+
+    useEffect(() => {
+        const handler = (event: Event) => {
+            const detail = (event as CustomEvent<{ sessionId?: string; scheduledAt?: number | null }>).detail
+            if (!detail || detail.sessionId !== props.session.id) return
+            if (typeof window === 'undefined') return
+            const target = window as typeof window & { __hapiPendingScheduledAtBySessionId?: Record<string, number | null | undefined> }
+            target.__hapiPendingScheduledAtBySessionId ??= {}
+            target.__hapiPendingScheduledAtBySessionId[props.session.id] = detail.scheduledAt ?? null
+        }
+        window.addEventListener('hapi-composer-schedule', handler as EventListener)
+        return () => window.removeEventListener('hapi-composer-schedule', handler as EventListener)
+    }, [props.session.id])
 
     const attachmentAdapter = useMemo(() => {
         if (!props.session.active) {
@@ -371,7 +427,7 @@ export function SessionChat(props: {
 
     const runtime = useHappyRuntime({
         session: props.session,
-        blocks: reconciled.blocks,
+        blocks: visibleBlocks,
         isSending: props.isSending,
         onSendMessage: handleSend,
         onAbort: handleAbort,
@@ -396,6 +452,9 @@ export function SessionChat(props: {
                 onSearchPrev={handleSearchPrevious}
                 onSearchNext={handleSearchNext}
                 searchHint={props.hasMoreMessages ? t('session.search.loadedOnly') : null}
+                outlineOpen={outlineOpen}
+                outlineCount={outlineItems.length}
+                onOutlineOpenChange={setOutlineOpen}
             />
 
             {props.session.teamState && (
@@ -434,6 +493,17 @@ export function SessionChat(props: {
                         forceScrollToken={forceScrollToken}
                         searchResults={searchResults}
                         activeSearchResult={activeSearchResult}
+                        outlineOpen={outlineOpen}
+                        outlineTitle={props.session.metadata?.name ?? props.session.metadata?.path ?? props.session.id}
+                        outlineItems={outlineItems}
+                        onOutlineOpenChange={setOutlineOpen}
+                        onLocateMessage={locateOutlineMessage}
+                    />
+
+                    <QueuedMessagesBar
+                        sessionId={props.session.id}
+                        api={props.api}
+                        onEdit={({ pendingSchedule }) => setPendingSchedule(pendingSchedule)}
                     />
 
                     <HappyComposer
@@ -474,6 +544,10 @@ export function SessionChat(props: {
                         voiceMicMuted={voice?.micMuted}
                         onVoiceToggle={voice ? handleVoiceToggle : undefined}
                         onVoiceMicToggle={voice ? handleVoiceMicToggle : undefined}
+                        pendingSchedule={pendingSchedule}
+                        onSchedule={setPendingSchedule}
+                        onClearSchedule={() => setPendingSchedule(null)}
+                        onAbort={handleAbort}
                     />
                 </div>
             </AssistantRuntimeProvider>

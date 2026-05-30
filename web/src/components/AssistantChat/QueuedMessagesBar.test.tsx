@@ -1,0 +1,111 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import { QueuedMessagesBar } from '@/components/AssistantChat/QueuedMessagesBar'
+import type { DecryptedMessage } from '@/types/api'
+
+const mocks = vi.hoisted(() => ({
+  state: {
+    sessionId: 'session-1',
+    messages: [] as DecryptedMessage[],
+    pending: [] as DecryptedMessage[],
+  },
+  setText: vi.fn(),
+  removeOptimisticMessage: vi.fn(),
+  cancelMutate: vi.fn(),
+}))
+
+vi.mock('@assistant-ui/react', () => ({
+  useAssistantApi: () => ({
+    composer: () => ({ setText: mocks.setText }),
+  }),
+}))
+
+vi.mock('@/hooks/queries/useMessages', () => ({
+  EMPTY_STATE: {
+    sessionId: 'session-1',
+    messages: [],
+    pending: [],
+    pendingCount: 0,
+    hasMore: false,
+    oldestAt: null,
+    oldestSeq: null,
+    newestSeq: null,
+    isLoading: false,
+    isLoadingMore: false,
+    warning: null,
+    atBottom: true,
+    messagesVersion: 0,
+  },
+}))
+
+vi.mock('@/lib/message-window-store', () => ({
+  subscribeMessageWindow: (_sessionId: string, _listener: () => void) => () => {},
+  getMessageWindowState: () => mocks.state,
+  removeOptimisticMessage: mocks.removeOptimisticMessage,
+}))
+
+vi.mock('@/hooks/mutations/useCancelQueuedMessage', () => ({
+  useCancelQueuedMessage: () => ({
+    isPending: false,
+    variables: undefined,
+    mutate: mocks.cancelMutate,
+  }),
+}))
+
+vi.mock('@/lib/use-translation', () => ({
+  useTranslation: () => ({
+    t: (key: string, params?: Record<string, string | number>) => {
+      if (key === 'queuedMessages.title') return 'Queued messages'
+      if (key === 'queuedMessages.edit') return 'Edit queued message'
+      if (key === 'queuedMessages.cancel') return 'Cancel queued message'
+      if (key === 'queuedMessages.scheduledFor') return `Scheduled for ${params?.time ?? ''}`
+      return key
+    }
+  })
+}))
+
+function makeOptimisticQueuedMessage() {
+  return {
+    id: 'local-1',
+    seq: null,
+    localId: 'local-1',
+    content: { role: 'user', content: { type: 'text', text: 'hello queued' } },
+    createdAt: Date.now(),
+    invokedAt: null,
+    scheduledAt: null,
+    status: 'queued' as const,
+    originalText: 'hello queued',
+  } satisfies DecryptedMessage
+}
+
+describe('QueuedMessagesBar local optimistic controls', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.state = {
+      sessionId: 'session-1',
+      messages: [makeOptimisticQueuedMessage()],
+      pending: [],
+    }
+  })
+
+  it('allows editing a queued optimistic message before server echo', () => {
+    const onEdit = vi.fn()
+    render(<QueuedMessagesBar sessionId="session-1" api={null} onEdit={onEdit} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Edit queued message' }))
+
+    expect(mocks.removeOptimisticMessage).toHaveBeenCalledWith('session-1', 'local-1')
+    expect(mocks.setText).toHaveBeenCalledWith('hello queued')
+    expect(onEdit).toHaveBeenCalled()
+    expect(mocks.cancelMutate).not.toHaveBeenCalled()
+  })
+
+  it('allows cancelling a queued optimistic message before server echo', () => {
+    render(<QueuedMessagesBar sessionId="session-1" api={null} />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel queued message' }))
+
+    expect(mocks.removeOptimisticMessage).toHaveBeenCalledWith('session-1', 'local-1')
+    expect(mocks.cancelMutate).not.toHaveBeenCalled()
+  })
+})

@@ -42,6 +42,8 @@ export type StoredMessage = {
     createdAt: number
     seq: number
     localId: string | null
+    invokedAt: number | null
+    scheduledAt: number | null
 }
 
 export type StoredUser = {

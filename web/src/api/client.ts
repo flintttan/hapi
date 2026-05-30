@@ -3,6 +3,7 @@ import type {
     AuthResponse,
     CliTokenCreateResponse,
     CliTokensResponse,
+    CancelMessageResponse,
     CodexCollaborationMode,
     DeleteUploadResponse,
     ListDirectoryResponse,
@@ -254,8 +255,11 @@ export class ApiClient {
         })
     }
 
-    async getMessages(sessionId: string, options: { beforeSeq?: number | null; limit?: number }): Promise<MessagesResponse> {
+    async getMessages(sessionId: string, options: { beforeSeq?: number | null; beforeAt?: number | null; limit?: number }): Promise<MessagesResponse> {
         const params = new URLSearchParams()
+        if (options.beforeAt !== undefined && options.beforeAt !== null) {
+            params.set('beforeAt', `${options.beforeAt}`)
+        }
         if (options.beforeSeq !== undefined && options.beforeSeq !== null) {
             params.set('beforeSeq', `${options.beforeSeq}`)
         }
@@ -297,6 +301,31 @@ export class ApiClient {
         }
         const qs = params.toString()
         return await this.request<FileSearchResponse>(`/api/sessions/${encodeURIComponent(sessionId)}/files${qs ? `?${qs}` : ''}`)
+    }
+
+    async getGeneratedImageBlob(sessionId: string, imageId: string, attempt: number = 0, overrideToken?: string | null): Promise<Blob> {
+        const headers = new Headers()
+        const liveToken = this.getToken ? this.getToken() : null
+        const authToken = overrideToken !== undefined
+            ? (overrideToken ?? (liveToken ?? this.token))
+            : (liveToken ?? this.token)
+        if (authToken) {
+            headers.set('authorization', `Bearer ${authToken}`)
+        }
+        const res = await fetch(this.buildUrl(`/api/sessions/${encodeURIComponent(sessionId)}/generated-images/${encodeURIComponent(imageId)}`), {
+            headers
+        })
+        if (res.status === 401 && attempt === 0 && this.onUnauthorized) {
+            const refreshed = await this.onUnauthorized()
+            if (refreshed) {
+                this.token = refreshed
+                return await this.getGeneratedImageBlob(sessionId, imageId, attempt + 1, refreshed)
+            }
+        }
+        if (!res.ok) {
+            throw new ApiError(`HTTP ${res.status}`, res.status, undefined, await res.text().catch(() => undefined))
+        }
+        return await res.blob()
     }
 
     async readSessionFile(sessionId: string, path: string): Promise<FileReadResponse> {
@@ -354,15 +383,23 @@ export class ApiClient {
         return response.sessionId
     }
 
-    async sendMessage(sessionId: string, text: string, localId?: string | null, attachments?: AttachmentMetadata[]): Promise<void> {
+    async sendMessage(sessionId: string, text: string, localId?: string | null, attachments?: AttachmentMetadata[], scheduledAt?: number | null): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
             method: 'POST',
             body: JSON.stringify({
                 text,
                 localId: localId ?? undefined,
-                attachments: attachments ?? undefined
+                attachments: attachments ?? undefined,
+                scheduledAt: scheduledAt ?? undefined
             })
         })
+    }
+
+    async cancelMessage(sessionId: string, messageId: string): Promise<CancelMessageResponse> {
+        return await this.request<CancelMessageResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}`,
+            { method: 'DELETE' }
+        )
     }
 
     async abortSession(sessionId: string): Promise<void> {

@@ -188,4 +188,26 @@ describe('HappyComposer keyboard behavior', () => {
         expect(mocks.send).not.toHaveBeenCalled()
         expect(mocks.setText).toHaveBeenCalledWith('/help ')
     })
+
+    it('aborts running thread on Escape when no explicit onAbort is provided', () => {
+        mocks.assistantState.thread.isRunning = true
+
+        render(<HappyComposer sessionId="session-1" />)
+
+        fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Escape' })
+
+        expect(mocks.cancelRun).toHaveBeenCalledTimes(1)
+    })
+
+    it('prefers explicit onAbort callback over assistant thread cancel', async () => {
+        mocks.assistantState.thread.isRunning = true
+        const onAbort = vi.fn().mockResolvedValue(undefined)
+
+        render(<HappyComposer sessionId="session-1" onAbort={onAbort} />)
+
+        fireEvent.keyDown(screen.getByTestId('composer-input'), { key: 'Escape' })
+
+        expect(onAbort).toHaveBeenCalledTimes(1)
+        expect(mocks.cancelRun).not.toHaveBeenCalled()
+    })
 })

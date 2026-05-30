@@ -3,8 +3,10 @@ import type { AppendMessage, AttachmentAdapter, ThreadMessageLike } from '@assis
 import { useExternalMessageConverter, useExternalStoreRuntime } from '@assistant-ui/react'
 import { safeStringify } from '@hapi/protocol'
 import { renderEventLabel } from '@/chat/presentation'
-import type { ChatBlock, CliOutputBlock } from '@/chat/types'
+import type { ChatBlock, CliOutputBlock, CodexReviewBlock, GeneratedImageBlock } from '@/chat/types'
+import type { VisibleChatBlock } from '@/chat/toolGroups'
 import type { AgentEvent, ToolCallBlock } from '@/chat/types'
+import { isToolGroupBlock } from '@/chat/toolGroups'
 import type { AttachmentMetadata, MessageStatus as HappyMessageStatus, Session } from '@/types/api'
 
 export type HappyChatMessageMetadata = {
@@ -19,7 +21,7 @@ export type HappyChatMessageMetadata = {
     attachments?: AttachmentMetadata[]
 }
 
-function toThreadMessageLike(block: ChatBlock): ThreadMessageLike {
+function toThreadMessageLike(block: VisibleChatBlock): ThreadMessageLike {
     if (block.kind === 'user-text') {
         const messageId = `user:${block.id}`
         return {
@@ -79,6 +81,48 @@ function toThreadMessageLike(block: ChatBlock): ThreadMessageLike {
         }
     }
 
+    if (block.kind === 'generated-image') {
+        const imageBlock: GeneratedImageBlock = block
+        return {
+            role: 'assistant',
+            id: `generated-image:${imageBlock.id}`,
+            createdAt: new Date(imageBlock.createdAt),
+            content: [{
+                type: 'tool-call',
+                toolCallId: imageBlock.id,
+                toolName: 'GeneratedImage',
+                argsText: '',
+                result: undefined,
+                isError: false,
+                artifact: imageBlock
+            }],
+            metadata: {
+                custom: { kind: 'assistant', searchId: `generated-image:${imageBlock.id}` } satisfies HappyChatMessageMetadata
+            }
+        }
+    }
+
+    if (block.kind === 'codex-review') {
+        const reviewBlock: CodexReviewBlock = block
+        return {
+            role: 'assistant',
+            id: `codex-review:${reviewBlock.id}`,
+            createdAt: new Date(reviewBlock.createdAt),
+            content: [{
+                type: 'tool-call',
+                toolCallId: reviewBlock.id,
+                toolName: 'CodexReview',
+                argsText: '',
+                result: undefined,
+                isError: false,
+                artifact: reviewBlock
+            }],
+            metadata: {
+                custom: { kind: 'assistant', searchId: `codex-review:${reviewBlock.id}` } satisfies HappyChatMessageMetadata
+            }
+        }
+    }
+
     if (block.kind === 'cli-output') {
         const messageId = `cli:${block.id}`
         return {
@@ -88,6 +132,27 @@ function toThreadMessageLike(block: ChatBlock): ThreadMessageLike {
             content: [{ type: 'text', text: block.text }],
             metadata: {
                 custom: { kind: 'cli-output', source: block.source, searchId: `cli-output:${block.id}` } satisfies HappyChatMessageMetadata
+            }
+        }
+    }
+
+    if (isToolGroupBlock(block)) {
+        const messageId = `tool:${block.id}`
+        return {
+            role: 'assistant',
+            id: messageId,
+            createdAt: new Date(block.createdAt),
+            content: [{
+                type: 'tool-call',
+                toolCallId: block.id,
+                toolName: 'ToolGroup',
+                argsText: '',
+                result: undefined,
+                isError: block.summary.errorCount > 0,
+                artifact: block
+            }],
+            metadata: {
+                custom: { kind: 'tool', toolCallId: block.id, searchId: `tool-call:${block.firstToolId}` } satisfies HappyChatMessageMetadata
             }
         }
     }
@@ -172,9 +237,9 @@ function extractMessageContent(message: AppendMessage): { text: string; attachme
 
 export function useHappyRuntime(props: {
     session: Session
-    blocks: readonly ChatBlock[]
+    blocks: readonly VisibleChatBlock[]
     isSending: boolean
-    onSendMessage: (text: string, attachments?: AttachmentMetadata[]) => void
+    onSendMessage: (text: string, attachments?: AttachmentMetadata[], scheduledAt?: number | null) => void
     onAbort: () => Promise<void>
     attachmentAdapter?: AttachmentAdapter
     allowSendWhenInactive?: boolean
@@ -183,15 +248,23 @@ export function useHappyRuntime(props: {
     // This prevents re-converting all messages on every render
     const convertedMessages = useExternalMessageConverter<ChatBlock>({
         callback: toThreadMessageLike,
-        messages: props.blocks as ChatBlock[],
+        messages: props.blocks as unknown as ChatBlock[],
         isRunning: props.session.thinking,
     })
 
     const onNew = useCallback(async (message: AppendMessage) => {
         const { text, attachments } = extractMessageContent(message)
         if (!text && attachments.length === 0) return
-        props.onSendMessage(text, attachments.length > 0 ? attachments : undefined)
-    }, [props.onSendMessage])
+        let scheduledAt: number | null = null
+        if (typeof window !== 'undefined') {
+            const pending = (window as typeof window & { __hapiPendingScheduledAtBySessionId?: Record<string, number | null | undefined> }).__hapiPendingScheduledAtBySessionId
+            scheduledAt = pending?.[props.session.id] ?? null
+            if (pending && Object.prototype.hasOwnProperty.call(pending, props.session.id)) {
+                delete pending[props.session.id]
+            }
+        }
+        props.onSendMessage(text, attachments.length > 0 ? attachments : undefined, scheduledAt)
+    }, [props.onSendMessage, props.session.id])
 
     const onCancel = useCallback(async () => {
         await props.onAbort()

@@ -19,6 +19,7 @@ export type {
     StoredUserPreferences,
     VersionedUpdateResult
 } from './types'
+export type { CancelQueuedMessageResult, LookupQueuedMessageResult } from './messages'
 export { MachineStore } from './machineStore'
 export { MessageStore } from './messageStore'
 export { PushStore } from './pushStore'
@@ -40,7 +41,7 @@ type DbCliTokenLookup = {
     user_id: string
 }
 
-const SCHEMA_VERSION: number = 8
+const SCHEMA_VERSION: number = 9
 const REQUIRED_TABLES = [
     'sessions',
     'machines',
@@ -218,10 +219,17 @@ export class Store {
                 created_at INTEGER NOT NULL,
                 seq INTEGER NOT NULL,
                 local_id TEXT,
+                invoked_at INTEGER,
+                scheduled_at INTEGER,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
             CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_local_id ON messages(session_id, local_id) WHERE local_id IS NOT NULL;
+            CREATE INDEX IF NOT EXISTS idx_messages_session_position
+                ON messages(session_id, COALESCE(invoked_at, created_at) DESC, seq DESC);
+            CREATE INDEX IF NOT EXISTS idx_messages_scheduled_pending
+                ON messages(scheduled_at)
+                WHERE scheduled_at IS NOT NULL AND invoked_at IS NULL;
 
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -630,6 +638,22 @@ export class Store {
         if (!columns.has('local_id')) {
             this.db.exec('ALTER TABLE messages ADD COLUMN local_id TEXT')
         }
+        if (!columns.has('invoked_at')) {
+            this.db.exec('ALTER TABLE messages ADD COLUMN invoked_at INTEGER')
+        }
+        this.db.exec('UPDATE messages SET invoked_at = created_at WHERE invoked_at IS NULL')
+        if (!columns.has('scheduled_at')) {
+            this.db.exec('ALTER TABLE messages ADD COLUMN scheduled_at INTEGER')
+        }
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_messages_session_position
+                ON messages(session_id, COALESCE(invoked_at, created_at) DESC, seq DESC)
+        `)
+        this.db.exec(`
+            CREATE INDEX IF NOT EXISTS idx_messages_scheduled_pending
+                ON messages(scheduled_at)
+                WHERE scheduled_at IS NOT NULL AND invoked_at IS NULL
+        `)
     }
 
     private ensureUserPreferencesSchema(): void {

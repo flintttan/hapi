@@ -107,6 +107,10 @@ export class SyncEngine {
         return this.sessionCache.getSessionsByNamespace(namespace)
     }
 
+    getFutureScheduledMessageCounts(sessionIds: string[], now: number = Date.now()): Map<string, number> {
+        return this.store.messages.countFutureScheduledBySessionIds(sessionIds, now)
+    }
+
     getSession(sessionId: string): Session | undefined {
         return this.sessionCache.getSession(sessionId) ?? this.sessionCache.refreshSession(sessionId) ?? undefined
     }
@@ -155,20 +159,20 @@ export class SyncEngine {
         return this.machineCache.getOnlineMachinesByNamespace(namespace)
     }
 
-    getMessagesPage(sessionId: string, options: { limit: number; beforeSeq: number | null }): {
+    getMessagesPage(sessionId: string, options: { limit: number; before?: { at: number; seq: number } | null }): {
         messages: DecryptedMessage[]
         page: {
             limit: number
-            beforeSeq: number | null
             nextBeforeSeq: number | null
+            nextBeforeAt: number | null
             hasMore: boolean
         }
     } {
         return this.messageService.getMessagesPage(sessionId, options)
     }
 
-    getMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number }): DecryptedMessage[] {
-        return this.messageService.getMessagesAfter(sessionId, options)
+    getDeliverableMessagesAfter(sessionId: string, options: { afterSeq: number; limit: number; now: number }): DecryptedMessage[] {
+        return this.messageService.getDeliverableMessagesAfter(sessionId, options)
     }
 
     handleRealtimeEvent(event: SyncEvent): void {
@@ -225,6 +229,10 @@ export class SyncEngine {
         this.sessionCache.applyBackgroundTaskDelta(sessionId, delta)
     }
 
+    recordSessionActivity(sessionId: string, updatedAt: number): void {
+        this.sessionCache.recordSessionActivity(sessionId, updatedAt)
+    }
+
     handleMachineAlive(payload: { machineId: string; time: number }): void {
         this.machineCache.handleMachineAlive(payload)
     }
@@ -240,6 +248,7 @@ export class SyncEngine {
         for (const session of sorted) {
             this.triggerDedupIfNeeded(session.id)
         }
+        this.messageService.releaseMatureScheduledMessages(Date.now())
         this.machineCache.expireInactive()
     }
 
@@ -282,9 +291,20 @@ export class SyncEngine {
                 previewUrl?: string
             }>
             sentFrom?: 'telegram-bot' | 'webapp'
+            scheduledAt?: number | null
         }
     ): Promise<void> {
         await this.messageService.sendMessage(sessionId, payload)
+        this.sessionCache.markMessageQueued(sessionId)
+        this.sessionCache.recordSessionActivity(sessionId, Date.now())
+    }
+
+    async cancelQueuedMessage(sessionId: string, messageId: string) {
+        return await this.messageService.cancelQueuedMessage(sessionId, messageId)
+    }
+
+    sweepImmediateQueuedOnSessionEnd(sessionId: string, invokedAt: number): void {
+        this.messageService.sweepImmediateQueuedOnSessionEnd(sessionId, invokedAt)
     }
 
     async approvePermission(

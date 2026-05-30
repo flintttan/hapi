@@ -465,6 +465,11 @@ function SessionItem(props: {
                                 {t('session.item.pending')} {s.pendingRequestsCount}
                             </span>
                         ) : null}
+                        {s.futureScheduledMessageCount > 0 ? (
+                            <span className="text-[var(--app-link)]">
+                                {t('session.item.scheduled')} {s.futureScheduledMessageCount}
+                            </span>
+                        ) : null}
                         <span className="text-[var(--app-hint)]">
                             {formatRelativeTime(s.updatedAt, t)}
                         </span>

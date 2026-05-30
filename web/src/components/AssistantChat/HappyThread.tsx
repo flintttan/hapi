@@ -3,6 +3,7 @@ import { ThreadPrimitive } from '@assistant-ui/react'
 import type { ApiClient } from '@/api/client'
 import type { SessionMetadataSummary } from '@/types/api'
 import type { MessageSearchResult } from '@/lib/message-search'
+import { getConversationMessageAnchorId, type ConversationOutlineItem } from '@/chat/outline'
 import { HappyChatProvider } from '@/components/AssistantChat/context'
 import { HappyAssistantMessage } from '@/components/AssistantChat/messages/AssistantMessage'
 import { HappyUserMessage } from '@/components/AssistantChat/messages/UserMessage'
@@ -14,15 +15,9 @@ import { MessageSearchContext } from '@/components/AssistantChat/messageSearchCo
 
 function NewMessagesIndicator(props: { count: number; onClick: () => void }) {
     const { t } = useTranslation()
-    if (props.count === 0) {
-        return null
-    }
-
+    if (props.count === 0) return null
     return (
-        <button
-            onClick={props.onClick}
-            className="absolute bottom-20 left-1/2 -translate-x-1/2 bg-[var(--app-button)] text-[var(--app-button-text)] px-3 py-1.5 rounded-full text-sm font-medium shadow-lg animate-bounce-in z-10"
-        >
+        <button onClick={props.onClick} className="absolute bottom-20 left-1/2 z-10 -translate-x-1/2 rounded-full bg-[var(--app-button)] px-3 py-1.5 text-sm font-medium text-[var(--app-button-text)] shadow-lg animate-bounce-in">
             {t('misc.newMessage', { n: props.count })} &#8595;
         </button>
     )
@@ -36,11 +31,10 @@ function MessageSkeleton() {
         { align: 'end', width: 'w-1/2', height: 'h-9' },
         { align: 'start', width: 'w-5/6', height: 'h-14' }
     ]
-
     return (
         <div role="status" aria-live="polite">
             <span className="sr-only">{t('misc.loadingMessages')}</span>
-            <div className="space-y-3 animate-pulse">
+            <div className="animate-pulse space-y-3">
                 {rows.map((row, index) => (
                     <div key={`skeleton-${index}`} className={row.align === 'end' ? 'flex justify-end' : 'flex justify-start'}>
                         <div className={`${row.height} ${row.width} rounded-xl bg-[var(--app-subtle-bg)]`} />
@@ -51,11 +45,82 @@ function MessageSkeleton() {
     )
 }
 
+
+type ScrollAnchor = {
+    id: string
+    topOffset: number
+}
+
+const MESSAGE_ANCHOR_SELECTOR = '.happy-thread-messages > [id]'
+
+function captureScrollAnchor(viewport: HTMLElement): ScrollAnchor | null {
+    const viewportRect = viewport.getBoundingClientRect()
+    const messages = Array.from(viewport.querySelectorAll<HTMLElement>(MESSAGE_ANCHOR_SELECTOR))
+    for (const message of messages) {
+        const rect = message.getBoundingClientRect()
+        if (rect.bottom > viewportRect.top && rect.top < viewportRect.bottom) {
+            return {
+                id: message.id,
+                topOffset: rect.top - viewportRect.top,
+            }
+        }
+    }
+    return null
+}
+
+function restoreScrollAnchor(viewport: HTMLElement, anchor: ScrollAnchor): boolean {
+    const target = document.getElementById(anchor.id)
+    if (!target || !viewport.contains(target)) {
+        return false
+    }
+    const viewportRect = viewport.getBoundingClientRect()
+    const targetRect = target.getBoundingClientRect()
+    viewport.scrollTop += targetRect.top - viewportRect.top - anchor.topOffset
+    return true
+}
+
 const THREAD_MESSAGE_COMPONENTS = {
     UserMessage: HappyUserMessage,
     AssistantMessage: HappyAssistantMessage,
-    SystemMessage: HappySystemMessage
+    SystemMessage: HappySystemMessage,
 } as const
+
+function ConversationOutlinePanel(props: {
+    title: string
+    items: readonly ConversationOutlineItem[]
+    onSelect: (item: ConversationOutlineItem) => void
+    onClose: () => void
+}) {
+    const { t } = useTranslation()
+    return (
+        <aside className="absolute inset-y-0 right-0 z-30 flex w-full max-w-[24rem] flex-col border-l border-[var(--app-border)] bg-[var(--app-bg)] shadow-2xl sm:w-[24rem]">
+            <div className="flex items-start gap-3 border-b border-[var(--app-border)] p-3">
+                <div className="min-w-0 flex-1">
+                    <div className="text-sm font-semibold">{t('session.outline.title')}</div>
+                    <div className="mt-0.5 truncate text-xs text-[var(--app-hint)]">{props.title}</div>
+                </div>
+                <button type="button" onClick={props.onClose} className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]" aria-label={t('button.close')} title={t('button.close')}>×</button>
+            </div>
+            <div className="app-scroll-y min-h-0 flex-1 p-2">
+                {props.items.length === 0 ? (
+                    <div className="px-2 py-8 text-center text-sm text-[var(--app-hint)]">{t('session.outline.empty')}</div>
+                ) : (
+                    <div className="space-y-1">
+                        {props.items.map((item) => (
+                            <button key={item.id} type="button" onClick={() => props.onSelect(item)} className="group flex w-full min-w-0 items-start gap-2 rounded-md px-2 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)]">
+                                <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-[var(--app-button)]" aria-hidden="true" />
+                                <span className="min-w-0 flex-1">
+                                    <span className="block truncate text-[11px] font-medium uppercase text-[var(--app-hint)]">{t('session.outline.kind.user')}</span>
+                                    <span className="line-clamp-2 text-sm leading-snug text-[var(--app-fg)]">{item.label}</span>
+                                </span>
+                            </button>
+                        ))}
+                    </div>
+                )}
+            </div>
+        </aside>
+    )
+}
 
 export function HappyThread(props: {
     api: ApiClient
@@ -78,6 +143,12 @@ export function HappyThread(props: {
     forceScrollToken: number
     searchResults?: MessageSearchResult[]
     activeSearchResult?: MessageSearchResult | null
+    outlineOpen?: boolean
+    outlineTitle?: string
+    outlineItems?: readonly ConversationOutlineItem[]
+    onOutlineOpenChange?: (open: boolean) => void
+    onOutlineItemClick?: (item: ConversationOutlineItem) => void
+    onLocateMessage?: (messageId: string) => Promise<boolean>
 }) {
     const { t } = useTranslation()
     const viewportRef = useRef<HTMLDivElement | null>(null)
@@ -96,12 +167,10 @@ export function HappyThread(props: {
     const onFlushPendingRef = useRef(props.onFlushPending)
     const forceScrollTokenRef = useRef(props.forceScrollToken)
     const searchResultsById = new Set((props.searchResults ?? []).map((result) => result.id))
-
-    // Smart scroll state: autoScroll enabled when user is near bottom
     const [autoScrollEnabled, setAutoScrollEnabled] = useState(true)
     const autoScrollEnabledRef = useRef(autoScrollEnabled)
+    const outlineNavigationRef = useRef(false)
 
-    // Keep refs in sync with state
     useEffect(() => {
         autoScrollEnabledRef.current = autoScrollEnabled
     }, [autoScrollEnabled])
@@ -121,42 +190,31 @@ export function HappyThread(props: {
         onLoadMoreRef.current = props.onLoadMore
     }, [props.onLoadMore])
 
-    // Track scroll position to toggle autoScroll (stable listener using refs)
     useEffect(() => {
         const viewport = viewportRef.current
         if (!viewport) return
-
         const THRESHOLD_PX = 120
-
         const handleScroll = () => {
             const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
             const isNearBottom = distanceFromBottom < THRESHOLD_PX
-
             if (isNearBottom) {
                 if (!autoScrollEnabledRef.current) setAutoScrollEnabled(true)
             } else if (autoScrollEnabledRef.current) {
                 setAutoScrollEnabled(false)
             }
-
             if (isNearBottom !== atBottomRef.current) {
                 atBottomRef.current = isNearBottom
                 onAtBottomChangeRef.current(isNearBottom)
-                if (isNearBottom) {
-                    onFlushPendingRef.current()
-                }
+                if (isNearBottom) onFlushPendingRef.current()
             }
         }
-
         viewport.addEventListener('scroll', handleScroll, { passive: true })
         return () => viewport.removeEventListener('scroll', handleScroll)
-    }, []) // Stable: no dependencies, reads from refs
+    }, [])
 
-    // Scroll to bottom handler for the indicator button
     const scrollToBottom = useCallback(() => {
         const viewport = viewportRef.current
-        if (viewport) {
-            viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
-        }
+        if (viewport) viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
         setAutoScrollEnabled(true)
         if (!atBottomRef.current) {
             atBottomRef.current = true
@@ -165,7 +223,6 @@ export function HappyThread(props: {
         onFlushPendingRef.current()
     }, [])
 
-    // Reset state when session changes
     useEffect(() => {
         setAutoScrollEnabled(true)
         atBottomRef.current = true
@@ -174,35 +231,54 @@ export function HappyThread(props: {
     }, [props.sessionId])
 
     useEffect(() => {
-        if (forceScrollTokenRef.current === props.forceScrollToken) {
-            return
-        }
+        if (forceScrollTokenRef.current === props.forceScrollToken) return
         forceScrollTokenRef.current = props.forceScrollToken
         scrollToBottom()
     }, [props.forceScrollToken, scrollToBottom])
 
     useEffect(() => {
         const activeId = props.activeSearchResult?.id
-        if (!activeId) {
-            return
-        }
+        if (!activeId) return
         const viewport = viewportRef.current
         const target = viewport?.querySelector<HTMLElement>(`[data-message-search-id="${CSS.escape(activeId)}"]`)
         target?.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }, [props.activeSearchResult?.id])
 
-    const handleLoadMore = useCallback(() => {
-        if (isLoadingMessagesRef.current || !hasMoreMessagesRef.current || isLoadingMoreRef.current || loadLockRef.current) {
-            return
-        }
+    const scrollMessageIntoView = useCallback((target: HTMLElement) => {
+        outlineNavigationRef.current = true
+        setAutoScrollEnabled(false)
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        window.setTimeout(() => {
+            outlineNavigationRef.current = false
+        }, 500)
+    }, [])
+
+    const handleOutlineItemSelect = useCallback(async (item: ConversationOutlineItem) => {
+        const anchorId = getConversationMessageAnchorId(item.targetMessageId)
         const viewport = viewportRef.current
-        if (!viewport) {
-            return
+        const findTarget = () => viewport?.querySelector<HTMLElement>(`#${CSS.escape(anchorId)}`) ?? null
+        let target = findTarget()
+        if (!target && props.onLocateMessage) {
+            const currentViewport = viewportRef.current
+            const anchor = currentViewport ? captureScrollAnchor(currentViewport) : null
+            const located = await props.onLocateMessage(item.targetMessageId)
+            if (located && currentViewport && anchor) {
+                restoreScrollAnchor(currentViewport, anchor)
+            }
+            target = findTarget()
         }
-        pendingScrollRef.current = {
-            scrollTop: viewport.scrollTop,
-            scrollHeight: viewport.scrollHeight
+        if (target) {
+            scrollMessageIntoView(target)
         }
+        props.onOutlineItemClick?.(item)
+        props.onOutlineOpenChange?.(false)
+    }, [props.onLocateMessage, props.onOutlineItemClick, props.onOutlineOpenChange, scrollMessageIntoView])
+
+    const handleLoadMore = useCallback(() => {
+        if (isLoadingMessagesRef.current || !hasMoreMessagesRef.current || isLoadingMoreRef.current || loadLockRef.current) return
+        const viewport = viewportRef.current
+        if (!viewport) return
+        pendingScrollRef.current = { scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight }
         loadLockRef.current = true
         loadStartedRef.current = false
         let loadPromise: Promise<unknown>
@@ -232,128 +308,104 @@ export function HappyThread(props: {
     useEffect(() => {
         const sentinel = topSentinelRef.current
         const viewport = viewportRef.current
-        if (!sentinel || !viewport || !props.hasMoreMessages || props.isLoadingMessages) {
-            return
-        }
-        if (typeof IntersectionObserver === 'undefined') {
-            return
-        }
-
-        const observer = new IntersectionObserver(
-            (entries) => {
-                for (const entry of entries) {
-                    if (entry.isIntersecting) {
-                        handleLoadMoreRef.current()
-                    }
-                }
-            },
-            {
-                root: viewport,
-                rootMargin: '200px 0px 0px 0px'
+        if (!sentinel || !viewport || !props.hasMoreMessages || props.isLoadingMessages) return
+        if (typeof IntersectionObserver === 'undefined') return
+        const observer = new IntersectionObserver((entries) => {
+            for (const entry of entries) {
+                if (entry.isIntersecting) handleLoadMoreRef.current()
             }
-        )
-
+        }, { root: viewport, rootMargin: '200px 0px 0px 0px' })
         observer.observe(sentinel)
         return () => observer.disconnect()
     }, [props.hasMoreMessages, props.isLoadingMessages])
 
     useLayoutEffect(() => {
-        const pending = pendingScrollRef.current
-        const viewport = viewportRef.current
-        if (!pending || !viewport) {
-            return
-        }
-        const delta = viewport.scrollHeight - pending.scrollHeight
-        viewport.scrollTop = pending.scrollTop + delta
-        pendingScrollRef.current = null
-        loadLockRef.current = false
-    }, [props.messagesVersion])
-
-    useEffect(() => {
         isLoadingMoreRef.current = props.isLoadingMoreMessages
-        if (props.isLoadingMoreMessages) {
-            loadStartedRef.current = true
-        }
-        if (prevLoadingMoreRef.current && !props.isLoadingMoreMessages && pendingScrollRef.current) {
+        if (!prevLoadingMoreRef.current && props.isLoadingMoreMessages) loadStartedRef.current = true
+        if (prevLoadingMoreRef.current && !props.isLoadingMoreMessages) {
+            const viewport = viewportRef.current
+            const pending = pendingScrollRef.current
+            if (viewport && pending) {
+                const delta = viewport.scrollHeight - pending.scrollHeight
+                viewport.scrollTop = pending.scrollTop + delta
+            }
             pendingScrollRef.current = null
             loadLockRef.current = false
         }
         prevLoadingMoreRef.current = props.isLoadingMoreMessages
-    }, [props.isLoadingMoreMessages])
+    }, [props.isLoadingMoreMessages, props.messagesVersion])
 
-    const showSkeleton = props.isLoadingMessages && props.rawMessagesCount === 0 && props.pendingCount === 0
+    useLayoutEffect(() => {
+        if (!autoScrollEnabledRef.current) return
+        const viewport = viewportRef.current
+        if (!viewport) return
+        viewport.scrollTop = viewport.scrollHeight
+    }, [props.messagesVersion, autoScrollEnabled])
 
     return (
-        <HappyChatProvider value={{
-            api: props.api,
-            sessionId: props.sessionId,
-            metadata: props.metadata,
-            disabled: props.disabled,
-            onRefresh: props.onRefresh,
-            onRetryMessage: props.onRetryMessage
-        }}>
-            <ThreadPrimitive.Root className="flex min-h-0 flex-1 flex-col relative">
-                <ThreadPrimitive.Viewport asChild autoScroll={autoScrollEnabled}>
-                    <div ref={viewportRef} className="app-scroll-y min-h-0 flex-1 overflow-x-hidden">
-                        <div className="mx-auto w-full max-w-content min-w-0 p-3">
-                            <div ref={topSentinelRef} className="h-px w-full" aria-hidden="true" />
-                            {showSkeleton ? (
-                                <MessageSkeleton />
-                            ) : (
-                                <>
-                                    {props.messagesWarning ? (
-                                        <div className="mb-3 rounded-md bg-amber-500/10 p-2 text-xs">
-                                            {props.messagesWarning}
-                                        </div>
-                                    ) : null}
-
-                                    {props.hasMoreMessages && !props.isLoadingMessages ? (
-                                        <div className="py-1 mb-2">
-                                            <div className="mx-auto w-fit">
-                                                <Button
-                                                    variant="outline"
-                                                    size="sm"
-                                                    onClick={handleLoadMore}
-                                                    disabled={props.isLoadingMoreMessages || props.isLoadingMessages}
-                                                    aria-busy={props.isLoadingMoreMessages}
-                                                    className="gap-1.5 text-xs opacity-80 hover:opacity-100"
-                                                >
-                                                    {props.isLoadingMoreMessages ? (
-                                                        <>
-                                                            <Spinner size="sm" label={null} className="text-current" />
-                                                            {t('misc.loading')}
-                                                        </>
-                                                    ) : (
-                                                        <>
-                                                            <span aria-hidden="true">↑</span>
-                                                            {t('misc.loadOlder')}
-                                                        </>
-                                                    )}
-                                                </Button>
-                                            </div>
-                                        </div>
-                                    ) : null}
-
-                                    {import.meta.env.DEV && props.normalizedMessagesCount === 0 && props.rawMessagesCount > 0 ? (
-                                        <div className="mb-2 rounded-md bg-amber-500/10 p-2 text-xs">
-                                            Message normalization returned 0 items for {props.rawMessagesCount} messages (see `web/src/chat/normalize.ts`).
-                                        </div>
-                                    ) : null}
-                                </>
-                            )}
-                            <MessageSearchContext.Provider value={{
-                                resultIds: searchResultsById,
-                                activeId: props.activeSearchResult?.id ?? null
-                            }}>
-                                <div className="happy-thread-messages flex flex-col gap-3">
-                                    <ThreadPrimitive.Messages components={THREAD_MESSAGE_COMPONENTS} />
-                                </div>
-                            </MessageSearchContext.Provider>
+        <div className="relative min-h-0 flex-1">
+            <HappyChatProvider value={{ api: props.api, sessionId: props.sessionId, metadata: props.metadata, disabled: props.disabled, onRefresh: props.onRefresh, onRetryMessage: props.onRetryMessage, hasMoreMessages: props.hasMoreMessages, isLoadingMoreMessages: props.isLoadingMoreMessages, loadOlderMessagesPreservingScroll: async () => {
+                if (isLoadingMessagesRef.current || !hasMoreMessagesRef.current || isLoadingMoreRef.current || loadLockRef.current) {
+                    return false
+                }
+                const viewport = viewportRef.current
+                if (!viewport) {
+                    return false
+                }
+                const anchor = captureScrollAnchor(viewport)
+                pendingScrollRef.current = { scrollTop: viewport.scrollTop, scrollHeight: viewport.scrollHeight }
+                loadLockRef.current = true
+                loadStartedRef.current = false
+                try {
+                    await onLoadMoreRef.current()
+                } catch (error) {
+                    pendingScrollRef.current = null
+                    loadLockRef.current = false
+                    throw error
+                }
+                requestAnimationFrame(() => {
+                    const nextViewport = viewportRef.current
+                    if (!nextViewport) return
+                    if (anchor && restoreScrollAnchor(nextViewport, anchor)) return
+                    const pending = pendingScrollRef.current
+                    if (!pending) return
+                    const delta = nextViewport.scrollHeight - pending.scrollHeight
+                    nextViewport.scrollTop = pending.scrollTop + delta
+                })
+                return true
+            } }}>
+                <MessageSearchContext.Provider value={{ resultIds: searchResultsById, activeId: props.activeSearchResult?.id ?? null }}>
+                    <ThreadPrimitive.Root className="relative flex h-full min-h-0 flex-col">
+                        <div ref={viewportRef} className="app-scroll-y flex-1 px-3 py-3">
+                            <div className="mx-auto flex w-full max-w-content flex-col gap-3 happy-thread-messages">
+                                <div ref={topSentinelRef} className="h-px w-full" />
+                                {props.hasMoreMessages ? (
+                                    <div className="flex justify-center pt-1">
+                                        <Button variant="outline" size="sm" onClick={() => void props.onLoadMore()} disabled={props.isLoadingMoreMessages} className="gap-2 text-xs">
+                                            {props.isLoadingMoreMessages ? <Spinner size="sm" label={null} className="text-current" /> : null}
+                                            {props.isLoadingMoreMessages ? t('misc.loading') : t('misc.loadOlderMessages')}
+                                        </Button>
+                                    </div>
+                                ) : null}
+                                {props.isLoadingMessages && props.rawMessagesCount === 0 ? <MessageSkeleton /> : null}
+                                <ThreadPrimitive.Messages components={THREAD_MESSAGE_COMPONENTS} />
+                                {props.messagesWarning ? <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700">{props.messagesWarning}</div> : null}
+                            </div>
                         </div>
-                    </div>
-                </ThreadPrimitive.Viewport>
-                <NewMessagesIndicator count={props.pendingCount} onClick={scrollToBottom} />
-            </ThreadPrimitive.Root>
-        </HappyChatProvider>
+                        <NewMessagesIndicator count={props.pendingCount} onClick={scrollToBottom} />
+                    </ThreadPrimitive.Root>
+                </MessageSearchContext.Provider>
+            </HappyChatProvider>
+            {props.outlineOpen ? (
+                <ConversationOutlinePanel
+                    title={props.outlineTitle ?? ''}
+                    items={props.outlineItems ?? []}
+                    onSelect={(item) => {
+                        void handleOutlineItemSelect(item)
+                    }}
+                    onClose={() => props.onOutlineOpenChange?.(false)}
+                />
+            ) : null}
+        </div>
     )
 }

@@ -1,5 +1,6 @@
+import { useEffect, useState } from 'react'
 import type { ToolCallMessagePartProps } from '@assistant-ui/react'
-import type { ChatBlock } from '@/chat/types'
+import type { ChatBlock, CodexReviewBlock, GeneratedImageBlock } from '@/chat/types'
 import type { ToolCallBlock } from '@/chat/types'
 import { isObject, safeStringify } from '@hapi/protocol'
 import { getEventPresentation } from '@/chat/presentation'
@@ -10,7 +11,25 @@ import { MessageStatusIndicator } from '@/components/AssistantChat/messages/Mess
 import { ToolCard } from '@/components/ToolCard/ToolCard'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
+import { ImagePreview } from '@/components/ImagePreview'
+import { CodexReviewCard } from '@/components/AssistantChat/messages/CodexReviewCard'
 import { useMessageSearchContext } from '@/components/AssistantChat/messageSearchContext'
+
+function isGeneratedImageBlock(value: unknown): value is GeneratedImageBlock {
+    if (!isObject(value)) return false
+    if (value.kind != 'generated-image') return false
+    if (typeof value.id != 'string') return false
+    if (typeof value.imageId != 'string') return false
+    if (typeof value.fileName != 'string') return false
+    return true
+}
+
+function isCodexReviewBlock(value: unknown): value is CodexReviewBlock {
+    if (!isObject(value)) return false
+    if (value.kind != 'codex-review') return false
+    if (typeof value.id != 'string') return false
+    return true
+}
 
 function isToolCallBlock(value: unknown): value is ToolCallBlock {
     if (!isObject(value)) return false
@@ -25,6 +44,60 @@ function isToolCallBlock(value: unknown): value is ToolCallBlock {
     if (value.tool.description !== null && typeof value.tool.description !== 'string') return false
     if (value.tool.state !== 'pending' && value.tool.state !== 'running' && value.tool.state !== 'completed' && value.tool.state !== 'error') return false
     return true
+}
+
+function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
+    const ctx = useHappyChatContext()
+    const [objectUrl, setObjectUrl] = useState<string | null>(null)
+    const [error, setError] = useState<string | null>(null)
+
+    useEffect(() => {
+        let disposed = false
+        let nextObjectUrl: string | null = null
+
+        setObjectUrl(null)
+        setError(null)
+        void ctx.api.getGeneratedImageBlob(ctx.sessionId, props.block.imageId)
+            .then((blob) => {
+                if (disposed) return
+                nextObjectUrl = URL.createObjectURL(blob)
+                setObjectUrl(nextObjectUrl)
+            })
+            .catch((err: unknown) => {
+                if (disposed) return
+                setError(err instanceof Error ? err.message : 'Failed to load generated image')
+            })
+
+        return () => {
+            disposed = true
+            if (nextObjectUrl) {
+                URL.revokeObjectURL(nextObjectUrl)
+            }
+        }
+    }, [ctx.api, ctx.sessionId, props.block.imageId])
+
+    return (
+        <div className="max-w-[92%] rounded-2xl border border-[var(--app-border)] bg-[var(--app-tool-card-bg)] p-3">
+            <div className="mb-2 min-w-0 truncate text-xs font-medium text-[var(--app-hint)]">
+                Generated image · {props.block.fileName}
+            </div>
+            {objectUrl ? (
+                <ImagePreview
+                    src={objectUrl}
+                    fileName={props.block.fileName}
+                    label={props.block.fileName}
+                    buttonClassName="block max-w-full cursor-zoom-in rounded-xl text-left"
+                    imageClassName="max-h-[min(28rem,60vh)] max-w-full rounded-xl object-contain"
+                />
+            ) : error ? (
+                <div className="text-sm text-[var(--app-hint)]">
+                    Generated image is unavailable. {error}
+                </div>
+            ) : (
+                <div className="h-48 w-72 max-w-full animate-pulse rounded-xl bg-[var(--app-subtle-bg)]" />
+            )}
+        </div>
+    )
 }
 
 function isPendingPermissionBlock(block: ChatBlock): boolean {
@@ -91,6 +164,22 @@ function HappyNestedBlockList(props: {
                             <div className={alignClass}>
                                 <CliOutputBlock text={block.text} />
                             </div>
+                        </div>
+                    )
+                }
+
+                if (block.kind === 'generated-image') {
+                    return (
+                        <div key={`generated-image:${block.id}`} className="px-1">
+                            <GeneratedImageCard block={block} />
+                        </div>
+                    )
+                }
+
+                if (block.kind === 'codex-review') {
+                    return (
+                        <div key={`codex-review:${block.id}`} className="px-1">
+                            <CodexReviewCard review={block.review} />
                         </div>
                     )
                 }
@@ -162,6 +251,22 @@ export function HappyToolMessage(props: ToolCallMessagePartProps) {
     const ctx = useHappyChatContext()
     const search = useMessageSearchContext()
     const artifact = props.artifact
+
+    if (isGeneratedImageBlock(artifact)) {
+        return (
+            <div className="py-1 min-w-0 max-w-full overflow-x-hidden">
+                <GeneratedImageCard block={artifact} />
+            </div>
+        )
+    }
+
+    if (isCodexReviewBlock(artifact)) {
+        return (
+            <div className="py-1 min-w-0 max-w-full overflow-x-hidden">
+                <CodexReviewCard review={artifact.review} />
+            </div>
+        )
+    }
 
     if (!isToolCallBlock(artifact)) {
         const argsText = typeof props.argsText === 'string' ? props.argsText.trim() : ''

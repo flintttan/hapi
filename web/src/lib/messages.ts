@@ -105,8 +105,8 @@ export function upsertMessagesInCache(
                     messages: mergedIncoming,
                     page: {
                         limit: 50,
-                        beforeSeq: null,
                         nextBeforeSeq: null,
+                        nextBeforeAt: null,
                         hasMore: false,
                     },
                 },

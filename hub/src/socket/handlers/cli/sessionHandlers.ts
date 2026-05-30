@@ -2,12 +2,15 @@ import type { ClientToServerEvents } from '@hapi/protocol'
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
 import type { CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
+import { isRedundantGoalStatusEventContent } from '@hapi/protocol/messages'
 import type { Store, StoredSession } from '../../../store'
 import type { SyncEvent } from '../../../sync/syncEngine'
 import { extractTodoWriteTodosFromMessageContent } from '../../../sync/todos'
 import { extractTeamStateFromMessageContent, applyTeamStateDelta } from '../../../sync/teams'
 import { extractBackgroundTaskDelta } from '../../../sync/backgroundTasks'
+import { shouldRecordSessionActivity } from '../../../sync/sessionActivity'
 import type { CliSocketWithData } from '../../socketTypes'
+import type { SessionEndReason } from '@hapi/protocol'
 import type { AccessErrorReason, AccessResult } from './types'
 
 type SessionAlivePayload = {
@@ -25,6 +28,7 @@ type SessionAlivePayload = {
 type SessionEndPayload = {
     sid: string
     time: number
+    reason?: SessionEndReason
 }
 
 type ResolveSessionAccess = (sessionId: string) => AccessResult<StoredSession>
@@ -60,10 +64,12 @@ export type SessionHandlersDeps = {
     onSessionEnd?: (payload: SessionEndPayload) => void
     onWebappEvent?: (event: SyncEvent) => void
     onBackgroundTaskDelta?: (sessionId: string, delta: { started: number; completed: number }) => void
+    onSessionActivity?: (sessionId: string, updatedAt: number) => void
+    onSweepImmediateQueued?: (sessionId: string, now: number) => void
 }
 
 export function registerSessionHandlers(socket: CliSocketWithData, deps: SessionHandlersDeps): void {
-    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionEnd, onWebappEvent, onBackgroundTaskDelta } = deps
+    const { store, resolveSessionAccess, emitAccessError, onSessionAlive, onSessionEnd, onWebappEvent, onBackgroundTaskDelta, onSessionActivity, onSweepImmediateQueued } = deps
 
     socket.on('message', (data: unknown) => {
         const parsed = messageSchema.safeParse(data)
@@ -91,13 +97,20 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         }
         const session = sessionAccess.value
 
+        if (isRedundantGoalStatusEventContent(content)) {
+            return
+        }
+
         const msg = store.messages.addMessage(sid, content, localId)
+        if (shouldRecordSessionActivity(content)) {
+            onSessionActivity?.(sid, msg.createdAt)
+        }
 
         const todos = extractTodoWriteTodosFromMessageContent(content)
         if (todos) {
             const updated = store.sessions.setSessionTodos(sid, todos, msg.createdAt, session.namespace)
             if (updated) {
-                onWebappEvent?.({ type: 'session-updated', sessionId: sid, data: { updatedAt: Date.now() } })
+                onWebappEvent?.({ type: 'session-updated', sessionId: sid })
             }
         }
 
@@ -108,7 +121,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
             const newTeamState = applyTeamStateDelta(existingTeamState ?? null, teamDelta)
             const updated = store.sessions.setSessionTeamState(sid, newTeamState, msg.createdAt, session.namespace)
             if (updated) {
-                onWebappEvent?.({ type: 'session-updated', sessionId: sid, data: { updatedAt: Date.now() } })
+                onWebappEvent?.({ type: 'session-updated', sessionId: sid })
             }
         }
 
@@ -143,7 +156,8 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
                 seq: msg.seq,
                 localId: msg.localId,
                 content: msg.content,
-                createdAt: msg.createdAt
+                createdAt: msg.createdAt,
+                invokedAt: msg.invokedAt
             }
         })
     })
@@ -189,7 +203,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
                 }
             }
             socket.to(`session:${sid}`).emit('update', update)
-            onWebappEvent?.({ type: 'session-updated', sessionId: sid, data: { updatedAt: Date.now() } })
+            onWebappEvent?.({ type: 'session-updated', sessionId: sid })
         }
     }
 
@@ -236,7 +250,7 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
                 }
             }
             socket.to(`session:${sid}`).emit('update', update)
-            onWebappEvent?.({ type: 'session-updated', sessionId: sid, data: { updatedAt: Date.now() } })
+            onWebappEvent?.({ type: 'session-updated', sessionId: sid })
         }
     }
 
@@ -254,6 +268,29 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         onSessionAlive?.(data)
     })
 
+    socket.on('messages-consumed', (data: { sid: string; localIds: string[] }) => {
+        if (!data || typeof data.sid !== 'string' || !Array.isArray(data.localIds)) {
+            return
+        }
+        const localIds = data.localIds.filter((id): id is string => typeof id === 'string')
+        if (localIds.length === 0) {
+            return
+        }
+        const sessionAccess = resolveSessionAccess(data.sid)
+        if (!sessionAccess.ok) {
+            emitAccessError('session', data.sid, sessionAccess.reason)
+            return
+        }
+        const invokedAt = Date.now()
+        try {
+            store.messages.markMessagesInvoked(data.sid, localIds, invokedAt)
+            onSessionActivity?.(data.sid, invokedAt)
+            onWebappEvent?.({ type: 'messages-consumed', sessionId: data.sid, localIds, invokedAt })
+        } catch (err) {
+            console.error('markMessagesInvoked failed', err)
+        }
+    })
+
     socket.on('session-end', (data: SessionEndPayload) => {
         if (!data || typeof data.sid !== 'string' || typeof data.time !== 'number') {
             return
@@ -262,6 +299,11 @@ export function registerSessionHandlers(socket: CliSocketWithData, deps: Session
         if (!sessionAccess.ok) {
             emitAccessError('session', data.sid, sessionAccess.reason)
             return
+        }
+        try {
+            onSweepImmediateQueued?.(data.sid, Date.now())
+        } catch (err) {
+            console.error('session-end sweep failed', err)
         }
         onSessionEnd?.(data)
     })

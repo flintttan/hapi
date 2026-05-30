@@ -9,6 +9,7 @@ export type MessageWindowState = {
     pending: DecryptedMessage[]
     pendingCount: number
     hasMore: boolean
+    oldestAt: number | null
     oldestSeq: number | null
     newestSeq: number | null
     isLoading: boolean
@@ -137,6 +138,7 @@ function createState(sessionId: string): InternalState {
         pendingVisibleCount: 0,
         pendingOverflowVisibleCount: 0,
         hasMore: false,
+        oldestAt: null,
         oldestSeq: null,
         newestSeq: null,
         isLoading: false,
@@ -188,21 +190,30 @@ function updateState(sessionId: string, updater: (prev: InternalState) => Intern
     }
 }
 
-function deriveSeqBounds(messages: DecryptedMessage[]): { oldestSeq: number | null; newestSeq: number | null } {
+function derivePositionBounds(messages: DecryptedMessage[]): { oldestAt: number | null; oldestSeq: number | null; newestSeq: number | null } {
+    let oldestAt: number | null = null
     let oldest: number | null = null
     let newest: number | null = null
     for (const message of messages) {
+        const positionAt = message.invokedAt ?? message.createdAt
+        if (oldestAt === null || positionAt < oldestAt) {
+            oldestAt = positionAt
+        }
         if (typeof message.seq !== 'number') {
             continue
         }
-        if (oldest === null || message.seq < oldest) {
+        if (
+            oldest === null
+            || positionAt < (oldestAt ?? positionAt)
+            || (positionAt === (oldestAt ?? positionAt) && message.seq < oldest)
+        ) {
             oldest = message.seq
         }
         if (newest === null || message.seq > newest) {
             newest = message.seq
         }
     }
-    return { oldestSeq: oldest, newestSeq: newest }
+    return { oldestAt, oldestSeq: oldest, newestSeq: newest }
 }
 
 function buildState(
@@ -233,7 +244,7 @@ function buildState(
         syncPendingVisibilityCache(prev.sessionId, pending)
     }
     const pendingCount = pendingVisibleCount + pendingOverflowVisibleCount
-    const { oldestSeq, newestSeq } = deriveSeqBounds(messages)
+    const { oldestAt, oldestSeq, newestSeq } = derivePositionBounds(messages)
     const messagesVersion = messages === prev.messages ? prev.messagesVersion : prev.messagesVersion + 1
 
     return {
@@ -244,6 +255,7 @@ function buildState(
         pendingVisibleCount,
         pendingOverflowVisibleCount,
         pendingCount,
+        oldestAt,
         oldestSeq,
         newestSeq,
         hasMore: updates.hasMore !== undefined ? updates.hasMore : prev.hasMore,
@@ -413,13 +425,17 @@ export async function fetchOlderMessages(api: ApiClient, sessionId: string): Pro
     if (initial.isLoadingMore || !initial.hasMore) {
         return
     }
-    if (initial.oldestSeq === null) {
+    if (initial.oldestSeq === null || initial.oldestAt === null) {
         return
     }
     updateState(sessionId, (prev) => buildState(prev, { isLoadingMore: true }))
 
     try {
-        const response = await api.getMessages(sessionId, { limit: PAGE_SIZE, beforeSeq: initial.oldestSeq })
+        const response = await api.getMessages(sessionId, {
+            limit: PAGE_SIZE,
+            beforeSeq: initial.oldestSeq,
+            beforeAt: initial.oldestAt,
+        })
         updateState(sessionId, (prev) => {
             const merged = mergeMessages(response.messages, prev.messages)
             const trimmed = trimVisible(merged, 'prepend')
@@ -536,4 +552,43 @@ export function updateMessageStatus(sessionId: string, localId: string, status: 
         }
         return buildState(prev, { messages, pending })
     })
+}
+
+
+export function removeOptimisticMessage(sessionId: string, messageId: string): void {
+    updateState(sessionId, (prev) => {
+        const messages = prev.messages.filter((message) => message.id !== messageId)
+        const pending = prev.pending.filter((message) => message.id !== messageId)
+        if (messages.length === prev.messages.length && pending.length === prev.pending.length) {
+            return prev
+        }
+        return buildState(prev, { messages, pending })
+    }, true)
+}
+
+export function markMessagesConsumed(sessionId: string, localIds: string[], invokedAt: number): void {
+    if (localIds.length === 0) {
+        return
+    }
+    const localIdSet = new Set(localIds)
+    updateState(sessionId, (prev) => {
+        let changed = false
+        const updateList = (list: DecryptedMessage[]) => list.map((message) => {
+            if (!message.localId || !localIdSet.has(message.localId)) {
+                return message
+            }
+            changed = true
+            return {
+                ...message,
+                invokedAt,
+                status: (message.status === 'failed' ? message.status : 'sent') as MessageStatus,
+            }
+        })
+        const messages = updateList(prev.messages)
+        const pending = updateList(prev.pending)
+        if (!changed) {
+            return prev
+        }
+        return buildState(prev, { messages, pending })
+    }, true)
 }

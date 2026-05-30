@@ -26,6 +26,16 @@ function getBlockSearchText(block: ChatBlock): string {
                 JSON.stringify(block.tool.input ?? ''),
                 block.children.map(getBlockSearchText).join('\n')
             ].join('\n')
+        case 'generated-image':
+            return `${block.fileName} ${block.imageId}`
+        case 'codex-review':
+            return [
+                block.review.overallCorrectness ?? '',
+                block.review.overallExplanation ?? '',
+                ...block.review.findings.map((finding) => `${finding.title}\n${finding.body}\n${finding.filePath ?? ''}`)
+            ].join('\n')
+        default:
+            return ''
     }
 }
 

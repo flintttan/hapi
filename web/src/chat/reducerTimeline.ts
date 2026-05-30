@@ -150,6 +150,20 @@ export function reduceTimeline(
                     continue
                 }
 
+                if (c.type === 'generated-image') {
+                    blocks.push({
+                        kind: 'generated-image',
+                        id: `${msg.id}:${idx}`,
+                        localId: msg.localId,
+                        createdAt: msg.createdAt,
+                        imageId: c.imageId,
+                        fileName: c.fileName,
+                        mimeType: c.mimeType,
+                        meta: msg.meta
+                    })
+                    continue
+                }
+
                 if (c.type === 'reasoning') {
                     blocks.push({
                         kind: 'agent-reasoning',
@@ -157,6 +171,18 @@ export function reduceTimeline(
                         localId: msg.localId,
                         createdAt: msg.createdAt,
                         text: c.text,
+                        meta: msg.meta
+                    })
+                    continue
+                }
+
+                if (c.type === 'codex-review') {
+                    blocks.push({
+                        kind: 'codex-review',
+                        id: `${msg.id}:${idx}`,
+                        localId: msg.localId,
+                        createdAt: msg.createdAt,
+                        review: c.review,
                         meta: msg.meta
                     })
                     continue

@@ -1,20 +1,8 @@
 import { Hono } from 'hono'
-import { AttachmentMetadataSchema } from '@hapi/protocol/schemas'
-import { z } from 'zod'
+import { MessagesQuerySchema, SendMessageRequestSchema } from '@hapi/protocol'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
-
-const querySchema = z.object({
-    limit: z.coerce.number().int().min(1).max(200).optional(),
-    beforeSeq: z.coerce.number().int().min(1).optional()
-})
-
-const sendMessageBodySchema = z.object({
-    text: z.string(),
-    localId: z.string().min(1).optional(),
-    attachments: z.array(AttachmentMetadataSchema).optional()
-})
 
 export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
@@ -31,10 +19,33 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
         const sessionId = sessionResult.sessionId
 
-        const parsed = querySchema.safeParse(c.req.query())
-        const limit = parsed.success ? (parsed.data.limit ?? 50) : 50
-        const beforeSeq = parsed.success ? (parsed.data.beforeSeq ?? null) : null
-        return c.json(engine.getMessagesPage(sessionId, { limit, beforeSeq }))
+        const parsed = MessagesQuerySchema.safeParse(c.req.query())
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid query', issues: parsed.error.flatten() }, 400)
+        }
+
+        const limit = parsed.data.limit ?? 50
+        const before = parsed.data.beforeAt !== undefined && parsed.data.beforeSeq !== undefined
+            ? { at: parsed.data.beforeAt, seq: parsed.data.beforeSeq }
+            : null
+        return c.json(engine.getMessagesPage(sessionId, { limit, before }))
+    })
+
+    app.delete('/sessions/:id/messages/:messageId', async (c) => {
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) {
+            return engine
+        }
+
+        const sessionResult = requireSessionFromParam(c, engine)
+        if (sessionResult instanceof Response) {
+            return sessionResult
+        }
+        const sessionId = sessionResult.sessionId
+        const messageId = c.req.param('messageId')
+
+        const result = await engine.cancelQueuedMessage(sessionId, messageId)
+        return c.json(result)
     })
 
     app.post('/sessions/:id/messages', async (c) => {
@@ -50,9 +61,9 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         const sessionId = sessionResult.sessionId
 
         const body = await c.req.json().catch(() => null)
-        const parsed = sendMessageBodySchema.safeParse(body)
+        const parsed = SendMessageRequestSchema.safeParse(body)
         if (!parsed.success) {
-            return c.json({ error: 'Invalid body' }, 400)
+            return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
         }
 
         // Require text or attachments
@@ -64,7 +75,8 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             text: parsed.data.text,
             localId: parsed.data.localId,
             attachments: parsed.data.attachments,
-            sentFrom: 'webapp'
+            sentFrom: 'webapp',
+            scheduledAt: parsed.data.scheduledAt
         })
         return c.json({ ok: true })
     })

@@ -8,11 +8,13 @@ import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { useMessageSearchContext } from '@/components/AssistantChat/messageSearchContext'
+import { getConversationMessageAnchorId } from '@/chat/outline'
 
 export function HappyUserMessage() {
     const ctx = useHappyChatContext()
     const search = useMessageSearchContext()
     const { copied, copy } = useCopyToClipboard()
+    const messageId = useAssistantState(({ message }) => message.id)
     const role = useAssistantState(({ message }) => message.role)
     const text = useAssistantState(({ message }) => {
         if (message.role !== 'user') return ''
@@ -61,7 +63,7 @@ export function HappyUserMessage() {
 
     if (isCliOutput) {
         return (
-            <MessagePrimitive.Root className={`px-1 min-w-0 max-w-full overflow-x-hidden rounded-lg ${searchClass}`} {...searchAttrs}>
+            <MessagePrimitive.Root id={getConversationMessageAnchorId(messageId)} className={`scroll-mt-4 px-1 min-w-0 max-w-full overflow-x-hidden rounded-lg ${searchClass}`} {...searchAttrs}>
                 <div className="ml-auto w-full max-w-[92%]">
                     <CliOutputBlock text={cliText} />
                 </div>
@@ -73,7 +75,7 @@ export function HappyUserMessage() {
     const hasAttachments = attachments && attachments.length > 0
 
     return (
-        <MessagePrimitive.Root className={`${userBubbleClass} group/msg ${searchClass}`} {...searchAttrs}>
+        <MessagePrimitive.Root id={getConversationMessageAnchorId(messageId)} className={`${userBubbleClass} group/msg scroll-mt-4 ${searchClass}`} {...searchAttrs}>
             <div className="flex items-end gap-2">
                 <div className="flex-1 min-w-0">
                     {hasText && <LazyRainbowText text={text} />}
