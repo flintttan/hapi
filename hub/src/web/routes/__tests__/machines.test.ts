@@ -87,4 +87,23 @@ describe('Machines routes', () => {
 
         expect(res.status).toBe(403)
     })
+
+    test('POST /machines/:id/paths/exists degrades gracefully when legacy CLI lacks path-exists RPC', async () => {
+        const machine = makeMachine('m1')
+        const engine = {
+            getMachine: (machineId: string) => machineId === 'm1' ? machine : undefined,
+            checkPathsExist: async () => {
+                throw new Error('RPC handler not registered: session-legacy:path-exists')
+            }
+        } as any
+
+        const res = await createApp(engine).request('/machines/m1/paths/exists', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ paths: ['/tmp/demo'] })
+        })
+
+        expect(res.status).toBe(200)
+        expect(await res.json()).toEqual({ exists: {} })
+    })
 })

@@ -137,7 +137,11 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             const exists = await engine.checkPathsExist(machineId, uniquePaths)
             return c.json({ exists })
         } catch (error) {
-            return c.json({ error: error instanceof Error ? error.message : 'Failed to check paths' }, 500)
+            const message = error instanceof Error ? error.message : 'Failed to check paths'
+            if (message.includes('RPC handler not registered') && message.includes(':path-exists')) {
+                return c.json({ exists: {} })
+            }
+            return c.json({ error: message }, 500)
         }
     })
 
