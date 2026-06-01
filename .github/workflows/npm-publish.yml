@@ -65,6 +65,8 @@ jobs:
               working-directory: cli
 
             - name: Publish platform packages
+              env:
+                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
               run: |
                   for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64; do
                       echo "Publishing @flintttan/hapi-${platform}..."
@@ -75,6 +77,8 @@ jobs:
               working-directory: cli
 
             - name: Publish main package
+              env:
+                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
               run: |
                   cd npm/main
                   npm publish --access public
