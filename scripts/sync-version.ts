@@ -56,15 +56,23 @@ for (const pkgPath of packages) {
 console.log(`\n✓ Successfully updated ${updateCount} package.json files to version ${version}`);
 
 const buildInfoContent = readFileSync(buildInfoFile, 'utf-8');
-const updatedBuildInfoContent = buildInfoContent.replace(
-  /export const APP_VERSION = ['"][^'"]+['"]/,
-  `export const APP_VERSION = '${version}'`,
+const appVersionMatch = buildInfoContent.match(
+  /export const APP_VERSION\s*=\s*['"]([^'"]+)['"]/,
 );
 
-if (updatedBuildInfoContent === buildInfoContent) {
+if (!appVersionMatch) {
   console.error(`✗ Failed to update ${buildInfoFile}: APP_VERSION not found`);
   process.exit(1);
 }
 
-writeFileSync(buildInfoFile, updatedBuildInfoContent);
-console.log(`✓ Updated shared/src/buildInfo.ts → ${version}`);
+const currentBuildInfoVersion = appVersionMatch[1];
+if (currentBuildInfoVersion === version) {
+  console.log(`✓ shared/src/buildInfo.ts already at ${version}`);
+} else {
+  const updatedBuildInfoContent = buildInfoContent.replace(
+    appVersionMatch[0],
+    `export const APP_VERSION = '${version}'`,
+  );
+  writeFileSync(buildInfoFile, updatedBuildInfoContent);
+  console.log(`✓ Updated shared/src/buildInfo.ts: ${currentBuildInfoVersion} → ${version}`);
+}
