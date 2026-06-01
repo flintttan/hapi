@@ -21,6 +21,8 @@ jobs:
         steps:
             - name: Checkout code
               uses: actions/checkout@v4
+              with:
+                  ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', inputs.version) || github.ref }}
 
             - name: Setup Bun
               uses: oven-sh/setup-bun@v2
@@ -28,16 +30,26 @@ jobs:
                   bun-version: latest
 
             - name: Setup Node.js
-              uses: actions/setup-node@v4
+              uses: actions/setup-node@v6
               with:
-                  node-version: '20'
+                  node-version: '24'
                   registry-url: 'https://registry.npmjs.org'
+                  package-manager-cache: false
 
             - name: Install dependencies
               run: bun install
 
             - name: Sync version from version.json
               run: bun run sync-version
+
+            - name: Validate manual release version
+              if: github.event_name == 'workflow_dispatch'
+              run: |
+                  VERSION=$(cat version.json | grep '"version"' | cut -d'"' -f4)
+                  if [ "$VERSION" != "${{ inputs.version }}" ]; then
+                      echo "Expected version ${{ inputs.version }}, but checked out $VERSION"
+                      exit 1
+                  fi
 
             - name: Determine version
               id: version
@@ -53,21 +65,17 @@ jobs:
               working-directory: cli
 
             - name: Publish platform packages
-              env:
-                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
               run: |
                   for platform in darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-x64; do
                       echo "Publishing @flintttan/hapi-${platform}..."
                       cd npm/${platform}
-                      npm publish --access public --provenance
+                      npm publish --access public
                       cd ../..
                   done
               working-directory: cli
 
             - name: Publish main package
-              env:
-                  NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
               run: |
                   cd npm/main
-                  npm publish --access public --provenance
+                  npm publish --access public
               working-directory: cli
