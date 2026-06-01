@@ -29,13 +29,11 @@ describe('messages schema migration', () => {
             CREATE TABLE sessions (
                 id TEXT PRIMARY KEY,
                 tag TEXT,
-                namespace TEXT NOT NULL DEFAULT 'default',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
             CREATE TABLE machines (
                 id TEXT PRIMARY KEY,
-                namespace TEXT NOT NULL DEFAULT 'default',
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL
             );
@@ -50,7 +48,13 @@ describe('messages schema migration', () => {
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 platform TEXT NOT NULL,
                 platform_user_id TEXT NOT NULL,
-                namespace TEXT NOT NULL DEFAULT 'default',
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE push_subscriptions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                endpoint TEXT NOT NULL,
+                p256dh TEXT NOT NULL,
+                auth TEXT NOT NULL,
                 created_at INTEGER NOT NULL
             );
         `)
@@ -60,11 +64,28 @@ describe('messages schema migration', () => {
         expect(() => new Store(dbPath)).not.toThrow()
 
         db = new Database(dbPath, { create: false, readwrite: false, strict: true })
+        const sessionColumns = db.prepare('PRAGMA table_info(sessions)').all() as Array<{ name: string }>
+        const sessionIndexes = db.prepare('PRAGMA index_list(sessions)').all() as Array<{ name: string }>
+        const machineColumns = db.prepare('PRAGMA table_info(machines)').all() as Array<{ name: string }>
+        const machineIndexes = db.prepare('PRAGMA index_list(machines)').all() as Array<{ name: string }>
+        const userColumns = db.prepare('PRAGMA table_info(users)').all() as Array<{ name: string }>
+        const userIndexes = db.prepare('PRAGMA index_list(users)').all() as Array<{ name: string }>
+        const pushColumns = db.prepare('PRAGMA table_info(push_subscriptions)').all() as Array<{ name: string }>
+        const pushIndexes = db.prepare('PRAGMA index_list(push_subscriptions)').all() as Array<{ name: string }>
         const messageColumns = db.prepare('PRAGMA table_info(messages)').all() as Array<{ name: string }>
         const messageIndexes = db.prepare('PRAGMA index_list(messages)').all() as Array<{ name: string }>
 
+        expect(sessionColumns.map((column) => column.name)).toContain('namespace')
+        expect(sessionIndexes.map((index) => index.name)).toContain('idx_sessions_tag_namespace')
+        expect(machineColumns.map((column) => column.name)).toContain('namespace')
+        expect(machineIndexes.map((index) => index.name)).toContain('idx_machines_namespace')
+        expect(userColumns.map((column) => column.name)).toContain('namespace')
+        expect(userIndexes.map((index) => index.name)).toContain('idx_users_platform_namespace')
+        expect(pushColumns.map((column) => column.name)).toContain('namespace')
+        expect(pushIndexes.map((index) => index.name)).toContain('idx_push_subscriptions_namespace')
         expect(messageColumns.map((column) => column.name)).toContain('invoked_at')
         expect(messageColumns.map((column) => column.name)).toContain('scheduled_at')
+        expect(messageIndexes.map((index) => index.name)).toContain('idx_messages_local_id')
         expect(messageIndexes.map((index) => index.name)).toContain('idx_messages_session_position')
         expect(messageIndexes.map((index) => index.name)).toContain('idx_messages_scheduled_pending')
     })

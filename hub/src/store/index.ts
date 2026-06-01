@@ -147,9 +147,12 @@ export class Store {
         this.ensureSessionsSchema()
         this.ensureMachinesSchema()
         this.ensureMessagesSchema()
+        this.ensureUsersSchema()
         this.ensureAppUsersSchema()
+        this.ensurePushSubscriptionsSchema()
         this.ensureUserPreferencesSchema()
         this.ensureSystemUsers()
+        this.ensureSchemaIndexes()
     }
 
     private normalizeUserTables(): void {
@@ -194,8 +197,6 @@ export class Store {
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0
             );
-            CREATE INDEX IF NOT EXISTS idx_sessions_tag ON sessions(tag);
-            CREATE INDEX IF NOT EXISTS idx_sessions_tag_namespace ON sessions(tag, namespace);
 
             CREATE TABLE IF NOT EXISTS machines (
                 id TEXT PRIMARY KEY,
@@ -210,7 +211,6 @@ export class Store {
                 active_at INTEGER,
                 seq INTEGER DEFAULT 0
             );
-            CREATE INDEX IF NOT EXISTS idx_machines_namespace ON machines(namespace);
 
             CREATE TABLE IF NOT EXISTS messages (
                 id TEXT PRIMARY KEY,
@@ -223,7 +223,6 @@ export class Store {
                 scheduled_at INTEGER,
                 FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             );
-            CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq);
 
             CREATE TABLE IF NOT EXISTS users (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -233,8 +232,6 @@ export class Store {
                 created_at INTEGER NOT NULL,
                 UNIQUE(platform, platform_user_id)
             );
-            CREATE INDEX IF NOT EXISTS idx_users_platform ON users(platform);
-            CREATE INDEX IF NOT EXISTS idx_users_platform_namespace ON users(platform, namespace);
 
             CREATE TABLE IF NOT EXISTS app_users (
                 id TEXT PRIMARY KEY,
@@ -244,9 +241,6 @@ export class Store {
                 password_hash TEXT,
                 created_at INTEGER NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username);
-            CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email);
-            CREATE INDEX IF NOT EXISTS idx_app_users_telegram_id ON app_users(telegram_id);
 
             CREATE TABLE IF NOT EXISTS cli_tokens (
                 id TEXT PRIMARY KEY,
@@ -257,8 +251,6 @@ export class Store {
                 last_used_at INTEGER,
                 FOREIGN KEY (user_id) REFERENCES app_users(id) ON DELETE CASCADE
             );
-            CREATE INDEX IF NOT EXISTS idx_cli_tokens_user_id ON cli_tokens(user_id);
-            CREATE INDEX IF NOT EXISTS idx_cli_tokens_token ON cli_tokens(token);
 
             CREATE TABLE IF NOT EXISTS user_preferences (
                 namespace TEXT PRIMARY KEY,
@@ -276,8 +268,9 @@ export class Store {
                 created_at INTEGER NOT NULL,
                 UNIQUE(namespace, endpoint)
             );
-            CREATE INDEX IF NOT EXISTS idx_push_subscriptions_namespace ON push_subscriptions(namespace);
         `)
+
+        this.ensureSchemaIndexes()
     }
 
     private migrateLegacySchemaIfNeeded(): void {
@@ -471,6 +464,28 @@ export class Store {
         }
     }
 
+    private ensureUsersSchema(): void {
+        if (!this.hasTable('users')) {
+            return
+        }
+
+        const columns = this.getColumnNames('users')
+        if (!columns.has('namespace')) {
+            this.db.exec(`ALTER TABLE users ADD COLUMN namespace TEXT NOT NULL DEFAULT 'default'`)
+        }
+    }
+
+    private ensurePushSubscriptionsSchema(): void {
+        if (!this.hasTable('push_subscriptions')) {
+            return
+        }
+
+        const columns = this.getColumnNames('push_subscriptions')
+        if (!columns.has('namespace')) {
+            this.db.exec(`ALTER TABLE push_subscriptions ADD COLUMN namespace TEXT NOT NULL DEFAULT 'default'`)
+        }
+    }
+
     private ensureSessionsSchema(): void {
         if (!this.hasTable('sessions')) {
             return
@@ -639,20 +654,6 @@ export class Store {
         if (!columns.has('scheduled_at')) {
             this.db.exec('ALTER TABLE messages ADD COLUMN scheduled_at INTEGER')
         }
-        this.db.exec(`
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_local_id
-                ON messages(session_id, local_id)
-                WHERE local_id IS NOT NULL
-        `)
-        this.db.exec(`
-            CREATE INDEX IF NOT EXISTS idx_messages_session_position
-                ON messages(session_id, COALESCE(invoked_at, created_at) DESC, seq DESC)
-        `)
-        this.db.exec(`
-            CREATE INDEX IF NOT EXISTS idx_messages_scheduled_pending
-                ON messages(scheduled_at)
-                WHERE scheduled_at IS NOT NULL AND invoked_at IS NULL
-        `)
     }
 
     private ensureUserPreferencesSchema(): void {
@@ -677,6 +678,92 @@ export class Store {
         }
         if (!columns.has('updated_at')) {
             this.db.exec('ALTER TABLE user_preferences ADD COLUMN updated_at INTEGER NOT NULL DEFAULT 0')
+        }
+    }
+
+    private ensureSchemaIndexes(): void {
+        if (this.hasTable('sessions')) {
+            const columns = this.getColumnNames('sessions')
+            if (columns.has('tag')) {
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_tag ON sessions(tag)')
+            }
+            if (columns.has('tag') && columns.has('namespace')) {
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_tag_namespace ON sessions(tag, namespace)')
+            }
+        }
+
+        if (this.hasTable('machines')) {
+            const columns = this.getColumnNames('machines')
+            if (columns.has('namespace')) {
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_machines_namespace ON machines(namespace)')
+            }
+        }
+
+        if (this.hasTable('messages')) {
+            const columns = this.getColumnNames('messages')
+            if (columns.has('session_id') && columns.has('seq')) {
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, seq)')
+            }
+            if (columns.has('session_id') && columns.has('local_id')) {
+                this.db.exec(`
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_local_id
+                        ON messages(session_id, local_id)
+                        WHERE local_id IS NOT NULL
+                `)
+            }
+            if (columns.has('session_id') && columns.has('invoked_at') && columns.has('created_at') && columns.has('seq')) {
+                this.db.exec(`
+                    CREATE INDEX IF NOT EXISTS idx_messages_session_position
+                        ON messages(session_id, COALESCE(invoked_at, created_at) DESC, seq DESC)
+                `)
+            }
+            if (columns.has('scheduled_at') && columns.has('invoked_at')) {
+                this.db.exec(`
+                    CREATE INDEX IF NOT EXISTS idx_messages_scheduled_pending
+                        ON messages(scheduled_at)
+                        WHERE scheduled_at IS NOT NULL AND invoked_at IS NULL
+                `)
+            }
+        }
+
+        if (this.hasTable('users')) {
+            const columns = this.getColumnNames('users')
+            if (columns.has('platform')) {
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_users_platform ON users(platform)')
+            }
+            if (columns.has('platform') && columns.has('namespace')) {
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_users_platform_namespace ON users(platform, namespace)')
+            }
+        }
+
+        if (this.hasTable('app_users')) {
+            const columns = this.getColumnNames('app_users')
+            if (columns.has('username')) {
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_app_users_username ON app_users(username)')
+            }
+            if (columns.has('email')) {
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_app_users_email ON app_users(email)')
+            }
+            if (columns.has('telegram_id')) {
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_app_users_telegram_id ON app_users(telegram_id)')
+            }
+        }
+
+        if (this.hasTable('cli_tokens')) {
+            const columns = this.getColumnNames('cli_tokens')
+            if (columns.has('user_id')) {
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_cli_tokens_user_id ON cli_tokens(user_id)')
+            }
+            if (columns.has('token')) {
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_cli_tokens_token ON cli_tokens(token)')
+            }
+        }
+
+        if (this.hasTable('push_subscriptions')) {
+            const columns = this.getColumnNames('push_subscriptions')
+            if (columns.has('namespace')) {
+                this.db.exec('CREATE INDEX IF NOT EXISTS idx_push_subscriptions_namespace ON push_subscriptions(namespace)')
+            }
         }
     }
 
