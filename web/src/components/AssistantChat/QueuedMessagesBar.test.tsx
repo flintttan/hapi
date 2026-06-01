@@ -64,7 +64,7 @@ vi.mock('@/lib/use-translation', () => ({
   })
 }))
 
-function makeOptimisticQueuedMessage() {
+function makeOptimisticMessage(status: 'sending' | 'queued' = 'queued') {
   return {
     id: 'local-1',
     seq: null,
@@ -73,7 +73,7 @@ function makeOptimisticQueuedMessage() {
     createdAt: Date.now(),
     invokedAt: null,
     scheduledAt: null,
-    status: 'queued' as const,
+    status,
     originalText: 'hello queued',
   } satisfies DecryptedMessage
 }
@@ -83,9 +83,21 @@ describe('QueuedMessagesBar local optimistic controls', () => {
     vi.clearAllMocks()
     mocks.state = {
       sessionId: 'session-1',
-      messages: [makeOptimisticQueuedMessage()],
+      messages: [makeOptimisticMessage('queued')],
       pending: [],
     }
+  })
+
+  it('does not show a normally sending optimistic message as queued', () => {
+    mocks.state = {
+      sessionId: 'session-1',
+      messages: [makeOptimisticMessage('sending')],
+      pending: [],
+    }
+
+    render(<QueuedMessagesBar sessionId="session-1" api={null} />)
+
+    expect(screen.queryByText('Queued messages')).not.toBeInTheDocument()
   })
 
   it('allows editing a queued optimistic message before server echo', () => {

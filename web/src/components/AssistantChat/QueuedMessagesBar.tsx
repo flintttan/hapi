@@ -20,7 +20,16 @@ function ClockIcon() {
 
 function isQueuedForInvocation(message: DecryptedMessage): boolean {
     const isUser = normalizeDecryptedMessage(message)?.role === 'user'
-    return isUser && message.invokedAt === null && message.status !== 'failed'
+    if (!isUser || message.invokedAt !== null || message.status === 'failed') {
+        return false
+    }
+    // Optimistic client-side bubbles share the same localId/id while the
+    // request is still in flight. Only treat them as queued when the send
+    // mutation explicitly marked them as queued (e.g. session still thinking).
+    if (message.localId && message.id === message.localId) {
+        return message.status === 'queued'
+    }
+    return true
 }
 
 export function sortQueuedMessages(msgs: DecryptedMessage[]): DecryptedMessage[] {

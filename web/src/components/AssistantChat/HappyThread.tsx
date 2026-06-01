@@ -198,8 +198,12 @@ export function HappyThread(props: {
             const distanceFromBottom = viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight
             const isNearBottom = distanceFromBottom < THRESHOLD_PX
             if (isNearBottom) {
-                if (!autoScrollEnabledRef.current) setAutoScrollEnabled(true)
+                if (!autoScrollEnabledRef.current) {
+                    autoScrollEnabledRef.current = true
+                    setAutoScrollEnabled(true)
+                }
             } else if (autoScrollEnabledRef.current) {
+                autoScrollEnabledRef.current = false
                 setAutoScrollEnabled(false)
             }
             if (isNearBottom !== atBottomRef.current) {
@@ -215,6 +219,7 @@ export function HappyThread(props: {
     const scrollToBottom = useCallback(() => {
         const viewport = viewportRef.current
         if (viewport) viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
+        autoScrollEnabledRef.current = true
         setAutoScrollEnabled(true)
         if (!atBottomRef.current) {
             atBottomRef.current = true
@@ -224,6 +229,7 @@ export function HappyThread(props: {
     }, [])
 
     useEffect(() => {
+        autoScrollEnabledRef.current = true
         setAutoScrollEnabled(true)
         atBottomRef.current = true
         onAtBottomChangeRef.current(true)
@@ -246,6 +252,7 @@ export function HappyThread(props: {
 
     const scrollMessageIntoView = useCallback((target: HTMLElement) => {
         outlineNavigationRef.current = true
+        autoScrollEnabledRef.current = false
         setAutoScrollEnabled(false)
         target.scrollIntoView({ behavior: 'smooth', block: 'center' })
         window.setTimeout(() => {

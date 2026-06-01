@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { I18nContext } from '@/lib/i18n-context'
 
@@ -8,7 +8,7 @@ const mockUseMessages = vi.fn(() => ({
   messages: [], warning: null, isLoading: false, isLoadingMore: false, hasMore: false,
   pendingCount: 0, messagesVersion: 0, loadMore: vi.fn(), refetch: vi.fn(), flushPending: vi.fn(), setAtBottom: vi.fn(),
 }))
-const mockUseSendMessage = vi.fn(() => ({ sendMessage: vi.fn(), retryMessage: vi.fn(), isSending: false }))
+const mockUseSendMessage = vi.fn(() => ({ sendMessage: vi.fn(), retryMessage: vi.fn(), isSending: false })) as Mock<(...args: any[]) => { sendMessage: ReturnType<typeof vi.fn>; retryMessage: ReturnType<typeof vi.fn>; isSending: boolean }>
 const mockUseSessions = vi.fn(() => ({ sessions: [], isLoading: false, error: null, refetch: vi.fn() }))
 const mockUseMachines = vi.fn(() => ({ machines: [], isLoading: false, error: null, refetch: vi.fn() }))
 const mockUseSlashCommands = vi.fn(() => ({ commands: [], getSuggestions: vi.fn(async () => []) }))
@@ -26,7 +26,7 @@ vi.mock('@/hooks/useTelegram', () => ({
 vi.mock('@/hooks/useSidebarResize', () => ({ useSidebarResize: () => ({ width: 320, isDragging: false, onPointerDown: vi.fn(), onPointerMove: vi.fn(), onPointerUp: vi.fn() }) }))
 vi.mock('@/hooks/queries/useSession', () => ({ useSession: () => mockUseSession() }))
 vi.mock('@/hooks/queries/useMessages', () => ({ useMessages: () => mockUseMessages() }))
-vi.mock('@/hooks/mutations/useSendMessage', () => ({ useSendMessage: () => mockUseSendMessage() }))
+vi.mock('@/hooks/mutations/useSendMessage', () => ({ useSendMessage: (...args: any[]) => mockUseSendMessage(...args) }))
 vi.mock('@/hooks/queries/useSessions', () => ({ useSessions: () => mockUseSessions() }))
 vi.mock('@/hooks/queries/useMachines', () => ({ useMachines: () => mockUseMachines() }))
 vi.mock('@/hooks/queries/useSlashCommands', () => ({ useSlashCommands: () => mockUseSlashCommands() }))
@@ -72,6 +72,12 @@ vi.mock('@tanstack/react-router', async () => {
 import { routeTree } from '@/router'
 
 describe('router SessionPage fallback', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockUseSession.mockReturnValue({ session: null, isLoading: false, error: 'not found', refetch: vi.fn() } as any)
+    mockUseSendMessage.mockReturnValue({ sendMessage: vi.fn(), retryMessage: vi.fn(), isSending: false })
+  })
+
   it('redirects to /sessions when session is missing after load', () => {
     const SessionComponent = (routeTree as any).children.find((route: any) => route.path === '/sessions')
       .children.find((route: any) => route.path === '$sessionId').component
@@ -83,5 +89,42 @@ describe('router SessionPage fallback', () => {
     )
 
     expect(screen.getByTestId('navigate')).toHaveTextContent('/sessions')
+  })
+
+  it('passes session thinking state to send-message hook', () => {
+    const SessionComponent = (routeTree as any).children.find((route: any) => route.path === '/sessions')
+      .children.find((route: any) => route.path === '$sessionId').component
+    mockUseSession.mockReturnValue({
+      session: {
+        id: 's1',
+        namespace: 'default',
+        seq: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        active: true,
+        activeAt: 1,
+        metadata: null,
+        metadataVersion: 1,
+        agentState: null,
+        agentStateVersion: 1,
+        thinking: true,
+        thinkingAt: 1,
+      },
+      isLoading: false,
+      error: null,
+      refetch: vi.fn(),
+    } as any)
+
+    render(
+      <I18nContext.Provider value={{ t: (key: string) => key, locale: 'en', setLocale: vi.fn() }}>
+        <SessionComponent />
+      </I18nContext.Provider>
+    )
+
+    expect(mockUseSendMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      's1',
+      expect.objectContaining({ isSessionThinking: true })
+    )
   })
 })
