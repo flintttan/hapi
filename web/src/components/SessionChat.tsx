@@ -288,6 +288,7 @@ export function SessionChat(props: {
             return true
         }
 
+        let previousHasMore = hasMoreMessagesRef.current
         while (hasMoreMessagesRef.current) {
             try {
                 await props.onLoadMore()
@@ -295,9 +296,14 @@ export function SessionChat(props: {
                 console.error('Failed to locate outline target message:', error)
                 return false
             }
+            await new Promise((resolve) => setTimeout(resolve, 0))
             if (findTarget()) {
                 return true
             }
+            if (previousHasMore === hasMoreMessagesRef.current) {
+                break
+            }
+            previousHasMore = hasMoreMessagesRef.current
             if (!hasMoreMessagesRef.current) {
                 break
             }

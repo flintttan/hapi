@@ -80,6 +80,21 @@ describe('codexCommand', () => {
         })
     })
 
+    it('consumes runner-only starting mode instead of forwarding it to Codex CLI args', async () => {
+        await codexCommand.run(createCommandContext([
+            '--hapi-starting-mode', 'remote',
+            '--started-by', 'runner',
+            '--model', 'gpt-5.4'
+        ]))
+
+        expect(assertCodexLocalSupportedMock).not.toHaveBeenCalled()
+        expect(runCodexMock).toHaveBeenCalledWith({
+            startedBy: 'runner',
+            model: 'gpt-5.4',
+            codexArgs: ['--model', 'gpt-5.4']
+        })
+    })
+
     it('prints the upgrade error and exits when the local version check fails', async () => {
         const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
         const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {

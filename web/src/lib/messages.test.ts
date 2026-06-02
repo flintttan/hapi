@@ -25,4 +25,29 @@ describe('mergeMessages', () => {
     expect(merged).toHaveLength(1)
     expect(merged[0]).toMatchObject({ id: 'm1', invokedAt: 200, status: 'sent' })
   })
+
+  it('preserves optimistic sending status when server echo arrives before invoked ack', () => {
+    const optimistic = makeMessage({
+      id: 'local-1',
+      seq: null,
+      status: 'sending',
+      originalText: 'hello',
+    })
+    const serverEcho = makeMessage({
+      id: 'server-1',
+      seq: 2,
+      invokedAt: null,
+    })
+
+    const merged = mergeMessages([optimistic], [serverEcho])
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0]).toMatchObject({
+      id: 'server-1',
+      localId: 'local-1',
+      status: 'sending',
+      originalText: 'hello',
+      invokedAt: null,
+    })
+  })
 })

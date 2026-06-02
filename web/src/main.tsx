@@ -11,6 +11,7 @@ import { queryClient } from './lib/query-client'
 import { createAppRouter } from './router'
 import { I18nProvider } from './lib/i18n-context'
 import { restoreSpaRedirect } from './lib/spaRedirect'
+import { getBasePath } from './lib/pwa'
 
 function getStartParam(): string | null {
     const query = new URLSearchParams(window.location.search)
@@ -30,7 +31,7 @@ function getDeepLinkedSessionId(): string | null {
 
 function getInitialPath(): string {
     const sessionId = getDeepLinkedSessionId()
-    return sessionId ? `/sessions/${sessionId}` : '/sessions'
+    return sessionId ? getBasePath(`sessions/${sessionId}`) : getBasePath('sessions')
 }
 
 async function bootstrap() {
@@ -52,9 +53,13 @@ async function bootstrap() {
 
     const updateSW = registerSW({
         onNeedRefresh() {
-            if (confirm('New version available! Reload to update?')) {
-                updateSW(true)
-            }
+            window.dispatchEvent(new CustomEvent('hapi:pwa-update-available', {
+                detail: {
+                    update: () => {
+                        void updateSW(true)
+                    }
+                }
+            }))
         },
         onOfflineReady() {
             console.log('App ready for offline use')

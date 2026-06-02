@@ -47,13 +47,17 @@ export const CliMessagesResponseSchema = z.object({
 export type CliMessagesResponse = z.infer<typeof CliMessagesResponseSchema>
 
 export const CreateSessionResponseSchema = z.object({
-    session: SessionSchema
+    session: SessionSchema.omit({ namespace: true }).extend({
+        namespace: z.string().optional()
+    })
 })
 
 export type CreateSessionResponse = z.infer<typeof CreateSessionResponseSchema>
 
 export const CreateMachineResponseSchema = z.object({
-    machine: MachineSchema
+    machine: MachineSchema.omit({ namespace: true }).extend({
+        namespace: z.string().optional()
+    })
 })
 
 export type CreateMachineResponse = z.infer<typeof CreateMachineResponseSchema>

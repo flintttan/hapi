@@ -3,6 +3,7 @@ import { precacheAndRoute } from 'workbox-precaching'
 import { registerRoute } from 'workbox-routing'
 import { CacheFirst, NetworkFirst } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
+import { getBaseAssetUrl, getBasePath } from '@/lib/pwa'
 
 declare const self: ServiceWorkerGlobalScope & {
     __WB_MANIFEST: Array<string | { url: string; revision?: string }>
@@ -99,8 +100,8 @@ self.addEventListener('push', (event) => {
 
     const title = payload.title || 'HAPI'
     const body = payload.body ?? ''
-    const icon = payload.icon ?? '/pwa-192x192.png'
-    const badge = payload.badge ?? '/pwa-64x64.png'
+    const icon = payload.icon ?? getBaseAssetUrl('pwa-192x192.png')
+    const badge = payload.badge ?? getBaseAssetUrl('pwa-64x64.png')
     const data = payload.data
     const tag = payload.tag
 
@@ -118,6 +119,6 @@ self.addEventListener('push', (event) => {
 self.addEventListener('notificationclick', (event) => {
     event.notification.close()
     const data = event.notification.data as { url?: string } | undefined
-    const url = data?.url ?? '/'
+    const url = data?.url ?? getBasePath()
     event.waitUntil(self.clients.openWindow(url))
 })

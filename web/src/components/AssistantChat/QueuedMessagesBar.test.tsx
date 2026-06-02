@@ -127,6 +127,25 @@ describe('QueuedMessagesBar local optimistic controls', () => {
     expect(screen.getByText('server queued')).toBeInTheDocument()
   })
 
+  it('does not show a server-echo message as queued when optimistic status is still sending', () => {
+    mocks.state = {
+      sessionId: 'session-1',
+      messages: [
+        makeStoredQueuedMessage({
+          id: 'server-1',
+          localId: 'local-1',
+          status: 'sending',
+          content: { role: 'user', content: { type: 'text', text: 'server echo sending' } },
+        }),
+      ],
+      pending: [],
+    }
+
+    render(<QueuedMessagesBar sessionId="session-1" api={null} />)
+
+    expect(screen.queryByText('Queued messages')).not.toBeInTheDocument()
+  })
+
   it('does not show a stored invoked message as queued', () => {
     mocks.state = {
       sessionId: 'session-1',

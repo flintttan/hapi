@@ -106,6 +106,41 @@ describe('API extra headers integration', () => {
         })
     })
 
+    it('accepts create machine responses without namespace', async () => {
+        axiosPostMock.mockResolvedValue({
+            data: {
+                machine: {
+                    id: 'machine-1',
+                    seq: 1,
+                    createdAt: now,
+                    updatedAt: now,
+                    active: true,
+                    activeAt: now,
+                    metadata: {
+                        host: 'test-host',
+                        platform: 'darwin',
+                        happyCliVersion: '0.5.55'
+                    },
+                    metadataVersion: 0,
+                    runnerState: null,
+                    runnerStateVersion: 0
+                }
+            }
+        })
+
+        const client = await ApiClient.create()
+        const machine = await client.getOrCreateMachine({
+            machineId: 'machine-1',
+            metadata: {
+                host: 'test-host',
+                platform: 'darwin',
+                happyCliVersion: '0.5.55'
+            }
+        })
+
+        expect(machine.namespace).toBe('default')
+    })
+
     it('adds extra headers to socket transport options', () => {
         configuration._setExtraHeaders({
             Cookie: 'CF_Authorization=token'

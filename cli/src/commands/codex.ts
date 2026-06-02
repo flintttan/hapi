@@ -53,6 +53,11 @@ export const codexCommand: CommandDefinition = {
                 }
                 if (arg === '--started-by') {
                     options.startedBy = commandArgs[++i] as 'runner' | 'terminal'
+                } else if (arg === '--hapi-starting-mode') {
+                    const value = commandArgs[++i]
+                    if (value !== 'local' && value !== 'remote') {
+                        throw new Error('Invalid --hapi-starting-mode (expected local or remote)')
+                    }
                 } else if (arg === '--permission-mode') {
                     const mode = commandArgs[++i]
                     if (!mode || !(CODEX_PERMISSION_MODES as readonly string[]).includes(mode)) {

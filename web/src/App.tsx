@@ -26,6 +26,7 @@ import { ReconnectingBanner } from '@/components/ReconnectingBanner'
 import { VoiceErrorBanner } from '@/components/VoiceErrorBanner'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
+import { PwaUpdateToastBridge } from '@/components/PwaUpdateToastBridge'
 import { ToastProvider, useToast } from '@/lib/toast-context'
 import type { SyncEvent } from '@/types/api'
 
@@ -359,6 +360,7 @@ function AppInner() {
                 <div className="h-full min-h-0 flex flex-col">
                     <Outlet />
                 </div>
+                <PwaUpdateToastBridge />
                 <ToastContainer />
                 <InstallPrompt />
             </VoiceProvider>

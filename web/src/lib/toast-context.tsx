@@ -6,6 +6,8 @@ export type Toast = {
     body: string
     sessionId: string
     url: string
+    actionLabel?: string
+    onAction?: () => void
 }
 
 export type ToastContextValue = {

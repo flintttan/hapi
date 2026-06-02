@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Spinner } from '@/components/Spinner'
 import { useTranslation } from '@/lib/use-translation'
 import { MessageSearchContext } from '@/components/AssistantChat/messageSearchContext'
+import { useToast } from '@/lib/toast-context'
 
 function NewMessagesIndicator(props: { count: number; onClick: () => void }) {
     const { t } = useTranslation()
@@ -151,6 +152,7 @@ export function HappyThread(props: {
     onLocateMessage?: (messageId: string) => Promise<boolean>
 }) {
     const { t } = useTranslation()
+    const { addToast } = useToast()
     const viewportRef = useRef<HTMLDivElement | null>(null)
     const topSentinelRef = useRef<HTMLDivElement | null>(null)
     const loadLockRef = useRef(false)
@@ -170,6 +172,7 @@ export function HappyThread(props: {
     const [autoScrollEnabled, setAutoScrollEnabled] = useState(true)
     const autoScrollEnabledRef = useRef(autoScrollEnabled)
     const outlineNavigationRef = useRef(false)
+    const outlineSelectionInFlightRef = useRef(false)
 
     useEffect(() => {
         autoScrollEnabledRef.current = autoScrollEnabled
@@ -261,25 +264,42 @@ export function HappyThread(props: {
     }, [])
 
     const handleOutlineItemSelect = useCallback(async (item: ConversationOutlineItem) => {
+        if (outlineSelectionInFlightRef.current) {
+            return
+        }
+        outlineSelectionInFlightRef.current = true
         const anchorId = getConversationMessageAnchorId(item.targetMessageId)
         const viewport = viewportRef.current
         const findTarget = () => viewport?.querySelector<HTMLElement>(`#${CSS.escape(anchorId)}`) ?? null
-        let target = findTarget()
-        if (!target && props.onLocateMessage) {
-            const currentViewport = viewportRef.current
-            const anchor = currentViewport ? captureScrollAnchor(currentViewport) : null
-            const located = await props.onLocateMessage(item.targetMessageId)
-            if (located && currentViewport && anchor) {
-                restoreScrollAnchor(currentViewport, anchor)
+        try {
+            let target = findTarget()
+            if (!target && props.onLocateMessage) {
+                const currentViewport = viewportRef.current
+                const anchor = currentViewport ? captureScrollAnchor(currentViewport) : null
+                const located = await props.onLocateMessage(item.targetMessageId)
+                if (located && currentViewport && anchor) {
+                    restoreScrollAnchor(currentViewport, anchor)
+                }
+                target = findTarget()
             }
-            target = findTarget()
+
+            if (target) {
+                scrollMessageIntoView(target)
+                props.onOutlineItemClick?.(item)
+                props.onOutlineOpenChange?.(false)
+                return
+            }
+
+            addToast({
+                title: t('session.outline.title'),
+                body: t('session.outline.empty'),
+                sessionId: props.sessionId,
+                url: `/sessions/${props.sessionId}`,
+            })
+        } finally {
+            outlineSelectionInFlightRef.current = false
         }
-        if (target) {
-            scrollMessageIntoView(target)
-        }
-        props.onOutlineItemClick?.(item)
-        props.onOutlineOpenChange?.(false)
-    }, [props.onLocateMessage, props.onOutlineItemClick, props.onOutlineOpenChange, scrollMessageIntoView])
+    }, [addToast, props.onLocateMessage, props.onOutlineItemClick, props.onOutlineOpenChange, props.sessionId, scrollMessageIntoView, t])
 
     const handleLoadMore = useCallback(() => {
         if (isLoadingMessagesRef.current || !hasMoreMessagesRef.current || isLoadingMoreRef.current || loadLockRef.current) return

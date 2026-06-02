@@ -20,8 +20,14 @@ export function ToastContainer() {
                     key={toast.id}
                     title={toast.title}
                     body={toast.body}
+                    actionLabel={toast.actionLabel}
                     className="cursor-pointer"
                     onClick={() => {
+                        if (toast.onAction) {
+                            toast.onAction()
+                            removeToast(toast.id)
+                            return
+                        }
                         removeToast(toast.id)
                         if (toast.sessionId) {
                             void navigate({

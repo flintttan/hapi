@@ -20,10 +20,11 @@ export type ToastProps = React.HTMLAttributes<HTMLDivElement> &
     VariantProps<typeof toastVariants> & {
     title: string
     body: string
+    actionLabel?: string
     onClose?: () => void
 }
 
-export function Toast({ title, body, onClose, className, variant, ...props }: ToastProps) {
+export function Toast({ title, body, actionLabel, onClose, className, variant, ...props }: ToastProps) {
     const handleClose = (event: React.MouseEvent<HTMLButtonElement>) => {
         event.stopPropagation()
         onClose?.()
@@ -35,6 +36,9 @@ export function Toast({ title, body, onClose, className, variant, ...props }: To
                 <div className="min-w-0 flex-1">
                     <div className="text-sm font-semibold leading-5">{title}</div>
                     <div className="mt-1 text-xs text-[var(--app-hint)]">{body}</div>
+                    {actionLabel ? (
+                        <div className="mt-2 text-xs font-medium text-[var(--app-link)]">{actionLabel}</div>
+                    ) : null}
                 </div>
                 {onClose ? (
                     <button

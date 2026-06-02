@@ -34,6 +34,14 @@ function isQueuedForInvocation(message: DecryptedMessage): boolean {
         return message.status === 'queued' || isScheduledForFuture
     }
 
+    // A server-echoed row may still carry optimistic status copied over by
+    // mergeMessages() before the CLI sends messages-consumed. Preserve that
+    // semantic so the first in-flight message stays in-thread instead of
+    // flashing in the queued bar.
+    if (message.status === 'sending') {
+        return false
+    }
+
     // Stored rows do not carry a client-only status. With a server id and
     // invokedAt=null they are the authoritative queued/scheduled messages.
     return true

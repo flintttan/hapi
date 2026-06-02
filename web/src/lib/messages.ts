@@ -61,6 +61,30 @@ export function mergeMessages(existing: DecryptedMessage[], incoming: DecryptedM
 
     let merged = Array.from(byId.values())
 
+    const optimisticByLocalId = new Map<string, DecryptedMessage>()
+    for (const msg of merged) {
+        if (msg.localId && isOptimisticMessage(msg)) {
+            optimisticByLocalId.set(msg.localId, msg)
+        }
+    }
+
+    if (optimisticByLocalId.size > 0) {
+        merged = merged.map((msg) => {
+            if (!msg.localId || isOptimisticMessage(msg)) {
+                return msg
+            }
+            const optimistic = optimisticByLocalId.get(msg.localId)
+            if (!optimistic) {
+                return msg
+            }
+            return {
+                ...msg,
+                status: optimistic.status ?? msg.status,
+                originalText: optimistic.originalText ?? msg.originalText,
+            }
+        })
+    }
+
     const incomingStoredLocalIds = new Set<string>()
     for (const msg of incoming) {
         if (msg.localId && !isOptimisticMessage(msg)) {
