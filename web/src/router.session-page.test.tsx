@@ -50,7 +50,14 @@ vi.mock('@/lib/message-window-store', () => ({ fetchLatestMessages: vi.fn(), see
 vi.mock('@/lib/clearDraftsAfterSend', () => ({ clearDraftsAfterSend: vi.fn() }))
 vi.mock('@tanstack/react-query', async () => {
   const actual = await vi.importActual<typeof import('@tanstack/react-query')>('@tanstack/react-query')
-  return { ...actual, useQueryClient: () => ({ prefetchQuery: vi.fn(), setQueryData: vi.fn() }) }
+  return {
+    ...actual,
+    useQueryClient: () => ({
+      prefetchQuery: vi.fn(),
+      setQueryData: vi.fn(),
+      invalidateQueries: vi.fn(),
+    })
+  }
 })
 vi.mock('@tanstack/react-router', async () => {
   const React = await vi.importActual<typeof import('react')>('react')
