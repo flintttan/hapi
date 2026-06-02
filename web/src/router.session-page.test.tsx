@@ -15,6 +15,8 @@ const mockUseSlashCommands = vi.fn(() => ({ commands: [], getSuggestions: vi.fn(
 const mockUseSkills = vi.fn(() => ({ getSuggestions: vi.fn(async () => []) }))
 const mockUseLocation = vi.fn(({ select }: { select: (v: { pathname: string }) => string }) => select({ pathname: '/sessions/s1' }))
 const mockUseParams = vi.fn(() => ({ sessionId: 's1' }))
+const mockNavigate = vi.fn()
+let capturedNewSessionOnSuccess: ((sessionId: string) => void) | null = null
 
 vi.mock('@/lib/app-context', () => ({ useAppContext: () => mockUseAppContext() }))
 vi.mock('@/App', () => ({ App: () => <div data-testid="app-root" /> }))
@@ -34,7 +36,12 @@ vi.mock('@/hooks/queries/useSkills', () => ({ useSkills: () => mockUseSkills() }
 vi.mock('@/lib/toast-context', () => ({ useToast: () => ({ addToast: vi.fn() }) }))
 vi.mock('@/components/SessionChat', () => ({ SessionChat: () => <div>session chat</div> }))
 vi.mock('@/components/SessionList', () => ({ SessionList: () => <div>session list</div> }))
-vi.mock('@/components/NewSession', () => ({ NewSession: () => <div>new session</div> }))
+vi.mock('@/components/NewSession', () => ({
+  NewSession: ({ onSuccess }: { onSuccess: (sessionId: string) => void }) => {
+    capturedNewSessionOnSuccess = onSuccess
+    return <div>new session</div>
+  }
+}))
 vi.mock('@/routes/sessions/files', () => ({ default: () => <div>files</div> }))
 vi.mock('@/routes/sessions/file', () => ({ default: () => <div>file</div> }))
 vi.mock('@/routes/sessions/terminal', () => ({ default: () => <div>terminal</div> }))
@@ -64,7 +71,7 @@ vi.mock('@tanstack/react-router', async () => {
     createRouter: (config: unknown) => config,
     useLocation: (arg: unknown) => mockUseLocation(arg as never),
     useMatchRoute: () => vi.fn(() => ({ sessionId: 's1' })),
-    useNavigate: () => vi.fn(),
+    useNavigate: () => mockNavigate,
     useParams: () => mockUseParams(),
   }
 })
@@ -74,6 +81,8 @@ import { routeTree } from '@/router'
 describe('router SessionPage fallback', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockNavigate.mockReset()
+    capturedNewSessionOnSuccess = null
     mockUseSession.mockReturnValue({ session: null, isLoading: false, error: 'not found', refetch: vi.fn() } as any)
     mockUseSendMessage.mockReturnValue({ sendMessage: vi.fn(), retryMessage: vi.fn(), isSending: false })
   })
@@ -131,5 +140,27 @@ describe('router SessionPage fallback', () => {
         onSessionResolved: expect.any(Function),
       })
     )
+  })
+
+  it('navigates directly to the created session on new session success', async () => {
+    const NewSessionComponent = (routeTree as any).children.find((route: any) => route.path === '/sessions')
+      .children.find((route: any) => route.path === 'new').component
+
+    expect(NewSessionComponent).toBeTruthy()
+
+    render(
+      <I18nContext.Provider value={{ t: (key: string) => key, locale: 'en', setLocale: vi.fn() }}>
+        <NewSessionComponent />
+      </I18nContext.Provider>
+    )
+
+    expect(capturedNewSessionOnSuccess).toBeTruthy()
+    capturedNewSessionOnSuccess?.('session-new')
+
+    expect(mockNavigate).toHaveBeenCalledWith({
+      to: '/sessions/$sessionId',
+      params: { sessionId: 'session-new' },
+      replace: true,
+    })
   })
 })

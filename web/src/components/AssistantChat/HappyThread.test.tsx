@@ -89,6 +89,30 @@ describe('HappyThread outline navigation', () => {
     vi.clearAllMocks()
   })
 
+  it('scrolls to bottom when session id changes', async () => {
+    const { rerender, container } = render(
+      <HappyThread {...makeProps({ sessionId: 'session-1', outlineOpen: false })} />,
+    )
+
+    const viewport = container.querySelector('.app-scroll-y') as HTMLDivElement | null
+    expect(viewport).toBeTruthy()
+    if (!viewport) return
+
+    Object.defineProperty(viewport, 'scrollHeight', {
+      configurable: true,
+      get: () => 999,
+    })
+    viewport.scrollTop = 0
+
+    rerender(
+      <HappyThread {...makeProps({ sessionId: 'session-2', outlineOpen: false })} />,
+    )
+
+    await waitFor(() => {
+      expect(viewport.scrollTop).toBe(999)
+    })
+  })
+
   it('closes outline after successful locate', async () => {
     const onOutlineOpenChange = vi.fn()
     const onLocateMessage = vi.fn(async () => true)

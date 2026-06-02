@@ -373,14 +373,10 @@ function NewSessionPage() {
 
     const handleSuccess = useCallback((sessionId: string) => {
         void queryClient.invalidateQueries({ queryKey: queryKeys.sessions })
-        // Replace current page with /sessions to clear spawn flow from history
-        navigate({ to: '/sessions', replace: true })
-        // Then navigate to new session
-        requestAnimationFrame(() => {
-            navigate({
-                to: '/sessions/$sessionId',
-                params: { sessionId },
-            })
+        navigate({
+            to: '/sessions/$sessionId',
+            params: { sessionId },
+            replace: true,
         })
     }, [navigate, queryClient])
 

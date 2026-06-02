@@ -237,6 +237,11 @@ export function HappyThread(props: {
         atBottomRef.current = true
         onAtBottomChangeRef.current(true)
         forceScrollTokenRef.current = props.forceScrollToken
+        const viewport = viewportRef.current
+        if (viewport) {
+            viewport.scrollTop = viewport.scrollHeight
+        }
+        onFlushPendingRef.current()
     }, [props.sessionId])
 
     useEffect(() => {
