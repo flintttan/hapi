@@ -23,10 +23,6 @@ vi.mock('@/lib/sessionModelLabel', () => ({
   getSessionModelLabel: () => null,
 }))
 
-vi.mock('@/components/SessionActionMenu', () => ({
-  SessionActionMenu: () => null,
-}))
-
 vi.mock('@/components/RenameSessionDialog', () => ({
   RenameSessionDialog: () => null,
 }))

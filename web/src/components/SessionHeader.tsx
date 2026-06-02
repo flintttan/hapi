@@ -317,6 +317,7 @@ export function SessionHeader(props: {
                 onArchive={() => setArchiveOpen(true)}
                 onDelete={() => setDeleteOpen(true)}
                 anchorPoint={menuAnchorPoint}
+                anchorRef={menuAnchorRef}
                 menuId={menuId}
             />
 

@@ -5,7 +5,8 @@ import {
     useLayoutEffect,
     useRef,
     useState,
-    type CSSProperties
+    type CSSProperties,
+    type RefObject,
 } from 'react'
 import { useTranslation } from '@/lib/use-translation'
 
@@ -17,6 +18,7 @@ type SessionActionMenuProps = {
     onArchive: () => void
     onDelete: () => void
     anchorPoint: { x: number; y: number }
+    anchorRef?: RefObject<HTMLElement | null>
     menuId?: string
 }
 
@@ -100,6 +102,7 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         onArchive,
         onDelete,
         anchorPoint,
+        anchorRef,
         menuId
     } = props
     const menuRef = useRef<HTMLDivElement | null>(null)
@@ -133,19 +136,26 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         const padding = 8
         const gap = 8
 
-        const spaceBelow = viewportHeight - anchorPoint.y
-        const spaceAbove = anchorPoint.y
+        const liveAnchorPoint = anchorRef?.current
+            ? (() => {
+                const rect = anchorRef.current.getBoundingClientRect()
+                return { x: rect.right, y: rect.bottom }
+            })()
+            : anchorPoint
+
+        const spaceBelow = viewportHeight - liveAnchorPoint.y
+        const spaceAbove = liveAnchorPoint.y
         const openAbove = spaceBelow < menuRect.height + gap && spaceAbove > spaceBelow
 
-        let top = openAbove ? anchorPoint.y - menuRect.height - gap : anchorPoint.y + gap
-        let left = anchorPoint.x - menuRect.width / 2
+        let top = openAbove ? liveAnchorPoint.y - menuRect.height - gap : liveAnchorPoint.y + gap
+        let left = liveAnchorPoint.x - menuRect.width / 2
         const transformOrigin = openAbove ? 'bottom center' : 'top center'
 
         top = Math.min(Math.max(top, padding), viewportHeight - menuRect.height - padding)
         left = Math.min(Math.max(left, padding), viewportWidth - menuRect.width - padding)
 
         setMenuPosition({ top, left, transformOrigin })
-    }, [anchorPoint])
+    }, [anchorPoint, anchorRef])
 
     useLayoutEffect(() => {
         if (!isOpen) return
@@ -264,3 +274,5 @@ export function SessionActionMenu(props: SessionActionMenuProps) {
         </div>
     )
 }
+
+export type { SessionActionMenuProps }

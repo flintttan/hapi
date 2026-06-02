@@ -113,6 +113,67 @@ describe('HappyThread outline navigation', () => {
     })
   })
 
+  it('keeps session entry pinned to bottom until initial messages finish rendering', async () => {
+    const { rerender, container } = render(
+      <HappyThread {...makeProps({ sessionId: 'session-1', outlineOpen: false, isLoadingMessages: true, rawMessagesCount: 0, normalizedMessagesCount: 0, messagesVersion: 1 })} />,
+    )
+
+    const viewport = container.querySelector('.app-scroll-y') as HTMLDivElement | null
+    expect(viewport).toBeTruthy()
+    if (!viewport) return
+
+    let scrollHeight = 120
+    Object.defineProperty(viewport, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight,
+    })
+    viewport.scrollTop = 0
+
+    rerender(
+      <HappyThread {...makeProps({ sessionId: 'session-2', outlineOpen: false, isLoadingMessages: true, rawMessagesCount: 0, normalizedMessagesCount: 0, messagesVersion: 2 })} />,
+    )
+
+    await waitFor(() => {
+      expect(viewport.scrollTop).toBe(120)
+    })
+
+    scrollHeight = 640
+    rerender(
+      <HappyThread {...makeProps({ sessionId: 'session-2', outlineOpen: false, isLoadingMessages: false, rawMessagesCount: 6, normalizedMessagesCount: 6, messagesVersion: 3 })} />,
+    )
+
+    await waitFor(() => {
+      expect(viewport.scrollTop).toBe(640)
+    })
+  })
+
+  it('keeps bottom alignment when layout chrome changes while already at bottom', async () => {
+    const { rerender, container } = render(
+      <HappyThread {...makeProps({ sessionId: 'session-1', outlineOpen: false, viewportLayoutKey: 'search:0|outline:0|team:0|inactive:0' })} />,
+    )
+
+    const viewport = container.querySelector('.app-scroll-y') as HTMLDivElement | null
+    expect(viewport).toBeTruthy()
+    if (!viewport) return
+
+    let scrollHeight = 320
+    Object.defineProperty(viewport, 'scrollHeight', {
+      configurable: true,
+      get: () => scrollHeight,
+    })
+
+    viewport.scrollTop = 320
+
+    scrollHeight = 540
+    rerender(
+      <HappyThread {...makeProps({ sessionId: 'session-1', outlineOpen: false, viewportLayoutKey: 'search:1|outline:0|team:0|inactive:0' })} />,
+    )
+
+    await waitFor(() => {
+      expect(viewport.scrollTop).toBe(540)
+    })
+  })
+
   it('closes outline after successful locate', async () => {
     const onOutlineOpenChange = vi.fn()
     const onLocateMessage = vi.fn(async () => true)

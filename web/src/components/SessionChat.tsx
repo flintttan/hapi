@@ -250,6 +250,12 @@ export function SessionChat(props: {
     const activeSearchResult = searchResults.length > 0
         ? searchResults[Math.min(activeSearchIndex, searchResults.length - 1)] ?? null
         : null
+    const viewportLayoutKey = [
+        searchOpen ? 'search:1' : 'search:0',
+        outlineOpen ? 'outline:1' : 'outline:0',
+        props.session.teamState ? 'team:1' : 'team:0',
+        sessionInactive ? 'inactive:1' : 'inactive:0',
+    ].join('|')
 
     useEffect(() => {
         setActiveSearchIndex(0)
@@ -509,6 +515,7 @@ export function SessionChat(props: {
                         outlineItems={outlineItems}
                         onOutlineOpenChange={setOutlineOpen}
                         onLocateMessage={locateOutlineMessage}
+                        viewportLayoutKey={viewportLayoutKey}
                     />
 
                     <QueuedMessagesBar

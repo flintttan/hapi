@@ -150,6 +150,7 @@ export function HappyThread(props: {
     onOutlineOpenChange?: (open: boolean) => void
     onOutlineItemClick?: (item: ConversationOutlineItem) => void
     onLocateMessage?: (messageId: string) => Promise<boolean>
+    viewportLayoutKey?: string
 }) {
     const { t } = useTranslation()
     const { addToast } = useToast()
@@ -168,6 +169,7 @@ export function HappyThread(props: {
     const onAtBottomChangeRef = useRef(props.onAtBottomChange)
     const onFlushPendingRef = useRef(props.onFlushPending)
     const forceScrollTokenRef = useRef(props.forceScrollToken)
+    const pendingInitialScrollRef = useRef(true)
     const searchResultsById = new Set((props.searchResults ?? []).map((result) => result.id))
     const [autoScrollEnabled, setAutoScrollEnabled] = useState(true)
     const autoScrollEnabledRef = useRef(autoScrollEnabled)
@@ -219,9 +221,18 @@ export function HappyThread(props: {
         return () => viewport.removeEventListener('scroll', handleScroll)
     }, [])
 
-    const scrollToBottom = useCallback(() => {
+    const syncViewportToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
         const viewport = viewportRef.current
-        if (viewport) viewport.scrollTo({ top: viewport.scrollHeight, behavior: 'smooth' })
+        if (!viewport) return
+        if (behavior === 'auto') {
+            viewport.scrollTop = viewport.scrollHeight
+            return
+        }
+        viewport.scrollTo({ top: viewport.scrollHeight, behavior })
+    }, [])
+
+    const scrollToBottom = useCallback(() => {
+        syncViewportToBottom('smooth')
         autoScrollEnabledRef.current = true
         setAutoScrollEnabled(true)
         if (!atBottomRef.current) {
@@ -229,20 +240,21 @@ export function HappyThread(props: {
             onAtBottomChangeRef.current(true)
         }
         onFlushPendingRef.current()
-    }, [])
+    }, [syncViewportToBottom])
 
     useEffect(() => {
+        pendingInitialScrollRef.current = true
         autoScrollEnabledRef.current = true
         setAutoScrollEnabled(true)
         atBottomRef.current = true
         onAtBottomChangeRef.current(true)
         forceScrollTokenRef.current = props.forceScrollToken
-        const viewport = viewportRef.current
-        if (viewport) {
-            viewport.scrollTop = viewport.scrollHeight
-        }
+        syncViewportToBottom()
+        requestAnimationFrame(() => {
+            syncViewportToBottom()
+        })
         onFlushPendingRef.current()
-    }, [props.sessionId])
+    }, [props.sessionId, syncViewportToBottom])
 
     useEffect(() => {
         if (forceScrollTokenRef.current === props.forceScrollToken) return
@@ -369,10 +381,37 @@ export function HappyThread(props: {
 
     useLayoutEffect(() => {
         if (!autoScrollEnabledRef.current) return
-        const viewport = viewportRef.current
-        if (!viewport) return
-        viewport.scrollTop = viewport.scrollHeight
-    }, [props.messagesVersion, autoScrollEnabled])
+        syncViewportToBottom()
+    }, [props.messagesVersion, autoScrollEnabled, syncViewportToBottom])
+
+    useLayoutEffect(() => {
+        if (!atBottomRef.current) return
+        syncViewportToBottom()
+        requestAnimationFrame(() => {
+            if (atBottomRef.current) {
+                syncViewportToBottom()
+            }
+        })
+    }, [props.viewportLayoutKey, syncViewportToBottom])
+
+    useLayoutEffect(() => {
+        if (!pendingInitialScrollRef.current || !autoScrollEnabledRef.current) return
+        syncViewportToBottom()
+        if (props.isLoadingMessages) {
+            return
+        }
+        requestAnimationFrame(() => {
+            syncViewportToBottom()
+            pendingInitialScrollRef.current = false
+        })
+    }, [
+        props.sessionId,
+        props.isLoadingMessages,
+        props.rawMessagesCount,
+        props.normalizedMessagesCount,
+        props.messagesVersion,
+        syncViewportToBottom,
+    ])
 
     return (
         <div className="relative min-h-0 flex-1">
