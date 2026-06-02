@@ -4,10 +4,11 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { useSendMessage } from './useSendMessage'
 import type { ApiClient } from '@/api/client'
+import type { DecryptedMessage } from '@/types/api'
 
 const storeMocks = vi.hoisted(() => ({
     appendOptimisticMessage: vi.fn(),
-    getMessageWindowState: vi.fn(() => ({ messages: [], pending: [] })),
+    getMessageWindowState: vi.fn<() => { messages: DecryptedMessage[]; pending: DecryptedMessage[] }>(() => ({ messages: [], pending: [] })),
     updateMessageStatus: vi.fn(),
 }))
 
@@ -43,9 +44,10 @@ function createMockApi(sendMessage: (...args: unknown[]) => Promise<void> = asyn
 describe('useSendMessage', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        storeMocks.getMessageWindowState.mockReturnValue({ messages: [], pending: [] })
     })
 
-    it('optimistically marks an immediate message as queued while session is thinking', async () => {
+    it('optimistically marks an immediate message as sending even if session thinking is stale', async () => {
         const api = createMockApi()
 
         const { result } = renderHook(
@@ -60,7 +62,7 @@ describe('useSendMessage', () => {
         await waitFor(() => {
             expect(storeMocks.appendOptimisticMessage).toHaveBeenCalledWith(
                 'session-A',
-                expect.objectContaining({ status: 'queued', invokedAt: null })
+                expect.objectContaining({ status: 'sending', invokedAt: null })
             )
         })
     })
@@ -102,6 +104,38 @@ describe('useSendMessage', () => {
             expect(storeMocks.appendOptimisticMessage).toHaveBeenCalledWith(
                 'session-A',
                 expect.objectContaining({ status: 'queued', scheduledAt })
+            )
+        })
+    })
+
+    it('marks an immediate message as queued when another uninvoked local message already exists', async () => {
+        const api = createMockApi()
+        storeMocks.getMessageWindowState.mockReturnValue({
+            messages: [{
+                id: 'server-1',
+                seq: 1,
+                localId: 'local-existing',
+                content: { role: 'user', content: { type: 'text', text: 'first' } },
+                createdAt: 100,
+                invokedAt: null,
+                scheduledAt: null,
+            } satisfies DecryptedMessage],
+            pending: [] as DecryptedMessage[],
+        })
+
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-A', { isSessionThinking: false }),
+            { wrapper: createWrapper() },
+        )
+
+        act(() => {
+            result.current.sendMessage('second')
+        })
+
+        await waitFor(() => {
+            expect(storeMocks.appendOptimisticMessage).toHaveBeenCalledWith(
+                'session-A',
+                expect.objectContaining({ status: 'queued', invokedAt: null })
             )
         })
     })

@@ -29,6 +29,25 @@ type UseSendMessageOptions = {
     isSessionThinking?: boolean
 }
 
+function hasQueuedOrInFlightUserMessage(sessionId: string): boolean {
+    const state = getMessageWindowState(sessionId)
+    const allMessages = [...state.messages, ...state.pending]
+    const now = Date.now()
+
+    return allMessages.some((message) => {
+        if (!message.localId) {
+            return false
+        }
+        if (message.invokedAt != null || message.status === 'failed') {
+            return false
+        }
+        if (message.scheduledAt != null && message.scheduledAt > now) {
+            return true
+        }
+        return true
+    })
+}
+
 function findMessageByLocalId(
     sessionId: string,
     localId: string,
@@ -67,7 +86,8 @@ export function useSendMessage(
         },
         onMutate: async (input) => {
             const isFutureScheduled = input.scheduledAt != null && input.scheduledAt > Date.now()
-            const shouldQueue = isFutureScheduled || isSessionThinkingRef.current
+            const hasQueuedOrInFlight = hasQueuedOrInFlightUserMessage(input.sessionId)
+            const shouldQueue = isFutureScheduled || hasQueuedOrInFlight
             const status = shouldQueue ? 'queued' as const : 'sending' as const
             const optimisticMessage: DecryptedMessage = {
                 id: input.localId,
