@@ -155,9 +155,11 @@ export function HappyThread(props: {
     const { t } = useTranslation()
     const { addToast } = useToast()
     const viewportRef = useRef<HTMLDivElement | null>(null)
+    const messagesContainerRef = useRef<HTMLDivElement | null>(null)
     const topSentinelRef = useRef<HTMLDivElement | null>(null)
     const loadLockRef = useRef(false)
     const pendingScrollRef = useRef<{ scrollTop: number; scrollHeight: number } | null>(null)
+    const initialScrollSettleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const prevLoadingMoreRef = useRef(false)
     const loadStartedRef = useRef(false)
     const isLoadingMoreRef = useRef(props.isLoadingMoreMessages)
@@ -231,6 +233,24 @@ export function HappyThread(props: {
         viewport.scrollTo({ top: viewport.scrollHeight, behavior })
     }, [])
 
+    const clearInitialScrollSettleTimer = useCallback(() => {
+        if (initialScrollSettleTimerRef.current !== null) {
+            clearTimeout(initialScrollSettleTimerRef.current)
+            initialScrollSettleTimerRef.current = null
+        }
+    }, [])
+
+    const scheduleInitialScrollSettle = useCallback(() => {
+        if (!pendingInitialScrollRef.current || isLoadingMessagesRef.current) {
+            return
+        }
+        clearInitialScrollSettleTimer()
+        initialScrollSettleTimerRef.current = setTimeout(() => {
+            pendingInitialScrollRef.current = false
+            initialScrollSettleTimerRef.current = null
+        }, 250)
+    }, [clearInitialScrollSettleTimer])
+
     const scrollToBottom = useCallback(() => {
         syncViewportToBottom('smooth')
         autoScrollEnabledRef.current = true
@@ -244,6 +264,7 @@ export function HappyThread(props: {
 
     useEffect(() => {
         pendingInitialScrollRef.current = true
+        clearInitialScrollSettleTimer()
         autoScrollEnabledRef.current = true
         setAutoScrollEnabled(true)
         atBottomRef.current = true
@@ -252,9 +273,10 @@ export function HappyThread(props: {
         syncViewportToBottom()
         requestAnimationFrame(() => {
             syncViewportToBottom()
+            scheduleInitialScrollSettle()
         })
         onFlushPendingRef.current()
-    }, [props.sessionId, syncViewportToBottom])
+    }, [props.sessionId, clearInitialScrollSettleTimer, scheduleInitialScrollSettle, syncViewportToBottom])
 
     useEffect(() => {
         if (forceScrollTokenRef.current === props.forceScrollToken) return
@@ -319,6 +341,7 @@ export function HappyThread(props: {
     }, [addToast, props.onLocateMessage, props.onOutlineItemClick, props.onOutlineOpenChange, props.sessionId, scrollMessageIntoView, t])
 
     const handleLoadMore = useCallback(() => {
+        if (pendingInitialScrollRef.current) return
         if (isLoadingMessagesRef.current || !hasMoreMessagesRef.current || isLoadingMoreRef.current || loadLockRef.current) return
         const viewport = viewportRef.current
         if (!viewport) return
@@ -402,7 +425,7 @@ export function HappyThread(props: {
         }
         requestAnimationFrame(() => {
             syncViewportToBottom()
-            pendingInitialScrollRef.current = false
+            scheduleInitialScrollSettle()
         })
     }, [
         props.sessionId,
@@ -410,12 +433,71 @@ export function HappyThread(props: {
         props.rawMessagesCount,
         props.normalizedMessagesCount,
         props.messagesVersion,
+        scheduleInitialScrollSettle,
         syncViewportToBottom,
     ])
+
+    useEffect(() => {
+        const viewport = viewportRef.current
+        const messagesContainer = messagesContainerRef.current
+        if (!viewport || !messagesContainer) {
+            return
+        }
+
+        let frameId: number | null = null
+        const keepPinnedToBottom = () => {
+            if (!pendingInitialScrollRef.current && !atBottomRef.current) {
+                return
+            }
+            if (frameId !== null) {
+                cancelAnimationFrame(frameId)
+            }
+            frameId = requestAnimationFrame(() => {
+                frameId = null
+                if (pendingInitialScrollRef.current || atBottomRef.current) {
+                    syncViewportToBottom()
+                    scheduleInitialScrollSettle()
+                }
+            })
+        }
+
+        let resizeObserver: ResizeObserver | null = null
+        if (typeof ResizeObserver !== 'undefined') {
+            resizeObserver = new ResizeObserver(() => {
+                keepPinnedToBottom()
+            })
+            resizeObserver.observe(messagesContainer)
+            resizeObserver.observe(viewport)
+        }
+
+        let mutationObserver: MutationObserver | null = null
+        if (typeof MutationObserver !== 'undefined') {
+            mutationObserver = new MutationObserver(() => {
+                keepPinnedToBottom()
+            })
+            mutationObserver.observe(messagesContainer, {
+                childList: true,
+                subtree: true,
+                characterData: true,
+            })
+        }
+
+        return () => {
+            resizeObserver?.disconnect()
+            mutationObserver?.disconnect()
+            if (frameId !== null) {
+                cancelAnimationFrame(frameId)
+            }
+            clearInitialScrollSettleTimer()
+        }
+    }, [clearInitialScrollSettleTimer, props.sessionId, scheduleInitialScrollSettle, syncViewportToBottom])
 
     return (
         <div className="relative min-h-0 flex-1">
             <HappyChatProvider value={{ api: props.api, sessionId: props.sessionId, metadata: props.metadata, disabled: props.disabled, onRefresh: props.onRefresh, onRetryMessage: props.onRetryMessage, hasMoreMessages: props.hasMoreMessages, isLoadingMoreMessages: props.isLoadingMoreMessages, loadOlderMessagesPreservingScroll: async () => {
+                if (pendingInitialScrollRef.current) {
+                    return false
+                }
                 if (isLoadingMessagesRef.current || !hasMoreMessagesRef.current || isLoadingMoreRef.current || loadLockRef.current) {
                     return false
                 }
@@ -448,7 +530,7 @@ export function HappyThread(props: {
                 <MessageSearchContext.Provider value={{ resultIds: searchResultsById, activeId: props.activeSearchResult?.id ?? null }}>
                     <ThreadPrimitive.Root className="relative flex h-full min-h-0 flex-col">
                         <div ref={viewportRef} className="app-scroll-y flex-1 px-3 py-3">
-                            <div className="mx-auto flex w-full max-w-content flex-col gap-3 happy-thread-messages">
+                            <div ref={messagesContainerRef} className="mx-auto flex w-full max-w-content flex-col gap-3 happy-thread-messages">
                                 <div ref={topSentinelRef} className="h-px w-full" />
                                 {props.hasMoreMessages ? (
                                     <div className="flex justify-center pt-1">
