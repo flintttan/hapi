@@ -113,6 +113,7 @@ export type NormalizedMessage = ({
     id: string
     localId: string | null
     createdAt: number
+    invokedAt?: number | null
     isSidechain: boolean
     meta?: unknown
     usage?: UsageData

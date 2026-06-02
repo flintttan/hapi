@@ -77,6 +77,7 @@ export function reduceTimeline(
                 id: msg.id,
                 localId: msg.localId,
                 createdAt: msg.createdAt,
+                invokedAt: msg.invokedAt,
                 text: msg.content.text,
                 attachments: msg.content.attachments,
                 status: msg.status,

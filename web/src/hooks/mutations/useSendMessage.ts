@@ -55,6 +55,8 @@ export function useSendMessage(
     const { haptic } = usePlatform()
     const [isResolving, setIsResolving] = useState(false)
     const resolveGuardRef = useRef(false)
+    const isSessionThinkingRef = useRef(options?.isSessionThinking ?? false)
+    isSessionThinkingRef.current = options?.isSessionThinking ?? false
 
     const mutation = useMutation({
         mutationFn: async (input: SendMessageInput) => {
@@ -65,7 +67,8 @@ export function useSendMessage(
         },
         onMutate: async (input) => {
             const isFutureScheduled = input.scheduledAt != null && input.scheduledAt > Date.now()
-            const status = isFutureScheduled ? 'queued' as const : 'sending' as const
+            const shouldQueue = isFutureScheduled || isSessionThinkingRef.current
+            const status = shouldQueue ? 'queued' as const : 'sending' as const
             const optimisticMessage: DecryptedMessage = {
                 id: input.localId,
                 seq: null,

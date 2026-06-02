@@ -45,11 +45,31 @@ describe('useSendMessage', () => {
         vi.clearAllMocks()
     })
 
-    it('optimistically marks an immediate message as sending even while session is thinking', async () => {
+    it('optimistically marks an immediate message as queued while session is thinking', async () => {
         const api = createMockApi()
 
         const { result } = renderHook(
             () => useSendMessage(api, 'session-A', { isSessionThinking: true }),
+            { wrapper: createWrapper() },
+        )
+
+        act(() => {
+            result.current.sendMessage('hello')
+        })
+
+        await waitFor(() => {
+            expect(storeMocks.appendOptimisticMessage).toHaveBeenCalledWith(
+                'session-A',
+                expect.objectContaining({ status: 'queued', invokedAt: null })
+            )
+        })
+    })
+
+    it('optimistically marks an immediate message as sending when session is idle', async () => {
+        const api = createMockApi()
+
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-A', { isSessionThinking: false }),
             { wrapper: createWrapper() },
         )
 

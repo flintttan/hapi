@@ -53,6 +53,17 @@ describe('reduceTimeline', () => {
         expect(blocks[0].kind).toBe('user-text')
     })
 
+    it('preserves invokedAt on user-text blocks for outline filtering', () => {
+        const { blocks } = reduceTimeline([
+            makeUserMessage('queued', { id: 'msg-queued', invokedAt: null }),
+            makeUserMessage('invoked', { id: 'msg-invoked', invokedAt: 123 }),
+        ], makeContext())
+
+        expect(blocks).toHaveLength(2)
+        expect(blocks[0]).toMatchObject({ kind: 'user-text', id: 'msg-queued', invokedAt: null })
+        expect(blocks[1]).toMatchObject({ kind: 'user-text', id: 'msg-invoked', invokedAt: 123 })
+    })
+
     it('suppresses "No response requested." when parentUUID points to an injected turn', () => {
         // Simulate: sidechain message with uuid 'injected-uuid', then sentinel reply pointing to it
         const injectedMsg: TracedMessage = {

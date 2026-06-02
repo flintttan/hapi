@@ -47,6 +47,15 @@ export function mergeMessages(existing: DecryptedMessage[], incoming: DecryptedM
         byId.set(msg.id, msg)
     }
     for (const msg of incoming) {
+        const current = byId.get(msg.id)
+        if (current && current.invokedAt !== null && current.invokedAt !== undefined && (msg.invokedAt === null || msg.invokedAt === undefined)) {
+            byId.set(msg.id, {
+                ...msg,
+                invokedAt: current.invokedAt,
+                status: current.status,
+            })
+            continue
+        }
         byId.set(msg.id, msg)
     }
 
