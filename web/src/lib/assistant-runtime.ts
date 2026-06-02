@@ -29,17 +29,17 @@ function toThreadMessageLike(block: VisibleChatBlock): ThreadMessageLike {
             id: messageId,
             createdAt: new Date(block.createdAt),
             content: [{ type: 'text', text: block.text }],
-            metadata: {
-                custom: {
-                    kind: 'user',
-                    searchId: `user-text:${block.id}`,
-                    status: block.status,
-                    localId: block.localId,
-                    originalText: block.originalText,
-                    attachments: block.attachments
-                } satisfies HappyChatMessageMetadata
+                metadata: {
+                    custom: {
+                        kind: 'user',
+                        searchId: `user-text:${block.id}`,
+                        status: block.status,
+                        localId: block.localId,
+                        originalText: block.originalText,
+                        attachments: block.attachments
+                    } satisfies HappyChatMessageMetadata
+                }
             }
-        }
     }
 
     if (block.kind === 'agent-text') {

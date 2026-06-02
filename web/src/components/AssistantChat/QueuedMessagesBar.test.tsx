@@ -64,6 +64,20 @@ vi.mock('@/lib/use-translation', () => ({
   })
 }))
 
+
+function makeStoredQueuedMessage(overrides: Partial<DecryptedMessage> = {}) {
+  return {
+    id: 'server-1',
+    seq: 1,
+    localId: 'local-server-1',
+    content: { role: 'user', content: { type: 'text', text: 'server queued' } },
+    createdAt: Date.now(),
+    invokedAt: null,
+    scheduledAt: null,
+    ...overrides,
+  } satisfies DecryptedMessage
+}
+
 function makeOptimisticMessage(status: 'sending' | 'queued' = 'queued') {
   return {
     id: 'local-1',
@@ -92,6 +106,31 @@ describe('QueuedMessagesBar local optimistic controls', () => {
     mocks.state = {
       sessionId: 'session-1',
       messages: [makeOptimisticMessage('sending')],
+      pending: [],
+    }
+
+    render(<QueuedMessagesBar sessionId="session-1" api={null} />)
+
+    expect(screen.queryByText('Queued messages')).not.toBeInTheDocument()
+  })
+
+  it('shows a stored server queued message even without client-only status', () => {
+    mocks.state = {
+      sessionId: 'session-1',
+      messages: [makeStoredQueuedMessage()],
+      pending: [],
+    }
+
+    render(<QueuedMessagesBar sessionId="session-1" api={null} />)
+
+    expect(screen.getByText('Queued messages')).toBeInTheDocument()
+    expect(screen.getByText('server queued')).toBeInTheDocument()
+  })
+
+  it('does not show a stored invoked message as queued', () => {
+    mocks.state = {
+      sessionId: 'session-1',
+      messages: [makeStoredQueuedMessage({ invokedAt: Date.now() })],
       pending: [],
     }
 

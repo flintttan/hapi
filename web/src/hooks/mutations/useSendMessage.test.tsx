@@ -5,10 +5,16 @@ import type { ReactNode } from 'react'
 import { useSendMessage } from './useSendMessage'
 import type { ApiClient } from '@/api/client'
 
-vi.mock('@/lib/message-window-store', () => ({
+const storeMocks = vi.hoisted(() => ({
     appendOptimisticMessage: vi.fn(),
     getMessageWindowState: vi.fn(() => ({ messages: [], pending: [] })),
     updateMessageStatus: vi.fn(),
+}))
+
+vi.mock('@/lib/message-window-store', () => ({
+    appendOptimisticMessage: storeMocks.appendOptimisticMessage,
+    getMessageWindowState: storeMocks.getMessageWindowState,
+    updateMessageStatus: storeMocks.updateMessageStatus,
 }))
 
 vi.mock('@/hooks/usePlatform', () => ({
@@ -37,6 +43,47 @@ function createMockApi(sendMessage: (...args: unknown[]) => Promise<void> = asyn
 describe('useSendMessage', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+    })
+
+    it('optimistically marks an immediate message as sending even while session is thinking', async () => {
+        const api = createMockApi()
+
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-A', { isSessionThinking: true }),
+            { wrapper: createWrapper() },
+        )
+
+        act(() => {
+            result.current.sendMessage('hello')
+        })
+
+        await waitFor(() => {
+            expect(storeMocks.appendOptimisticMessage).toHaveBeenCalledWith(
+                'session-A',
+                expect.objectContaining({ status: 'sending', invokedAt: null })
+            )
+        })
+    })
+
+    it('optimistically marks a future scheduled message as queued', async () => {
+        const api = createMockApi()
+        const scheduledAt = Date.now() + 60_000
+
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-A'),
+            { wrapper: createWrapper() },
+        )
+
+        act(() => {
+            result.current.sendMessage('hello later', undefined, scheduledAt)
+        })
+
+        await waitFor(() => {
+            expect(storeMocks.appendOptimisticMessage).toHaveBeenCalledWith(
+                'session-A',
+                expect.objectContaining({ status: 'queued', scheduledAt })
+            )
+        })
     })
 
     it('calls onSuccess with the session ID that was sent', async () => {

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { ToolCallMessagePartProps } from '@assistant-ui/react'
 import type { ChatBlock, CodexReviewBlock, GeneratedImageBlock } from '@/chat/types'
 import type { ToolCallBlock } from '@/chat/types'
+import { isToolGroupBlock, type ToolGroupBlock } from '@/chat/toolGroups'
 import { isObject, safeStringify } from '@hapi/protocol'
 import { getEventPresentation } from '@/chat/presentation'
 import { CodeBlock } from '@/components/CodeBlock'
@@ -9,6 +10,7 @@ import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { LazyRainbowText } from '@/components/LazyRainbowText'
 import { MessageStatusIndicator } from '@/components/AssistantChat/messages/MessageStatusIndicator'
 import { ToolCard } from '@/components/ToolCard/ToolCard'
+import { ToolGroupCard } from '@/components/ToolCard/ToolGroupCard'
 import { useHappyChatContext } from '@/components/AssistantChat/context'
 import { CliOutputBlock } from '@/components/CliOutputBlock'
 import { ImagePreview } from '@/components/ImagePreview'
@@ -44,6 +46,10 @@ function isToolCallBlock(value: unknown): value is ToolCallBlock {
     if (value.tool.description !== null && typeof value.tool.description !== 'string') return false
     if (value.tool.state !== 'pending' && value.tool.state !== 'running' && value.tool.state !== 'completed' && value.tool.state !== 'error') return false
     return true
+}
+
+function isToolGroupArtifact(value: unknown): value is ToolGroupBlock {
+    return isObject(value) && isToolGroupBlock(value as never) && Array.isArray((value as { tools?: unknown }).tools)
 }
 
 function GeneratedImageCard(props: { block: GeneratedImageBlock }) {
@@ -264,6 +270,21 @@ export function HappyToolMessage(props: ToolCallMessagePartProps) {
         return (
             <div className="py-1 min-w-0 max-w-full overflow-x-hidden">
                 <CodexReviewCard review={artifact.review} />
+            </div>
+        )
+    }
+
+    if (isToolGroupArtifact(artifact)) {
+        const searchId = `tool-call:${artifact.firstToolId}`
+        const isSearchMatch = search.resultIds.has(searchId)
+        const isActiveSearchMatch = search.activeId === searchId
+        const searchClass = isSearchMatch
+            ? (isActiveSearchMatch ? 'rounded-lg ring-2 ring-amber-400 bg-amber-400/15' : 'rounded-lg ring-1 ring-amber-300/70 bg-amber-300/10')
+            : ''
+
+        return (
+            <div className={`py-1 min-w-0 max-w-full overflow-x-hidden ${searchClass}`} data-message-search-id={searchId}>
+                <ToolGroupCard block={artifact} metadata={ctx.metadata} />
             </div>
         )
     }

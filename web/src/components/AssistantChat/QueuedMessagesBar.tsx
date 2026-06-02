@@ -23,12 +23,19 @@ function isQueuedForInvocation(message: DecryptedMessage): boolean {
     if (!isUser || message.invokedAt !== null || message.status === 'failed') {
         return false
     }
+
+    const isScheduledForFuture = message.scheduledAt != null && message.scheduledAt > Date.now()
+
     // Optimistic client-side bubbles share the same localId/id while the
     // request is still in flight. Only treat them as queued when the send
-    // mutation explicitly marked them as queued (e.g. session still thinking).
+    // mutation explicitly marked them as queued (e.g. session still thinking)
+    // or when the message is explicitly scheduled for the future.
     if (message.localId && message.id === message.localId) {
-        return message.status === 'queued'
+        return message.status === 'queued' || isScheduledForFuture
     }
+
+    // Stored rows do not carry a client-only status. With a server id and
+    // invokedAt=null they are the authoritative queued/scheduled messages.
     return true
 }
 

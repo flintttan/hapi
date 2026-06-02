@@ -58,12 +58,15 @@ export function HappyUserMessage() {
     const searchClass = isSearchMatch
         ? (isActiveSearchMatch ? 'ring-2 ring-amber-400 bg-amber-400/15' : 'ring-1 ring-amber-300/70 bg-amber-300/10')
         : ''
+    const anchorMessageId = typeof searchId === 'string' && searchId.startsWith('user-text:')
+        ? searchId
+        : messageId
 
     const userBubbleClass = 'w-fit min-w-0 max-w-[92%] ml-auto rounded-xl bg-[var(--app-secondary-bg)] px-3 py-2 text-[var(--app-fg)] shadow-sm'
 
     if (isCliOutput) {
         return (
-            <MessagePrimitive.Root id={getConversationMessageAnchorId(messageId)} className={`scroll-mt-4 px-1 min-w-0 max-w-full overflow-x-hidden rounded-lg ${searchClass}`} {...searchAttrs}>
+            <MessagePrimitive.Root id={getConversationMessageAnchorId(anchorMessageId)} className={`scroll-mt-4 px-1 min-w-0 max-w-full overflow-x-hidden rounded-lg ${searchClass}`} {...searchAttrs}>
                 <div className="ml-auto w-full max-w-[92%]">
                     <CliOutputBlock text={cliText} />
                 </div>
@@ -75,7 +78,7 @@ export function HappyUserMessage() {
     const hasAttachments = attachments && attachments.length > 0
 
     return (
-        <MessagePrimitive.Root id={getConversationMessageAnchorId(messageId)} className={`${userBubbleClass} group/msg scroll-mt-4 ${searchClass}`} {...searchAttrs}>
+        <MessagePrimitive.Root id={getConversationMessageAnchorId(anchorMessageId)} className={`${userBubbleClass} group/msg scroll-mt-4 ${searchClass}`} {...searchAttrs}>
             <div className="flex items-end gap-2">
                 <div className="flex-1 min-w-0">
                     {hasText && <LazyRainbowText text={text} />}

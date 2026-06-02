@@ -71,6 +71,7 @@ export function SessionChat(props: {
     const [pendingSchedule, setPendingSchedule] = useState<PendingSchedule | null>(null)
     const [outlineOpen, setOutlineOpen] = useState(false)
     const previousToolGroupsRef = useRef<ToolGroupBlock[]>([])
+    const hasMoreMessagesRef = useRef(props.hasMoreMessages)
     const agentFlavor = props.session.metadata?.flavor ?? null
     const controlledByUser = props.session.agentState?.controlledByUser === true
     const codexCollaborationModeSupported = agentFlavor === 'codex' && !controlledByUser
@@ -236,6 +237,10 @@ export function SessionChat(props: {
         previousToolGroupsRef.current = visibleBlocks.filter((block): block is ToolGroupBlock => block.kind === 'tool-group')
     }, [visibleBlocks])
 
+    useEffect(() => {
+        hasMoreMessagesRef.current = props.hasMoreMessages
+    }, [props.hasMoreMessages])
+
     const outlineItems = useMemo(() => buildConversationOutline(reconciled.blocks), [reconciled.blocks])
 
     const searchResults = useMemo(
@@ -283,7 +288,7 @@ export function SessionChat(props: {
             return true
         }
 
-        while (props.hasMoreMessages) {
+        while (hasMoreMessagesRef.current) {
             try {
                 await props.onLoadMore()
             } catch (error) {
@@ -293,13 +298,13 @@ export function SessionChat(props: {
             if (findTarget()) {
                 return true
             }
-            if (!props.hasMoreMessages) {
+            if (!hasMoreMessagesRef.current) {
                 break
             }
         }
 
         return Boolean(findTarget())
-    }, [props.hasMoreMessages, props.onLoadMore])
+    }, [props.onLoadMore])
 
     const handlePermissionModeChange = useCallback(async (mode: PermissionMode) => {
         try {
