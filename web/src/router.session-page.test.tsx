@@ -91,7 +91,7 @@ describe('router SessionPage fallback', () => {
     expect(screen.getByTestId('navigate')).toHaveTextContent('/sessions')
   })
 
-  it('passes session thinking state to send-message hook', () => {
+  it('passes session callbacks to send-message hook without stale thinking coupling', () => {
     const SessionComponent = (routeTree as any).children.find((route: any) => route.path === '/sessions')
       .children.find((route: any) => route.path === '$sessionId').component
     mockUseSession.mockReturnValue({
@@ -124,7 +124,12 @@ describe('router SessionPage fallback', () => {
     expect(mockUseSendMessage).toHaveBeenCalledWith(
       expect.anything(),
       's1',
-      expect.objectContaining({ isSessionThinking: true })
+      expect.objectContaining({
+        onSuccess: expect.any(Function),
+        onBlocked: expect.any(Function),
+        resolveSessionId: expect.any(Function),
+        onSessionResolved: expect.any(Function),
+      })
     )
   })
 })

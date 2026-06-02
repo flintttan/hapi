@@ -9,6 +9,7 @@ import {
     updateMessageStatus,
 } from '@/lib/message-window-store'
 import { usePlatform } from '@/hooks/usePlatform'
+import { normalizeDecryptedMessage } from '@/chat/normalize'
 
 type SendMessageInput = {
     sessionId: string
@@ -26,26 +27,35 @@ type UseSendMessageOptions = {
     onSessionResolved?: (sessionId: string) => void
     onBlocked?: (reason: BlockedReason) => void
     onSuccess?: (sessionId: string) => void
-    isSessionThinking?: boolean
 }
 
-function hasQueuedOrInFlightUserMessage(sessionId: string): boolean {
+function isImmediatePendingUserMessage(message: DecryptedMessage, now: number): boolean {
+    if (!message.localId) {
+        return false
+    }
+    if (message.invokedAt != null || message.status === 'failed') {
+        return false
+    }
+    if (message.scheduledAt != null && message.scheduledAt > now) {
+        return false
+    }
+    return true
+}
+
+function hasPendingImmediateUserMessage(sessionId: string): boolean {
     const state = getMessageWindowState(sessionId)
     const allMessages = [...state.messages, ...state.pending]
     const now = Date.now()
 
-    return allMessages.some((message) => {
-        if (!message.localId) {
-            return false
-        }
-        if (message.invokedAt != null || message.status === 'failed') {
-            return false
-        }
-        if (message.scheduledAt != null && message.scheduledAt > now) {
-            return true
-        }
+    return allMessages.some((message) => isImmediatePendingUserMessage(message, now))
+}
+
+function shouldQueueOutgoingMessage(sessionId: string, scheduledAt?: number | null): boolean {
+    const isFutureScheduled = scheduledAt != null && scheduledAt > Date.now()
+    if (isFutureScheduled) {
         return true
-    })
+    }
+    return hasPendingImmediateUserMessage(sessionId)
 }
 
 function findMessageByLocalId(
@@ -74,8 +84,6 @@ export function useSendMessage(
     const { haptic } = usePlatform()
     const [isResolving, setIsResolving] = useState(false)
     const resolveGuardRef = useRef(false)
-    const isSessionThinkingRef = useRef(options?.isSessionThinking ?? false)
-    isSessionThinkingRef.current = options?.isSessionThinking ?? false
 
     const mutation = useMutation({
         mutationFn: async (input: SendMessageInput) => {
@@ -85,9 +93,7 @@ export function useSendMessage(
             await api.sendMessage(input.sessionId, input.text, input.localId, input.attachments, input.scheduledAt)
         },
         onMutate: async (input) => {
-            const isFutureScheduled = input.scheduledAt != null && input.scheduledAt > Date.now()
-            const hasQueuedOrInFlight = hasQueuedOrInFlightUserMessage(input.sessionId)
-            const shouldQueue = isFutureScheduled || hasQueuedOrInFlight
+            const shouldQueue = shouldQueueOutgoingMessage(input.sessionId, input.scheduledAt)
             const status = shouldQueue ? 'queued' as const : 'sending' as const
             const optimisticMessage: DecryptedMessage = {
                 id: input.localId,
@@ -187,14 +193,21 @@ export function useSendMessage(
 
         const message = findMessageByLocalId(sessionId, localId)
         if (!message?.originalText) return false
+        const normalized = normalizeDecryptedMessage(message)
+        const attachments = normalized?.role === 'user' ? normalized.content.attachments : undefined
 
-        updateMessageStatus(sessionId, localId, 'sending')
+        updateMessageStatus(
+            sessionId,
+            localId,
+            shouldQueueOutgoingMessage(sessionId, message.scheduledAt ?? null) ? 'queued' : 'sending',
+        )
 
         mutation.mutate({
             sessionId,
             text: message.originalText,
             localId,
             createdAt: message.createdAt,
+            attachments,
             scheduledAt: message.scheduledAt ?? null,
         })
         return true

@@ -47,11 +47,11 @@ describe('useSendMessage', () => {
         storeMocks.getMessageWindowState.mockReturnValue({ messages: [], pending: [] })
     })
 
-    it('optimistically marks an immediate message as sending even if session thinking is stale', async () => {
+    it('optimistically marks an immediate message as sending when session is idle', async () => {
         const api = createMockApi()
 
         const { result } = renderHook(
-            () => useSendMessage(api, 'session-A', { isSessionThinking: true }),
+            () => useSendMessage(api, 'session-A'),
             { wrapper: createWrapper() },
         )
 
@@ -67,16 +67,30 @@ describe('useSendMessage', () => {
         })
     })
 
-    it('optimistically marks an immediate message as sending when session is idle', async () => {
+    it('does not let future scheduled messages block a new immediate send', async () => {
         const api = createMockApi()
+        storeMocks.getMessageWindowState.mockReturnValue({
+            messages: [{
+                id: 'local-scheduled',
+                seq: null,
+                localId: 'local-scheduled',
+                content: { role: 'user', content: { type: 'text', text: 'later' } },
+                createdAt: 100,
+                invokedAt: null,
+                scheduledAt: Date.now() + 60_000,
+                status: 'queued',
+                originalText: 'later',
+            } satisfies DecryptedMessage],
+            pending: [] as DecryptedMessage[],
+        })
 
         const { result } = renderHook(
-            () => useSendMessage(api, 'session-A', { isSessionThinking: false }),
+            () => useSendMessage(api, 'session-A'),
             { wrapper: createWrapper() },
         )
 
         act(() => {
-            result.current.sendMessage('hello')
+            result.current.sendMessage('hello now')
         })
 
         await waitFor(() => {
@@ -124,7 +138,7 @@ describe('useSendMessage', () => {
         })
 
         const { result } = renderHook(
-            () => useSendMessage(api, 'session-A', { isSessionThinking: false }),
+            () => useSendMessage(api, 'session-A'),
             { wrapper: createWrapper() },
         )
 
@@ -138,6 +152,122 @@ describe('useSendMessage', () => {
                 expect.objectContaining({ status: 'queued', invokedAt: null })
             )
         })
+    })
+
+    it('does not treat stale queued messages from the pre-resume session as active queue for the resumed session', async () => {
+        const api = createMockApi()
+        storeMocks.getMessageWindowState.mockImplementation(((sid?: string) => {
+            if (sid === 'session-resolved') {
+                return { messages: [], pending: [] }
+            }
+            return {
+                messages: [{
+                    id: 'server-old',
+                    seq: 1,
+                    localId: 'local-old',
+                    content: { role: 'user', content: { type: 'text', text: 'old pending' } },
+                    createdAt: 100,
+                    invokedAt: null,
+                    scheduledAt: null,
+                } satisfies DecryptedMessage],
+                pending: [] as DecryptedMessage[],
+            }
+        }) as () => { messages: DecryptedMessage[]; pending: DecryptedMessage[] })
+
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-original', {
+                resolveSessionId: async () => 'session-resolved',
+            }),
+            { wrapper: createWrapper() },
+        )
+
+        await act(async () => {
+            await result.current.sendMessage('hello after resume')
+        })
+
+        await waitFor(() => {
+            expect(storeMocks.appendOptimisticMessage).toHaveBeenCalledWith(
+                'session-resolved',
+                expect.objectContaining({ status: 'sending', invokedAt: null })
+            )
+        })
+    })
+
+    it('retries immediately when session is idle', async () => {
+        const api = createMockApi()
+        storeMocks.getMessageWindowState.mockReturnValue({
+            messages: [{
+                id: 'local-id-1',
+                seq: null,
+                localId: 'local-id-1',
+                content: { role: 'user', content: { type: 'text', text: 'retry me' } },
+                createdAt: 100,
+                invokedAt: null,
+                scheduledAt: null,
+                status: 'failed',
+                originalText: 'retry me',
+            } satisfies DecryptedMessage],
+            pending: [] as DecryptedMessage[],
+        })
+
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-A'),
+            { wrapper: createWrapper() },
+        )
+
+        act(() => {
+            expect(result.current.retryMessage('local-id-1')).toBe(true)
+        })
+
+        expect(storeMocks.updateMessageStatus).toHaveBeenCalledWith('session-A', 'local-id-1', 'sending')
+        await waitFor(() => {
+            expect(storeMocks.appendOptimisticMessage).toHaveBeenCalledWith(
+                'session-A',
+                expect.objectContaining({ id: 'local-id-1', status: 'sending' }),
+            )
+        })
+    })
+
+    it('retries as queued when another immediate message is already pending', async () => {
+        const api = createMockApi()
+        storeMocks.getMessageWindowState.mockReturnValue({
+            messages: [
+                {
+                    id: 'local-id-1',
+                    seq: null,
+                    localId: 'local-id-1',
+                    content: { role: 'user', content: { type: 'text', text: 'retry me' } },
+                    createdAt: 100,
+                    invokedAt: null,
+                    scheduledAt: null,
+                    status: 'failed',
+                    originalText: 'retry me',
+                } satisfies DecryptedMessage,
+                {
+                    id: 'server-queued',
+                    seq: 2,
+                    localId: 'local-other',
+                    content: { role: 'user', content: { type: 'text', text: 'other pending' } },
+                    createdAt: 101,
+                    invokedAt: null,
+                    scheduledAt: null,
+                    status: 'queued',
+                    originalText: 'other pending',
+                } satisfies DecryptedMessage,
+            ],
+            pending: [] as DecryptedMessage[],
+        })
+
+        const { result } = renderHook(
+            () => useSendMessage(api, 'session-A'),
+            { wrapper: createWrapper() },
+        )
+
+        act(() => {
+            expect(result.current.retryMessage('local-id-1')).toBe(true)
+        })
+
+        expect(storeMocks.updateMessageStatus).toHaveBeenCalledWith('session-A', 'local-id-1', 'queued')
     })
 
     it('calls onSuccess with the session ID that was sent', async () => {
