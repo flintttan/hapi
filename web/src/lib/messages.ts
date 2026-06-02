@@ -20,6 +20,32 @@ function isOptimisticMessage(msg: DecryptedMessage): boolean {
     return Boolean(msg.localId && msg.id === msg.localId)
 }
 
+function hasInvokedAt(msg: DecryptedMessage): boolean {
+    return msg.invokedAt !== null && msg.invokedAt !== undefined
+}
+
+function resolveMessageStatus(current?: DecryptedMessage['status'], incoming?: DecryptedMessage['status']): DecryptedMessage['status'] {
+    if (current === 'failed' || incoming === 'failed') {
+        return current === 'failed' ? current : incoming
+    }
+    if (current === 'sent' || incoming === 'sent') {
+        return current === 'sent' ? current : incoming
+    }
+    if (current === 'queued' || incoming === 'queued') {
+        return current === 'queued' ? current : incoming
+    }
+    return current ?? incoming
+}
+
+function mergeMessageState(base: DecryptedMessage, candidate: DecryptedMessage): DecryptedMessage {
+    return {
+        ...candidate,
+        invokedAt: hasInvokedAt(base) ? base.invokedAt : candidate.invokedAt,
+        status: resolveMessageStatus(base.status, candidate.status),
+        originalText: base.originalText ?? candidate.originalText,
+    }
+}
+
 function compareMessages(a: DecryptedMessage, b: DecryptedMessage): number {
     const aSeq = typeof a.seq === 'number' ? a.seq : null
     const bSeq = typeof b.seq === 'number' ? b.seq : null
@@ -48,12 +74,8 @@ export function mergeMessages(existing: DecryptedMessage[], incoming: DecryptedM
     }
     for (const msg of incoming) {
         const current = byId.get(msg.id)
-        if (current && current.invokedAt !== null && current.invokedAt !== undefined && (msg.invokedAt === null || msg.invokedAt === undefined)) {
-            byId.set(msg.id, {
-                ...msg,
-                invokedAt: current.invokedAt,
-                status: current.status,
-            })
+        if (current) {
+            byId.set(msg.id, mergeMessageState(current, msg))
             continue
         }
         byId.set(msg.id, msg)
@@ -77,11 +99,7 @@ export function mergeMessages(existing: DecryptedMessage[], incoming: DecryptedM
             if (!optimistic) {
                 return msg
             }
-            return {
-                ...msg,
-                status: optimistic.status ?? msg.status,
-                originalText: optimistic.originalText ?? msg.originalText,
-            }
+            return mergeMessageState(optimistic, msg)
         })
     }
 
