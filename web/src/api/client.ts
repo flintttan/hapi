@@ -149,7 +149,20 @@ export class ApiClient {
             )
         }
 
-        return await res.json() as T
+        if (res.status === 204) {
+            return undefined as T
+        }
+
+        const text = await res.text().catch(() => '')
+        if (!text) {
+            return undefined as T
+        }
+
+        try {
+            return JSON.parse(text) as T
+        } catch {
+            throw new Error('Invalid JSON response from server.')
+        }
     }
 
     async authenticate(auth: { initData: string } | { accessToken: string } | { refreshToken: string } | { username: string; password: string }): Promise<AuthResponse> {

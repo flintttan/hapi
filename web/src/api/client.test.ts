@@ -79,4 +79,11 @@ describe('ApiClient error mapping', () => {
             expect(apiError.body).toContain('cursorSessionId')
         }
     })
+
+    it('accepts 204 No Content responses for void endpoints', async () => {
+        fetchMock.mockResolvedValueOnce(new Response(null, { status: 204 }))
+
+        const api = new ApiClient('test-token')
+        await expect(api.revokeCliToken('token-1')).resolves.toBeUndefined()
+    })
 })

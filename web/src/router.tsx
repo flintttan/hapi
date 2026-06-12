@@ -45,6 +45,7 @@ import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
 import SettingsPage from '@/routes/settings'
+import { UserMenu } from '@/components/UserMenu'
 
 function BackIcon(props: { className?: string }) {
     return (
@@ -152,7 +153,7 @@ function getMachineTitle(machine: Machine): string {
 }
 
 function SessionsPage() {
-    const { api } = useAppContext()
+    const { api, user, onLogout } = useAppContext()
     const navigate = useNavigate()
     const queryClient = useQueryClient()
     const pathname = useLocation({ select: location => location.pathname })
@@ -466,6 +467,9 @@ function SessionsPage() {
                             {t('sessions.count', { n: sessions.length, m: projectCount })}
                         </div>
                         <div className="flex items-center gap-2">
+                            {user && (
+                                <UserMenu user={user} onLogout={onLogout} />
+                            )}
                             <button
                                 type="button"
                                 onClick={() => void openCodexImportDialog()}

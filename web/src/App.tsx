@@ -46,8 +46,8 @@ export function App() {
 function AppInner() {
     const { t } = useTranslation()
     const { serverUrl, baseUrl, setServerUrl, clearServerUrl } = useServerUrl()
-    const { authSource, isLoading: isAuthSourceLoading, setAccessToken } = useAuthSource(baseUrl)
-    const { token, api, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl)
+    const { authSource, storedUser, isLoading: isAuthSourceLoading, setAccessToken, clearAuth } = useAuthSource(baseUrl)
+    const { token, user, api, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl, storedUser)
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
     const matchRoute = useMatchRoute()
@@ -130,6 +130,10 @@ function AppInner() {
     const baseUrlRef = useRef(baseUrl)
     const pushPromptedRef = useRef(false)
     const { isSupported: isPushSupported, permission: pushPermission, requestPermission, subscribe } = usePushNotifications(api)
+    const handleLogout = useCallback(() => {
+        clearAuth()
+        queryClient.clear()
+    }, [clearAuth, queryClient])
 
     useEffect(() => {
         if (baseUrlRef.current === baseUrl) {
@@ -386,7 +390,7 @@ function AppInner() {
     // Auth error
     if (authError || !token || !api) {
         // If using access token and auth failed, show login again
-        if (authSource.type === 'accessToken') {
+        if (authSource.type === 'accessToken' || authSource.type === 'refreshToken' || authSource.type === 'password') {
             return (
                 <LoginPrompt
                     onLogin={setAccessToken}
@@ -415,7 +419,7 @@ function AppInner() {
     }
 
     return (
-        <AppContextProvider value={{ api, token, baseUrl }}>
+        <AppContextProvider value={{ api, token, baseUrl, user, onLogout: handleLogout }}>
             <VoiceProvider>
                 <SyncingBanner isSyncing={isSyncing} />
                 <ReconnectingBanner
