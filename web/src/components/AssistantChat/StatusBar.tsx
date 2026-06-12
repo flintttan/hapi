@@ -8,6 +8,7 @@ import type { PermissionModeTone } from '@hapi/protocol'
 import { useMemo } from 'react'
 import type { AgentState, CodexCollaborationMode, PermissionMode } from '@/types/api'
 import type { ConversationStatus } from '@/realtime/types'
+import type { ThreadGoal } from '@/types/api'
 import { getContextBudgetTokens } from '@/chat/modelConfig'
 import { useTranslation } from '@/lib/use-translation'
 
@@ -116,15 +117,46 @@ function getContextWarning(contextSize: number, maxContextSize: number, t: (key:
     }
 }
 
+function formatTokenCount(value: number): string {
+    if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
+    if (value >= 1_000) return `${Math.round(value / 1_000)}k`
+    return String(value)
+}
+
+function formatCodexReasoningLabel(effort?: string | null): string {
+    const normalized = effort?.trim().toLowerCase()
+    if (!normalized || normalized === 'default') return 'reasoning default'
+    return `reasoning ${normalized}`
+}
+
+function isCodexFastMode(model?: string | null, effort?: string | null): boolean {
+    const normalizedEffort = effort?.trim().toLowerCase()
+    if (normalizedEffort === 'none' || normalizedEffort === 'minimal' || normalizedEffort === 'low') {
+        return true
+    }
+
+    const normalizedModel = model?.trim().toLowerCase() ?? ''
+    return normalizedModel.includes('mini') || normalizedModel.includes('fast')
+}
+
+/** Cursor native ACP does not emit usage_update; hide the bar to avoid empty/misleading UI. */
+export function shouldShowComposerStatusBar(agentFlavor: string | null | undefined): boolean {
+    return agentFlavor !== 'cursor'
+}
+
 export function StatusBar(props: {
     active: boolean
     thinking: boolean
     agentState: AgentState | null | undefined
     backgroundTaskCount?: number
     contextSize?: number
+    contextCacheRead?: number
+    contextWindow?: number | null
     model?: string | null
+    modelReasoningEffort?: string | null
     permissionMode?: PermissionMode
     collaborationMode?: CodexCollaborationMode
+    threadGoal?: ThreadGoal | null
     agentFlavor?: string | null
     voiceStatus?: ConversationStatus
 }) {
@@ -137,12 +169,30 @@ export function StatusBar(props: {
     const contextWarning = useMemo(
         () => {
             if (props.contextSize === undefined) return null
-            const maxContextSize = getContextBudgetTokens(props.model, props.agentFlavor)
+            const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
             if (!maxContextSize) return null
             return getContextWarning(props.contextSize, maxContextSize, t)
         },
-        [props.contextSize, props.model, props.agentFlavor, t]
+        [props.contextSize, props.contextWindow, props.model, props.agentFlavor, t]
     )
+    const contextUsageLabel = useMemo(() => {
+        if (props.contextSize === undefined) return null
+        const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
+        if (!maxContextSize) return `ctx ${formatTokenCount(props.contextSize)}`
+        const percentageUsed = Math.min(100, Math.round((props.contextSize / maxContextSize) * 100))
+        return `ctx ${formatTokenCount(props.contextSize)}/${formatTokenCount(maxContextSize)} (${percentageUsed}%)`
+    }, [props.contextSize, props.contextWindow, props.model, props.agentFlavor])
+    const compactContextUsageLabel = useMemo(() => {
+        if (props.contextSize === undefined) return null
+        const maxContextSize = props.contextWindow ?? getContextBudgetTokens(props.model, props.agentFlavor)
+        if (!maxContextSize) return `ctx ${formatTokenCount(props.contextSize)}`
+        const percentageLeft = Math.max(0, Math.round(100 - (props.contextSize / maxContextSize) * 100))
+        return `ctx ${formatTokenCount(maxContextSize).toUpperCase()}, ${percentageLeft}% left`
+    }, [props.contextSize, props.contextWindow, props.model, props.agentFlavor])
+    const cacheHitLabel = useMemo(() => {
+        if (!props.contextCacheRead || props.contextCacheRead <= 0) return null
+        return `cache ${formatTokenCount(props.contextCacheRead)}`
+    }, [props.contextCacheRead])
 
     const permissionMode = props.permissionMode
     const displayPermissionMode = permissionMode
@@ -160,33 +210,69 @@ export function StatusBar(props: {
     const collaborationModeLabel = displayCollaborationMode
         ? getCodexCollaborationModeLabel(displayCollaborationMode)
         : null
+    const codexReasoningLabel = (props.agentFlavor === 'codex' || props.agentFlavor === 'opencode')
+        ? formatCodexReasoningLabel(props.modelReasoningEffort)
+        : null
+    const codexFastMode = props.agentFlavor === 'codex'
+        ? isCodexFastMode(props.model, props.modelReasoningEffort)
+        : false
+    const goalLabel = props.agentFlavor === 'codex' && props.threadGoal
+        ? props.threadGoal.status === 'active'
+            ? 'goal'
+            : `goal ${props.threadGoal.status === 'budgetLimited' ? 'limited' : props.threadGoal.status}`
+        : null
 
     return (
-        <div className="flex items-center justify-between px-2 pb-1">
-            <div className="flex items-baseline gap-3">
-                <div className="flex items-center gap-1.5">
+        <div className="flex min-w-0 items-center justify-between gap-2 px-2 pb-1">
+            <div className="flex min-w-0 items-baseline gap-2 sm:gap-3">
+                <div className="flex shrink-0 items-center gap-1.5">
                     <span
                         className={`h-2 w-2 rounded-full ${connectionStatus.dotColor} ${connectionStatus.isPulsing ? 'animate-pulse' : ''}`}
                     />
-                    <span className={`text-xs ${connectionStatus.color}`}>
+                    <span className={`whitespace-nowrap text-xs ${connectionStatus.color}`}>
                         {connectionStatus.text}
                     </span>
                 </div>
-                {contextWarning ? (
-                    <span className={`text-[10px] ${contextWarning.color}`}>
-                        {contextWarning.text}
+                {contextUsageLabel ? (
+                    <span className={`min-w-0 whitespace-nowrap text-[10px] ${contextWarning?.color ?? 'text-[var(--app-hint)]'}`}>
+                        <span className="sm:hidden">
+                            {compactContextUsageLabel}
+                        </span>
+                        <span className="hidden sm:inline">
+                            {contextUsageLabel}{contextWarning ? ` · ${contextWarning.text}` : ''}
+                        </span>
+                    </span>
+                ) : null}
+                {cacheHitLabel ? (
+                    <span className="hidden whitespace-nowrap text-[10px] text-[var(--app-hint)] sm:inline">
+                        {cacheHitLabel}
                     </span>
                 ) : null}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex min-w-0 shrink-0 items-center gap-2">
+                {codexReasoningLabel ? (
+                    <span className="whitespace-nowrap text-xs text-[var(--app-hint)]">
+                        {codexReasoningLabel}
+                    </span>
+                ) : null}
+                {codexFastMode ? (
+                    <span className="whitespace-nowrap text-xs text-[#34C759]">
+                        fast
+                    </span>
+                ) : null}
+                {goalLabel ? (
+                    <span className="whitespace-nowrap text-xs text-[var(--app-link)]">
+                        {goalLabel}
+                    </span>
+                ) : null}
                 {collaborationModeLabel ? (
-                    <span className="text-xs text-blue-500">
+                    <span className="whitespace-nowrap text-xs text-blue-500">
                         {collaborationModeLabel}
                     </span>
                 ) : null}
                 {displayPermissionMode ? (
-                    <span className={`text-xs ${permissionModeColor}`}>
+                    <span className={`whitespace-nowrap text-xs ${permissionModeColor}`}>
                         {permissionModeLabel}
                     </span>
                 ) : null}

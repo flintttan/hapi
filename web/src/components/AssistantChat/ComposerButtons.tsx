@@ -1,6 +1,12 @@
 import { ComposerPrimitive } from '@assistant-ui/react'
 import type { ConversationStatus } from '@/realtime/types'
 import { useTranslation } from '@/lib/use-translation'
+import { ScheduleIcon } from '@/components/icons'
+import { ScheduleTimePicker } from './ScheduleTimePicker'
+import type { PendingSchedule } from './ScheduleTimePicker'
+import { useFue } from '@/lib/use-fue'
+import { FueCallout, FueDot } from '@/components/Fue'
+import { useRef, useState } from 'react'
 
 function VoiceAssistantIcon() {
     return (
@@ -175,15 +181,6 @@ function AbortIcon(props: { spinning: boolean }) {
     )
 }
 
-function ClockIcon() {
-    return (
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <polyline points="12 6 12 12 16 14" />
-        </svg>
-    )
-}
-
 function SendIcon() {
     return (
         <svg
@@ -200,6 +197,101 @@ function SendIcon() {
             <line x1="12" y1="19" x2="12" y2="5" />
             <polyline points="5 12 12 5 19 12" />
         </svg>
+    )
+}
+
+function ScratchlistToggleIcon() {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="18"
+            height="18"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+        >
+            <path d="M3.5 2.5h6L12.5 5.5v8a1 1 0 0 1-1 1h-8a1 1 0 0 1-1-1v-10a1 1 0 0 1 1-1Z" />
+            <path d="M9.5 2.5v3h3M5 8.5h6M5 11h4" />
+        </svg>
+    )
+}
+
+/**
+ * ScratchlistToggleButton — composer affordance for toggling scratchlist mode,
+ * wrapped in the generic FUE (First-User Experience) primitive so a new
+ * operator sees a pulsing dot + a one-time explainer popover the first time
+ * they encounter the feature; once they engage with it, the dot disappears
+ * for good and the entry counter takes over.
+ *
+ * The FUE wiring here is the canonical example for future features: the
+ * pattern is "wrap the affordance in useFue + FueDot, conditionally render
+ * FueCallout while engaging". See web/src/lib/use-fue.ts for the contract.
+ */
+function ScratchlistToggleButton(props: {
+    scratchlistMode: boolean
+    scratchlistCount: number
+    onScratchlistToggle: () => void
+    controlsDisabled?: boolean
+}) {
+    const { t } = useTranslation()
+    const fue = useFue('scratchlist-toggle')
+    const buttonRef = useRef<HTMLButtonElement>(null)
+
+    const showFueDot = fue.status !== 'acknowledged'
+    // Counter and FUE dot are mutually exclusive (see FueDot doc comment).
+    // Onboarding signal beats inventory signal: the user can't read the
+    // counter as "you have N items" until they understand the feature.
+    const showCounter = !showFueDot && props.scratchlistCount > 0
+
+    return (
+        <>
+            <button
+                ref={buttonRef}
+                type="button"
+                aria-label={t('scratchlist.toggleAriaLabel')}
+                title={t('scratchlist.toggleTooltip')}
+                aria-pressed={props.scratchlistMode ? true : false}
+                disabled={props.controlsDisabled}
+                onClick={() => {
+                    fue.engage()
+                    props.onScratchlistToggle()
+                }}
+                className={`relative flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                    props.scratchlistMode
+                        ? 'bg-amber-500 text-white hover:bg-amber-600'
+                        : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
+                }`}
+            >
+                <ScratchlistToggleIcon />
+                {showFueDot ? (
+                    <FueDot
+                        pulsing={fue.status === 'unseen'}
+                        ariaLabel={t('fue.newFeatureDot')}
+                    />
+                ) : null}
+                {showCounter ? (
+                    <span
+                        aria-hidden="true"
+                        className="absolute -top-0.5 -right-0.5 min-w-[12px] h-3 px-[3px] flex items-center justify-center rounded-full bg-amber-500 text-white text-[8px] font-semibold leading-none tabular-nums shadow-sm"
+                    >
+                        {props.scratchlistCount > 99 ? '99+' : props.scratchlistCount}
+                    </span>
+                ) : null}
+            </button>
+            {fue.status === 'engaging' ? (
+                <FueCallout
+                    title={t('scratchlist.fueTitle')}
+                    body={t('scratchlist.fueBody')}
+                    onDismiss={fue.dismiss}
+                    dismissLabel={t('fue.gotIt')}
+                    closeAriaLabel={t('fue.closeAriaLabel')}
+                    anchorRef={buttonRef}
+                />
+            ) : null}
+        </>
     )
 }
 
@@ -235,34 +327,47 @@ function LoadingIcon() {
     )
 }
 
-function UnifiedButton(props: {
+export function UnifiedButton(props: {
     canSend: boolean
     voiceStatus: ConversationStatus
     voiceEnabled: boolean
     controlsDisabled: boolean
     onSend: () => void
     onVoiceToggle: () => void
+    /**
+     * When true, the send button repaints amber and the aria-label
+     * announces "Send to scratchlist" instead of "Send message". The
+     * actual routing happens in SessionChat's wrapped onSend - the
+     * button itself is content-agnostic.
+     *
+     * Caller MUST compute this from the actual routing decision (mode
+     * AND no-attachments AND no-pending-schedule), not the raw
+     * scratchlist toggle. If the toggle is on but the submission would
+     * fall back to chat (because the scratchlist can't represent the
+     * payload), the button must look like a normal chat send. Per
+     * upstream review on PR #798: [Major] "Send button advertises
+     * scratchlist routing even when the submit will go to chat".
+     */
+    routesToScratchlist?: boolean
 }) {
     const { t } = useTranslation()
 
-    // Determine button state
     const isConnecting = props.voiceStatus === 'connecting'
     const isConnected = props.voiceStatus === 'connected'
     const isVoiceActive = isConnecting || isConnected
     const hasText = props.canSend
+    const routesToScratchlist = props.routesToScratchlist ?? false
 
-    // Determine button behavior
     const handleClick = () => {
         if (isVoiceActive) {
             props.onVoiceToggle() // Stop voice
         } else if (hasText) {
-            props.onSend() // Send message
-        } else if (props.voiceEnabled) {
-            props.onVoiceToggle() // Start voice
+            props.onSend() // Send message (or scratchlist add — wrapper decides)
+        } else if (props.voiceEnabled && !routesToScratchlist) {
+            props.onVoiceToggle() // Start voice (suppressed in scratchlist mode)
         }
     }
 
-    // Determine button style and icon
     let icon: React.ReactNode
     let className: string
     let ariaLabel: string
@@ -275,6 +380,13 @@ function UnifiedButton(props: {
         icon = <StopIcon />
         className = 'bg-black text-white'
         ariaLabel = t('composer.stop')
+    } else if (routesToScratchlist) {
+        // Amber send button - matches the scratchlist drawer accent.
+        // Single visual signal carries the "this goes to the scratchlist"
+        // contract; without it, the modal state is invisible to the user.
+        icon = <SendIcon />
+        className = 'bg-amber-500 text-white hover:bg-amber-600'
+        ariaLabel = t('scratchlist.sendToScratchlist')
     } else if (hasText) {
         icon = <SendIcon />
         className = 'bg-black text-white'
@@ -289,7 +401,16 @@ function UnifiedButton(props: {
         ariaLabel = t('composer.send')
     }
 
-    const isDisabled = props.controlsDisabled || (!hasText && !props.voiceEnabled && !isVoiceActive)
+    // When the submission routes to scratchlist the send button is the
+    // only path that does anything useful, so it must be enabled whenever
+    // there is text - we deliberately do NOT fall back to voice-toggle-on-
+    // empty-text. (When attachments / schedule force a chat fallback the
+    // normal chat-send disable rules apply.)
+    const isDisabled = props.controlsDisabled || (
+        routesToScratchlist
+            ? !hasText
+            : !hasText && !props.voiceEnabled && !isVoiceActive
+    )
 
     return (
         <button
@@ -328,12 +449,29 @@ export function ComposerButtons(props: {
     onVoiceToggle: () => void
     onVoiceMicToggle?: () => void
     onSend: () => void
-    showScheduleButton?: boolean
-    hasPendingSchedule?: boolean
-    onScheduleToggle?: () => void
+    pendingSchedule?: PendingSchedule | null
+    onSchedule?: (pending: PendingSchedule) => void
+    onClearSchedule?: () => void
+    // The backend rejects scheduled-send + attachment combinations (the per-CLI
+    // upload directory is torn down before a mature emit could read the files).
+    // The composer must surface that constraint at UI time so the user never
+    // builds a submission the hub will reject — see hub/web/routes/messages.ts.
+    hasAttachments?: boolean
+    // Scratchlist drawer toggle. When `onScratchlistToggle` is provided, a
+    // notepad icon appears next to the schedule-send icon. Click toggles
+    // composer-send-routing between chat and scratchlist; SessionChat owns
+    // the actual routing decision via its wrapped onSend.
+    scratchlistMode?: boolean
+    scratchlistCount?: number
+    onScratchlistToggle?: () => void
 }) {
     const { t } = useTranslation()
     const isVoiceConnected = props.voiceStatus === 'connected'
+    const [showSchedulePicker, setShowSchedulePicker] = useState(false)
+    const scheduleButtonRef = useRef<HTMLButtonElement>(null)
+
+    const hasSchedule = props.pendingSchedule != null
+    const hasAttachments = props.hasAttachments ?? false
 
     return (
         <div className="flex items-center justify-between px-2 pb-2">
@@ -341,7 +479,7 @@ export function ComposerButtons(props: {
                 <ComposerPrimitive.AddAttachment
                     aria-label={t('composer.attach')}
                     title={t('composer.attach')}
-                    disabled={props.controlsDisabled}
+                    disabled={props.controlsDisabled || hasSchedule}
                     className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-fg)]/60 transition-colors hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-50"
                 >
                     <AttachmentIcon />
@@ -370,19 +508,6 @@ export function ComposerButtons(props: {
                         disabled={props.terminalDisabled}
                     >
                         <TerminalIcon />
-                    </button>
-                ) : null}
-
-                {props.showScheduleButton && props.onScheduleToggle ? (
-                    <button
-                        type="button"
-                        aria-label={props.hasPendingSchedule ? t('composer.schedule.edit') : t('composer.schedule.button')}
-                        title={props.hasPendingSchedule ? t('composer.schedule.edit') : t('composer.schedule.button')}
-                        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${props.hasPendingSchedule ? 'text-[var(--app-link)] hover:bg-[var(--app-link)]/10' : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'} disabled:cursor-not-allowed disabled:opacity-50`}
-                        onClick={props.onScheduleToggle}
-                        disabled={props.controlsDisabled}
-                    >
-                        <ClockIcon />
                     </button>
                 ) : null}
 
@@ -427,6 +552,64 @@ export function ComposerButtons(props: {
                         <SpeakerIcon muted={props.voiceMicMuted} />
                     </button>
                 ) : null}
+
+                {/*
+                 * Scratchlist toggle - prototype of the composer-controlled
+                 * drawer (replaces the always-visible orange band). Counter
+                 * shown only when entries exist (>0); empty-state shows just
+                 * the icon to avoid the "you have 0 things" guilt UI.
+                 *
+                 * Clicking enters scratchlist mode: the send button repaints
+                 * amber and SessionChat's wrapped onSend routes the next
+                 * submission to addScratchlistEntry() instead of the chat.
+                 * Mode is sticky - operator clicks the icon again to exit.
+                 */}
+                {props.onScratchlistToggle ? (
+                    <ScratchlistToggleButton
+                        scratchlistMode={props.scratchlistMode ?? false}
+                        scratchlistCount={props.scratchlistCount ?? 0}
+                        onScratchlistToggle={props.onScratchlistToggle}
+                        controlsDisabled={props.controlsDisabled}
+                    />
+                ) : null}
+
+                {/* Schedule button — only shown when onSchedule handler is provided */}
+                {props.onSchedule ? (
+                    <>
+                        <button
+                            ref={scheduleButtonRef}
+                            type="button"
+                            aria-label={t('composer.scheduleSend')}
+                            title={t('composer.scheduleSend')}
+                            disabled={props.controlsDisabled || hasAttachments}
+                            onClick={() => {
+                                if (hasSchedule && props.onClearSchedule) {
+                                    props.onClearSchedule()
+                                } else {
+                                    setShowSchedulePicker((v) => !v)
+                                }
+                            }}
+                            className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                                hasSchedule
+                                    ? 'bg-blue-500 text-white hover:bg-blue-600'
+                                    : 'text-[var(--app-fg)]/60 hover:bg-[var(--app-bg)] hover:text-[var(--app-fg)]'
+                            }`}
+                        >
+                            <ScheduleIcon className="h-[18px] w-[18px]" />
+                        </button>
+                        {showSchedulePicker && (
+                            <ScheduleTimePicker
+                                anchorRef={scheduleButtonRef}
+                                onSchedule={(pending) => {
+                                    props.onSchedule!(pending)
+                                    setShowSchedulePicker(false)
+                                }}
+                                onClose={() => setShowSchedulePicker(false)}
+                                pendingSchedule={props.pendingSchedule}
+                            />
+                        )}
+                    </>
+                ) : null}
             </div>
 
             <UnifiedButton
@@ -436,6 +619,21 @@ export function ComposerButtons(props: {
                 controlsDisabled={props.controlsDisabled}
                 onSend={props.onSend}
                 onVoiceToggle={props.onVoiceToggle}
+                /*
+                 * Derived, NOT raw scratchlistMode. Mirror SessionChat's
+                 * shouldRouteToScratchlist so the visible send-button state
+                 * matches the actual routing decision: amber + "Send to
+                 * scratchlist" only when mode is on AND the payload would
+                 * be a pure-text scratchlist add. Attachments or a pending
+                 * schedule force a chat fallback in onSendForComposer; the
+                 * button must reflect that, otherwise the UI lies about
+                 * where the user's content is going.
+                 */
+                routesToScratchlist={
+                    (props.scratchlistMode ?? false)
+                    && !hasAttachments
+                    && props.pendingSchedule == null
+                }
             />
         </div>
     )

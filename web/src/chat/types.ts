@@ -1,10 +1,15 @@
 import type { AttachmentMetadata, MessageStatus } from '@/types/api'
+import type { ThreadGoal } from '@/types/api'
 
 export type UsageData = {
     input_tokens: number
     output_tokens: number
     cache_creation_input_tokens?: number
     cache_read_input_tokens?: number
+    context_tokens?: number
+    context_window?: number
+    thread_id?: string
+    scope_role?: string
     service_tier?: string
 }
 
@@ -16,9 +21,11 @@ export type AgentEvent =
     | { type: 'limit-warning'; /** 0–1 ratio (e.g. 0.9 = 90%), integer-precision via CLI pipe format */ utilization: number; endsAt: number; limitType: string }
     | { type: 'ready' }
     | { type: 'api-error'; retryAttempt: number; maxRetries: number; error: unknown }
-    | { type: 'turn-duration'; durationMs: number }
+    | { type: 'turn-duration'; durationMs: number; targetMessageId?: string }
     | { type: 'microcompact'; trigger: string; preTokens: number; tokensSaved: number }
     | { type: 'compact'; trigger: string; preTokens: number }
+    | { type: 'thread-goal-updated'; goal: ThreadGoal; threadId?: string; turnId?: string }
+    | { type: 'thread-goal-cleared'; threadId?: string }
     | ({ type: string } & Record<string, unknown>)
 
 export type ToolResultPermission = {
@@ -86,6 +93,7 @@ export type NormalizedAgentContent =
         type: 'reasoning'
         text: string
         uuid: string
+        streamId?: string
         parentUUID: string | null
     }
     | ToolUse
@@ -113,12 +121,13 @@ export type NormalizedMessage = ({
     id: string
     localId: string | null
     createdAt: number
-    invokedAt?: number | null
     isSidechain: boolean
     meta?: unknown
     usage?: UsageData
     status?: MessageStatus
     originalText?: string
+    invokedAt?: number | null
+    model?: string | null
 }
 
 export type ToolPermission = {
@@ -152,11 +161,11 @@ export type UserTextBlock = {
     id: string
     localId: string | null
     createdAt: number
+    invokedAt?: number | null
     text: string
     attachments?: AttachmentMetadata[]
     status?: MessageStatus
     originalText?: string
-    invokedAt?: number | null
     meta?: unknown
 }
 
@@ -165,6 +174,10 @@ export type AgentTextBlock = {
     id: string
     localId: string | null
     createdAt: number
+    invokedAt?: number | null
+    durationMs?: number
+    usage?: UsageData
+    model?: string | null
     text: string
     meta?: unknown
 }
@@ -174,6 +187,10 @@ export type AgentReasoningBlock = {
     id: string
     localId: string | null
     createdAt: number
+    invokedAt?: number | null
+    durationMs?: number
+    usage?: UsageData
+    model?: string | null
     text: string
     meta?: unknown
 }
@@ -183,18 +200,11 @@ export type CodexReviewBlock = {
     id: string
     localId: string | null
     createdAt: number
+    invokedAt?: number | null
+    durationMs?: number
+    usage?: UsageData
+    model?: string | null
     review: CodexReview
-    meta?: unknown
-}
-
-export type GeneratedImageBlock = {
-    kind: 'generated-image'
-    id: string
-    localId: string | null
-    createdAt: number
-    imageId: string
-    fileName: string
-    mimeType: string | null
     meta?: unknown
 }
 
@@ -203,8 +213,24 @@ export type CliOutputBlock = {
     id: string
     localId: string | null
     createdAt: number
+    invokedAt?: number | null
+    durationMs?: number
+    usage?: UsageData
+    model?: string | null
     text: string
     source: 'user' | 'assistant'
+    meta?: unknown
+}
+
+export type GeneratedImageBlock = {
+    kind: 'generated-image'
+    id: string
+    localId: string | null
+    createdAt: number
+    invokedAt?: number | null
+    imageId: string
+    fileName: string
+    mimeType: string | null
     meta?: unknown
 }
 
@@ -212,6 +238,8 @@ export type AgentEventBlock = {
     kind: 'agent-event'
     id: string
     createdAt: number
+    invokedAt?: number | null
+    model?: string | null
     event: AgentEvent
     meta?: unknown
 }
@@ -221,9 +249,13 @@ export type ToolCallBlock = {
     id: string
     localId: string | null
     createdAt: number
+    invokedAt?: number | null
+    durationMs?: number
+    usage?: UsageData
+    model?: string | null
     tool: ChatToolCall
     children: ChatBlock[]
     meta?: unknown
 }
 
-export type ChatBlock = UserTextBlock | AgentTextBlock | AgentReasoningBlock | CodexReviewBlock | GeneratedImageBlock | CliOutputBlock | ToolCallBlock | AgentEventBlock
+export type ChatBlock = UserTextBlock | AgentTextBlock | AgentReasoningBlock | CodexReviewBlock | CliOutputBlock | ToolCallBlock | GeneratedImageBlock | AgentEventBlock

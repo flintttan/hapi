@@ -1,48 +1,44 @@
-import type { CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
+import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
+import type {
+    CodexModelSummary,
+    CodexModelsResponse,
+    CommandResponse,
+    CursorModelSummary,
+    CursorModelsResponse,
+    DeleteUploadResponse,
+    DirectoryEntry,
+    FileReadResponse,
+    GeneratedImageResponse,
+    ListDirectoryResponse,
+    OpencodeModelsResponse,
+    OpencodeModelSummary,
+    OpencodeReasoningEffortResponse,
+    PathExistsResponse,
+    SlashCommandsResponse,
+    UploadFileResponse
+} from '@hapi/protocol/apiTypes'
 import type { Server } from 'socket.io'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 
-export type RpcCommandResponse = {
-    success: boolean
-    stdout?: string
-    stderr?: string
-    exitCode?: number
-    error?: string
-}
+const DEFAULT_RPC_TIMEOUT_MS = 30_000
+const MODEL_LIST_RPC_TIMEOUT_MS = 120_000
 
-export type RpcReadFileResponse = {
-    success: boolean
-    content?: string
-    error?: string
-}
-
-export type RpcUploadFileResponse = {
-    success: boolean
-    path?: string
-    error?: string
-}
-
-export type RpcDeleteUploadResponse = {
-    success: boolean
-    error?: string
-}
-
-export type RpcDirectoryEntry = {
-    name: string
-    type: 'file' | 'directory' | 'other'
-    size?: number
-    modified?: number
-}
-
-export type RpcListDirectoryResponse = {
-    success: boolean
-    entries?: RpcDirectoryEntry[]
-    error?: string
-}
-
-export type RpcPathExistsResponse = {
-    exists: Record<string, boolean>
-}
+export type RpcCommandResponse = CommandResponse
+export type RpcReadFileResponse = FileReadResponse
+export type RpcGeneratedImageResponse = GeneratedImageResponse
+export type RpcUploadFileResponse = UploadFileResponse
+export type RpcDeleteUploadResponse = DeleteUploadResponse
+export type RpcDirectoryEntry = DirectoryEntry
+export type RpcListDirectoryResponse = ListDirectoryResponse
+export type RpcPathExistsResponse = PathExistsResponse
+export type RpcCodexModel = CodexModelSummary
+export type RpcListCodexModelsResponse = CodexModelsResponse
+export type RpcCursorModel = CursorModelSummary
+export type RpcListCursorModelsResponse = CursorModelsResponse
+export type RpcOpencodeModel = OpencodeModelSummary
+export type RpcListOpencodeModelsResponse = OpencodeModelsResponse
+export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEffortResponse
 
 export class RpcGateway {
     constructor(
@@ -59,7 +55,7 @@ export class RpcGateway {
         decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort',
         answers?: Record<string, string[]> | Record<string, { answers: string[] }>
     ): Promise<void> {
-        await this.sessionRpc(sessionId, 'permission', {
+        await this.sessionRpc(sessionId, RPC_METHODS.Permission, {
             id: requestId,
             approved: true,
             mode,
@@ -74,7 +70,7 @@ export class RpcGateway {
         requestId: string,
         decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort'
     ): Promise<void> {
-        await this.sessionRpc(sessionId, 'permission', {
+        await this.sessionRpc(sessionId, RPC_METHODS.Permission, {
             id: requestId,
             approved: false,
             decision
@@ -82,11 +78,11 @@ export class RpcGateway {
     }
 
     async abortSession(sessionId: string): Promise<void> {
-        await this.sessionRpc(sessionId, 'abort', { reason: 'User aborted via Telegram Bot' })
+        await this.sessionRpc(sessionId, RPC_METHODS.Abort, { reason: 'User aborted via Telegram Bot' })
     }
 
     async switchSession(sessionId: string, to: 'remote' | 'local'): Promise<void> {
-        await this.sessionRpc(sessionId, 'switch', { to })
+        await this.sessionRpc(sessionId, RPC_METHODS.Switch, { to })
     }
 
     async requestSessionConfig(
@@ -99,17 +95,21 @@ export class RpcGateway {
             collaborationMode?: CodexCollaborationMode
         }
     ): Promise<unknown> {
-        return await this.sessionRpc(sessionId, 'set-session-config', config)
+        return await this.sessionRpc(sessionId, RPC_METHODS.SetSessionConfig, config)
     }
 
     async killSession(sessionId: string): Promise<void> {
-        await this.sessionRpc(sessionId, 'killSession', {})
+        await this.sessionRpc(sessionId, RPC_METHODS.KillSession, {})
+    }
+
+    async handoffSessionToLocal(sessionId: string): Promise<void> {
+        await this.sessionRpc(sessionId, RPC_METHODS.HandoffLocal, {})
     }
 
     async spawnSession(
         machineId: string,
         directory: string,
-        agent: 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode' = 'claude',
+        agent: AgentFlavor = 'claude',
         model?: string,
         modelReasoningEffort?: string,
         yolo?: boolean,
@@ -117,44 +117,25 @@ export class RpcGateway {
         worktreeName?: string,
         resumeSessionId?: string,
         effort?: string,
-        permissionMode?: PermissionMode,
-        approvedNewDirectoryCreation?: boolean
-    ): Promise<
-        | { type: 'success'; sessionId: string }
-        | { type: 'requestToApproveDirectoryCreation'; directory: string }
-        | { type: 'error'; message: string }
-    > {
+        permissionMode?: PermissionMode
+    ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         try {
             const result = await this.machineRpc(
                 machineId,
-                'spawn-happy-session',
-                {
-                    type: 'spawn-in-directory',
-                    directory,
-                    agent,
-                    model,
-                    modelReasoningEffort,
-                    yolo,
-                    sessionType,
-                    worktreeName,
-                    resumeSessionId,
-                    effort,
-                    permissionMode,
-                    approvedNewDirectoryCreation
-                }
+                RPC_METHODS.SpawnHappySession,
+                { type: 'spawn-in-directory', directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName, resumeSessionId, effort, permissionMode }
             )
             if (result && typeof result === 'object') {
                 const obj = result as Record<string, unknown>
                 if (obj.type === 'success' && typeof obj.sessionId === 'string') {
                     return { type: 'success', sessionId: obj.sessionId }
                 }
-                if (obj.type === 'requestToApproveDirectoryCreation' && typeof obj.directory === 'string') {
-                    return { type: 'requestToApproveDirectoryCreation', directory: obj.directory }
-                }
                 if (obj.type === 'error' && typeof obj.errorMessage === 'string') {
                     return { type: 'error', message: obj.errorMessage }
                 }
-                // 兼容：RpcHandlerManager 会把异常包装成 { error: string }
+                if (obj.type === 'requestToApproveDirectoryCreation' && typeof obj.directory === 'string') {
+                    return { type: 'error', message: `Directory creation requires approval: ${obj.directory}` }
+                }
                 if (typeof obj.error === 'string') {
                     return { type: 'error', message: obj.error }
                 }
@@ -177,8 +158,16 @@ export class RpcGateway {
         }
     }
 
+    async listMachineDirectory(machineId: string, path: string): Promise<RpcListDirectoryResponse> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.ListMachineDirectory, { path }) as RpcListDirectoryResponse | unknown
+        if (!result || typeof result !== 'object') {
+            return { success: false, error: 'Unexpected list-directory result' }
+        }
+        return result as RpcListDirectoryResponse
+    }
+
     async checkPathsExist(machineId: string, paths: string[]): Promise<Record<string, boolean>> {
-        const result = await this.machineRpc(machineId, 'path-exists', { paths }) as RpcPathExistsResponse | unknown
+        const result = await this.machineRpc(machineId, RPC_METHODS.PathExists, { paths }) as RpcPathExistsResponse | unknown
         if (!result || typeof result !== 'object') {
             throw new Error('Unexpected path-exists result')
         }
@@ -196,70 +185,104 @@ export class RpcGateway {
     }
 
     async getGitStatus(sessionId: string, cwd?: string): Promise<RpcCommandResponse> {
-        return await this.sessionRpc(sessionId, 'git-status', { cwd }) as RpcCommandResponse
+        return await this.sessionRpc(sessionId, RPC_METHODS.GitStatus, { cwd }) as RpcCommandResponse
     }
 
     async getGitDiffNumstat(sessionId: string, options: { cwd?: string; staged?: boolean }): Promise<RpcCommandResponse> {
-        return await this.sessionRpc(sessionId, 'git-diff-numstat', options) as RpcCommandResponse
+        return await this.sessionRpc(sessionId, RPC_METHODS.GitDiffNumstat, options) as RpcCommandResponse
     }
 
     async getGitDiffFile(sessionId: string, options: { cwd?: string; filePath: string; staged?: boolean }): Promise<RpcCommandResponse> {
-        return await this.sessionRpc(sessionId, 'git-diff-file', options) as RpcCommandResponse
+        return await this.sessionRpc(sessionId, RPC_METHODS.GitDiffFile, options) as RpcCommandResponse
     }
 
     async readSessionFile(sessionId: string, path: string): Promise<RpcReadFileResponse> {
-        return await this.sessionRpc(sessionId, 'readFile', { path }) as RpcReadFileResponse
+        return await this.sessionRpc(sessionId, RPC_METHODS.ReadFile, { path }) as RpcReadFileResponse
+    }
+
+    async readGeneratedImage(sessionId: string, imageId: string): Promise<RpcGeneratedImageResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ReadGeneratedImage, { id: imageId }) as RpcGeneratedImageResponse
     }
 
     async listDirectory(sessionId: string, path: string): Promise<RpcListDirectoryResponse> {
-        return await this.sessionRpc(sessionId, 'listDirectory', { path }) as RpcListDirectoryResponse
+        return await this.sessionRpc(sessionId, RPC_METHODS.ListDirectory, { path }) as RpcListDirectoryResponse
     }
 
     async uploadFile(sessionId: string, filename: string, content: string, mimeType: string): Promise<RpcUploadFileResponse> {
-        return await this.sessionRpc(sessionId, 'uploadFile', { sessionId, filename, content, mimeType }) as RpcUploadFileResponse
+        return await this.sessionRpc(sessionId, RPC_METHODS.UploadFile, { sessionId, filename, content, mimeType }) as RpcUploadFileResponse
     }
 
     async deleteUploadFile(sessionId: string, path: string): Promise<RpcDeleteUploadResponse> {
-        return await this.sessionRpc(sessionId, 'deleteUpload', { sessionId, path }) as RpcDeleteUploadResponse
+        return await this.sessionRpc(sessionId, RPC_METHODS.DeleteUpload, { sessionId, path }) as RpcDeleteUploadResponse
     }
 
     async runRipgrep(sessionId: string, args: string[], cwd?: string): Promise<RpcCommandResponse> {
-        return await this.sessionRpc(sessionId, 'ripgrep', { args, cwd }) as RpcCommandResponse
+        return await this.sessionRpc(sessionId, RPC_METHODS.Ripgrep, { args, cwd }) as RpcCommandResponse
     }
 
-    async listSlashCommands(sessionId: string, agent: string): Promise<{
-        success: boolean
-        commands?: Array<{ name: string; description?: string; source: 'builtin' | 'user' | 'plugin' | 'project' }>
-        error?: string
-    }> {
-        return await this.sessionRpc(sessionId, 'listSlashCommands', { agent }) as {
-            success: boolean
-            commands?: Array<{ name: string; description?: string; source: 'builtin' | 'user' | 'plugin' | 'project' }>
-            error?: string
-        }
+    async listSlashCommands(sessionId: string, agent: string): Promise<SlashCommandsResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ListSlashCommands, { agent }) as SlashCommandsResponse
     }
 
-    async listSkills(sessionId: string): Promise<{
+    async listSkills(sessionId: string, flavor?: string): Promise<{
         success: boolean
         skills?: Array<{ name: string; description?: string }>
         error?: string
     }> {
-        return await this.sessionRpc(sessionId, 'listSkills', {}) as {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ListSkills, { flavor }) as {
             success: boolean
             skills?: Array<{ name: string; description?: string }>
             error?: string
         }
     }
 
-    private async sessionRpc(sessionId: string, method: string, params: unknown): Promise<unknown> {
-        return await this.rpcCall(`${sessionId}:${method}`, params)
+    async listCodexModelsForSession(sessionId: string): Promise<RpcListCodexModelsResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
     }
 
-    private async machineRpc(machineId: string, method: string, params: unknown): Promise<unknown> {
-        return await this.rpcCall(`${machineId}:${method}`, params)
+    async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
     }
 
-    private async rpcCall(method: string, params: unknown): Promise<unknown> {
+    async listCursorModelsForSession(sessionId: string): Promise<RpcListCursorModelsResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ListCursorModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCursorModelsResponse
+    }
+
+    async listCursorModelsForMachine(machineId: string): Promise<RpcListCursorModelsResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ListCursorModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCursorModelsResponse
+    }
+
+    async listOpencodeModelsForSession(sessionId: string): Promise<RpcListOpencodeModelsResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ListOpencodeModels, {}) as RpcListOpencodeModelsResponse
+    }
+
+    async listOpencodeModelsForCwd(machineId: string, cwd: string): Promise<RpcListOpencodeModelsResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ListOpencodeModelsForCwd, { cwd }) as RpcListOpencodeModelsResponse
+    }
+
+    async listOpencodeReasoningEffortOptionsForSession(sessionId: string): Promise<RpcListOpencodeReasoningEffortOptionsResponse> {
+        return await this.sessionRpc(sessionId, RPC_METHODS.ListOpencodeReasoningEffortOptions, {}) as RpcListOpencodeReasoningEffortOptionsResponse
+    }
+
+    private async sessionRpc(
+        sessionId: string,
+        method: string,
+        params: unknown,
+        timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS
+    ): Promise<unknown> {
+        return await this.rpcCall(`${sessionId}:${method}`, params, timeoutMs)
+    }
+
+    private async machineRpc(
+        machineId: string,
+        method: string,
+        params: unknown,
+        timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS
+    ): Promise<unknown> {
+        return await this.rpcCall(`${machineId}:${method}`, params, timeoutMs)
+    }
+
+    private async rpcCall(method: string, params: unknown, timeoutMs: number = DEFAULT_RPC_TIMEOUT_MS): Promise<unknown> {
         const socketId = this.rpcRegistry.getSocketIdForMethod(method)
         if (!socketId) {
             throw new Error(`RPC handler not registered: ${method}`)
@@ -270,7 +293,7 @@ export class RpcGateway {
             throw new Error(`RPC socket disconnected: ${method}`)
         }
 
-        const response = await socket.timeout(30_000).emitWithAck('rpc-request', {
+        const response = await socket.timeout(timeoutMs).emitWithAck('rpc-request', {
             method,
             params: JSON.stringify(params)
         }) as unknown

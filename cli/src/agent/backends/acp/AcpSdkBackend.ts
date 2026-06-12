@@ -42,6 +42,16 @@ export type AcpConfigOptionDescriptor = {
     options: Array<{ value: string; name?: string }>;
 };
 
+type AcpInitializeResult = {
+    protocolVersion: number;
+    authMethods?: Array<{ id: string; name?: string }>;
+    agentCapabilities?: {
+        loadSession?: boolean;
+        promptCapabilities?: unknown;
+        sessionCapabilities?: unknown;
+    };
+};
+
 export class AcpSdkBackend implements AgentBackend {
     private transport: AcpStdioTransport | null = null;
     private permissionHandler: ((request: PermissionRequest) => void) | null = null;
@@ -51,10 +61,15 @@ export class AcpSdkBackend implements AgentBackend {
     private readonly sessionConfigOptions = new Map<string, AcpConfigOptionDescriptor[]>();
     private messageHandler: AcpMessageHandler | null = null;
     private activeSessionId: string | null = null;
+    private initializeResult: AcpInitializeResult | null = null;
+    private setModeSupported: boolean | undefined = undefined;
     private isProcessingMessage = false;
     private responseCompleteResolvers: Array<() => void> = [];
     private lastSessionUpdateAt = 0;
     private latestUsageUpdate: AcpUsageUpdate | null = null;
+    private promptUsageCallback: ((msg: AgentMessage) => void) | null = null;
+    private usageUpdateListener: ((msg: AgentMessage) => void) | null = null;
+    private lastForwardedUsageUpdate: AcpUsageUpdate | null = null;
 
     /** Retry configuration for ACP initialization */
     private static readonly INIT_RETRY_OPTIONS = {
@@ -66,6 +81,25 @@ export class AcpSdkBackend implements AgentBackend {
     private static readonly UPDATE_DRAIN_TIMEOUT_MS = 2000;
     private static readonly PRE_PROMPT_UPDATE_QUIET_PERIOD_MS = 200;
     private static readonly PRE_PROMPT_UPDATE_DRAIN_TIMEOUT_MS = 1200;
+    // After the initial post-prompt drain, slow-tailing models (DeepSeek,
+    // GPT-5.5, etc.) can keep sending agentMessageChunk notifications. We poll
+    // drainBuffers() on a short interval so the UI keeps streaming smoothly,
+    // and block prompt() from resolving until the model is truly quiet — that
+    // way turn_complete and the launcher's ready signal only fire after every
+    // straggler has been emitted to the current turn's onUpdate. Bounded by
+    // LATE_FLUSH_WINDOW_MS so a stuck stream never wedges the session.
+    //
+    // 6000ms covers tails up to ~5s observed against GPT-5.5 / DeepSeek V4 Pro
+    // with 1s headroom. 250ms quiet is anchored to drainLateBuffers entry
+    // time, so every turn pays at least one quiet period before resolving —
+    // that minimum is what catches stragglers arriving just after
+    // session/prompt resolves when the model paused mid-turn. 50ms polling
+    // keeps the UI responsive without measurable CPU cost (drainBuffers is a
+    // no-op on empty buffers). All three can be tightened once we have
+    // telemetry on real-world tail distributions.
+    private static readonly LATE_FLUSH_INTERVAL_MS = 50;
+    private static readonly LATE_FLUSH_QUIET_PERIOD_MS = 250;
+    private static readonly LATE_FLUSH_WINDOW_MS = 6000;
 
     constructor(private readonly options: { command: string; args?: string[]; env?: Record<string, string> }) {}
 
@@ -116,7 +150,100 @@ export class AcpSdkBackend implements AgentBackend {
             throw new Error('Invalid initialize response from ACP agent');
         }
 
+        this.initializeResult = {
+            protocolVersion: response.protocolVersion,
+            authMethods: Array.isArray(response.authMethods)
+                ? response.authMethods
+                    .filter((entry): entry is Record<string, unknown> => isObject(entry))
+                    .map((entry) => ({
+                        id: asString(entry.id) ?? '',
+                        name: asString(entry.name) ?? undefined
+                    }))
+                    .filter((entry) => entry.id.length > 0)
+                : undefined,
+            agentCapabilities: isObject(response.agentCapabilities)
+                ? {
+                    loadSession: response.agentCapabilities.loadSession === true,
+                    promptCapabilities: response.agentCapabilities.promptCapabilities,
+                    sessionCapabilities: response.agentCapabilities.sessionCapabilities
+                }
+                : undefined
+        };
+
         logger.debug(`[ACP] Initialized with protocol version ${response.protocolVersion}`);
+    }
+
+    async authenticate(methodId: string): Promise<void> {
+        if (!this.transport) {
+            throw new Error('ACP transport not initialized');
+        }
+        await this.transport.sendRequest('_client/authenticate', { methodId });
+    }
+
+    async authenticateIfAvailable(methodId: string): Promise<void> {
+        const methods = this.initializeResult?.authMethods ?? [];
+        if (!methods.some((method) => method.id === methodId)) {
+            logger.debug(`[ACP] Auth method not advertised: ${methodId}`);
+            return;
+        }
+        try {
+            await this.authenticate(methodId);
+        } catch (error) {
+            // Cursor advertises cursor_login but may not implement _client/authenticate yet.
+            logger.debug(`[ACP] authenticate skipped (${methodId})`, error);
+        }
+    }
+
+    supportsLoadSession(): boolean {
+        return this.initializeResult?.agentCapabilities?.loadSession === true;
+    }
+
+    getSessionConfigOptions(sessionId: string): AcpConfigOptionDescriptor[] | undefined {
+        return this.sessionConfigOptions.get(sessionId);
+    }
+
+    getConfigOptionByCategory(sessionId: string, category: string): AcpConfigOptionDescriptor | undefined {
+        return this.sessionConfigOptions.get(sessionId)?.find((option) => option.category === category);
+    }
+
+    registerExtensionRequestHandler(
+        method: string,
+        handler: (params: unknown, requestId: string | number | null) => Promise<unknown>
+    ): void {
+        if (!this.transport) {
+            throw new Error('ACP transport not initialized');
+        }
+        this.transport.registerRequestHandler(method, handler);
+    }
+
+    async setMode(sessionId: string, modeId: string): Promise<void> {
+        if (!this.transport) {
+            throw new Error('ACP transport not initialized');
+        }
+
+        await this.waitForResponseComplete();
+
+        if (this.setModeSupported !== false) {
+            try {
+                await this.transport.sendRequest('session/set_mode', { sessionId, modeId });
+                this.setModeSupported = true;
+                return;
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                if (/method not found/i.test(message)) {
+                    this.setModeSupported = false;
+                } else {
+                    throw error;
+                }
+            }
+        }
+
+        const modeOption = this.getConfigOptionByCategory(sessionId, 'mode');
+        if (!modeOption) {
+            throw new Error('ACP agent does not support session/set_mode and no mode config option is available');
+        }
+
+        await this.setConfigOption(sessionId, modeOption.id, modeId);
     }
 
     async newSession(config: AgentSessionConfig): Promise<string> {
@@ -242,6 +369,11 @@ export class AcpSdkBackend implements AgentBackend {
         return this.sessionConfigOptions.get(sessionId)?.find((option) => option.category === 'thought_level');
     }
 
+    /** Forwards ACP `usage_update` to the web status bar when no prompt is active (e.g. session resume). */
+    setUsageUpdateListener(listener: ((msg: AgentMessage) => void) | null): void {
+        this.usageUpdateListener = listener;
+    }
+
     async prompt(
         sessionId: string,
         content: PromptContent[],
@@ -252,20 +384,23 @@ export class AcpSdkBackend implements AgentBackend {
         }
 
         this.activeSessionId = sessionId;
+        // Single-phase handler swap: drain any chunks still buffered in the
+        // previous turn's handler so they emit via that turn's onUpdate, then
+        // immediately install the new handler. The post-prompt drainLateBuffers
+        // means by this point the previous turn should already be quiet; this
+        // wait is a cheap safety net for the rare case where a chunk arrived
+        // between prompt() resolving and the next turn starting.
         await this.waitForSessionUpdateQuiet(
             AcpSdkBackend.PRE_PROMPT_UPDATE_QUIET_PERIOD_MS,
             AcpSdkBackend.PRE_PROMPT_UPDATE_DRAIN_TIMEOUT_MS
         );
         this.messageHandler?.drainBuffers();
-        this.messageHandler = null;
-        await this.waitForSessionUpdateQuiet(
-            AcpSdkBackend.PRE_PROMPT_UPDATE_QUIET_PERIOD_MS,
-            AcpSdkBackend.PRE_PROMPT_UPDATE_DRAIN_TIMEOUT_MS
-        );
         this.messageHandler = new AcpMessageHandler(onUpdate);
         this.isProcessingMessage = true;
         this.lastSessionUpdateAt = Date.now();
         this.latestUsageUpdate = null;
+        this.lastForwardedUsageUpdate = null;
+        this.promptUsageCallback = onUpdate;
         let stopReason: string | null = null;
         let promptUsage: AcpPromptUsage | null = null;
 
@@ -285,6 +420,11 @@ export class AcpSdkBackend implements AgentBackend {
                 AcpSdkBackend.UPDATE_DRAIN_TIMEOUT_MS
             );
             this.messageHandler?.drainBuffers();
+            // Block here until the model truly stops streaming straggler
+            // chunks (or LATE_FLUSH_WINDOW_MS elapses), so turn_complete and
+            // the launcher's ready signal only fire once every chunk has been
+            // emitted to this turn's onUpdate.
+            await this.drainLateBuffers();
             try {
                 const latestUsageUpdate = this.readLatestUsageUpdate();
                 if (promptUsage) {
@@ -298,11 +438,28 @@ export class AcpSdkBackend implements AgentBackend {
                         contextTokens: latestUsageUpdate ? latestUsageUpdate.contextTokens : undefined,
                         contextWindow: latestUsageUpdate ? latestUsageUpdate.contextWindow : undefined
                     });
+                } else if (
+                    latestUsageUpdate
+                    && (latestUsageUpdate.contextTokens !== undefined || latestUsageUpdate.contextWindow !== undefined)
+                    && !this.hasForwardedUsage(latestUsageUpdate)
+                ) {
+                    // Agent did not return prompt usage (slash-handled turns,
+                    // errored turns), but we did see ACP usage updates during
+                    // the turn. Emit a context-only usage so the status bar
+                    // reflects the current context size.
+                    onUpdate({
+                        type: 'usage',
+                        inputTokens: 0,
+                        outputTokens: 0,
+                        contextTokens: latestUsageUpdate.contextTokens,
+                        contextWindow: latestUsageUpdate.contextWindow
+                    });
                 }
                 if (stopReason) {
                     onUpdate({ type: 'turn_complete', stopReason });
                 }
             } finally {
+                this.promptUsageCallback = null;
                 this.isProcessingMessage = false;
                 this.notifyResponseComplete();
             }
@@ -404,18 +561,108 @@ export class AcpSdkBackend implements AgentBackend {
 
     private captureUsageUpdate(update: unknown): void {
         if (!isObject(update)) return;
-        if (asString(update.sessionUpdate) !== ACP_SESSION_UPDATE_TYPES.usageUpdate) return;
 
-        const contextTokens = this.asFiniteNumber(update.used);
-        const contextWindow = this.asFiniteNumber(update.size);
+        const sessionUpdate = asString(update.sessionUpdate);
+        let contextTokens: number | null = null;
+        let contextWindow: number | null = null;
+
+        if (sessionUpdate === ACP_SESSION_UPDATE_TYPES.usageUpdate) {
+            contextTokens = this.asFiniteNumber(update.used);
+            contextWindow = this.asFiniteNumber(update.size);
+        } else if (sessionUpdate === ACP_SESSION_UPDATE_TYPES.sessionInfoUpdate) {
+            contextTokens = this.asFiniteNumber(
+                update.used
+                ?? update.contextTokens
+                ?? update.context_tokens
+                ?? update.contextUsed
+            );
+            contextWindow = this.asFiniteNumber(
+                update.size
+                ?? update.contextWindow
+                ?? update.context_window
+                ?? update.contextLimit
+            );
+        } else {
+            return;
+        }
+
         this.latestUsageUpdate = {
             contextTokens: contextTokens ?? undefined,
             contextWindow: contextWindow ?? undefined
         };
+        this.forwardUsageUpdate();
+    }
+
+    private hasForwardedUsage(update: AcpUsageUpdate): boolean {
+        return this.lastForwardedUsageUpdate !== null
+            && this.lastForwardedUsageUpdate.contextTokens === update.contextTokens
+            && this.lastForwardedUsageUpdate.contextWindow === update.contextWindow;
+    }
+
+    private forwardUsageUpdate(): void {
+        const update = this.latestUsageUpdate;
+        if (
+            !update
+            || (update.contextTokens === undefined && update.contextWindow === undefined)
+        ) {
+            return;
+        }
+
+        if (
+            this.lastForwardedUsageUpdate
+            && this.lastForwardedUsageUpdate.contextTokens === update.contextTokens
+            && this.lastForwardedUsageUpdate.contextWindow === update.contextWindow
+        ) {
+            return;
+        }
+
+        this.lastForwardedUsageUpdate = update;
+        const message: AgentMessage = {
+            type: 'usage',
+            inputTokens: 0,
+            outputTokens: 0,
+            contextTokens: update.contextTokens,
+            contextWindow: update.contextWindow
+        };
+
+        if (this.promptUsageCallback) {
+            this.promptUsageCallback(message);
+        } else if (this.usageUpdateListener) {
+            this.usageUpdateListener(message);
+        }
     }
 
     private readLatestUsageUpdate(): AcpUsageUpdate | null {
         return this.latestUsageUpdate;
+    }
+
+    /**
+     * Poll drainBuffers() on a short interval until the model has been quiet
+     * for LATE_FLUSH_QUIET_PERIOD_MS or LATE_FLUSH_WINDOW_MS elapses. Polling
+     * keeps the UI streaming smoothly while we wait; the quiet-window check
+     * lets fast models exit almost immediately (Claude tail typically < 100ms)
+     * while still bounding slow-tailing models (GPT-5.5, DeepSeek V4 Pro).
+     *
+     * The quiet measurement is anchored to entry time, not just
+     * lastSessionUpdateAt: if session/prompt paused mid-turn (chunks → pause
+     * → stopReason), lastSessionUpdateAt is already stale on entry and we
+     * would otherwise exit immediately, missing any straggler that arrives
+     * just after session/prompt resolves.
+     */
+    private async drainLateBuffers(): Promise<void> {
+        const quietBaseline = Date.now();
+        const deadline = quietBaseline + AcpSdkBackend.LATE_FLUSH_WINDOW_MS;
+        while (Date.now() < deadline) {
+            const latestActivityAt = Math.max(this.lastSessionUpdateAt, quietBaseline);
+            const elapsedSinceUpdate = Date.now() - latestActivityAt;
+            if (elapsedSinceUpdate >= AcpSdkBackend.LATE_FLUSH_QUIET_PERIOD_MS) {
+                return;
+            }
+            const remainingBudget = deadline - Date.now();
+            const waitMs = Math.max(1, Math.min(AcpSdkBackend.LATE_FLUSH_INTERVAL_MS, remainingBudget));
+            await new Promise<void>((resolve) => setTimeout(resolve, waitMs));
+            this.messageHandler?.drainBuffers();
+        }
     }
 
     private async waitForSessionUpdateQuiet(quietMs: number, timeoutMs: number): Promise<void> {
@@ -511,6 +758,11 @@ export class AcpSdkBackend implements AgentBackend {
             availableModels: existing?.availableModels ?? [],
             currentModelId: modelId
         });
+    }
+
+    /** After a successful model config apply, avoid stale base-only ACP currentValue overwriting cache. */
+    pinSessionModelWireId(sessionId: string, modelId: string): void {
+        this.updateCurrentModelOptimistic(sessionId, modelId);
     }
 
     private extractPromptUsage(response: unknown): AcpPromptUsage | null {
@@ -622,27 +874,88 @@ export class AcpSdkBackend implements AgentBackend {
             return;
         }
 
-        const availableModels: AcpModelDescriptor[] = [];
+        const byModelId = new Map<string, AcpModelDescriptor>();
+        const addModel = (modelId: string, name?: string) => {
+            const trimmedId = modelId.trim();
+            if (!trimmedId) return;
+            const trimmedName = name?.trim();
+            const existing = byModelId.get(trimmedId);
+            if (!existing) {
+                byModelId.set(
+                    trimmedId,
+                    trimmedName && trimmedName !== trimmedId
+                        ? { modelId: trimmedId, name: trimmedName }
+                        : { modelId: trimmedId }
+                );
+                return;
+            }
+            if (!existing.name && trimmedName && trimmedName !== trimmedId) {
+                byModelId.set(trimmedId, { modelId: trimmedId, name: trimmedName });
+            }
+        };
+
         if (Array.isArray(rawModels)) {
             for (const entry of rawModels) {
                 if (!isObject(entry)) continue;
                 const modelId = asString(entry.modelId) ?? asString(entry.value);
                 if (!modelId) continue;
-                const name = asString(entry.name) ?? undefined;
-                availableModels.push(name ? { modelId, name } : { modelId });
+                addModel(modelId, asString(entry.name) ?? undefined);
             }
         } else {
             // Preserve previously-captured availableModels when the response only
             // updates currentModelId (e.g. a setModel response from some agents).
             const existing = this.sessionModelsMetadata.get(sessionId);
-            if (existing) {
-                availableModels.push(...existing.availableModels);
+            for (const entry of existing?.availableModels ?? []) {
+                addModel(entry.modelId, entry.name);
             }
         }
 
+        // Cursor often lists one wire id per family in `models` but every variant in
+        // `configOptions` category=model — merge so metadata matches Zed-style pickers.
+        if (configModelOption) {
+            for (const entry of configModelOption.options) {
+                if (!isObject(entry)) continue;
+                const modelId = asString(entry.value) ?? asString(entry.modelId);
+                if (!modelId) continue;
+                addModel(modelId, asString(entry.name) ?? undefined);
+            }
+        }
+
+        const existing = this.sessionModelsMetadata.get(sessionId);
+        const currentModelId = this.preferSpecificCursorWireId(
+            rawCurrent,
+            existing?.currentModelId ?? null
+        );
+
         this.sessionModelsMetadata.set(sessionId, {
-            availableModels,
-            currentModelId: rawCurrent
+            availableModels: [...byModelId.values()],
+            currentModelId
         });
+    }
+
+    private preferSpecificCursorWireId(
+        incoming: string | null,
+        existing: string | null
+    ): string | null {
+        if (!incoming) {
+            return existing;
+        }
+        if (!existing) {
+            return incoming;
+        }
+
+        const incomingBase = incoming.split('[')[0];
+        const existingBase = existing.split('[')[0];
+        if (incomingBase !== existingBase) {
+            return incoming;
+        }
+
+        const incomingHasVariant = incoming.includes('[');
+        const existingHasVariant = existing.includes('[');
+        if (!incomingHasVariant && existingHasVariant) {
+            return existing;
+        }
+
+        return incoming;
     }
 }

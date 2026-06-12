@@ -10,7 +10,15 @@ describe('getContextBudgetTokens', () => {
         expect(getContextBudgetTokens('claude-sonnet-4-6', 'claude')).toBe(190_000)
     })
 
-    it('returns null for non-Claude sessions', () => {
-        expect(getContextBudgetTokens('gpt-5.4', 'codex')).toBeNull()
+    it('uses Codex app-server context window with headroom', () => {
+        expect(getContextBudgetTokens('gpt-5.4', 'codex')).toBe(248_400)
+    })
+
+    it('parses context budget from Cursor wire ids', () => {
+        expect(getContextBudgetTokens('composer-2.5-fast[context=300k]', 'cursor')).toBe(290_000)
+    })
+
+    it('returns null for unknown non-Claude sessions', () => {
+        expect(getContextBudgetTokens('gemini-3-pro', 'gemini')).toBeNull()
     })
 })

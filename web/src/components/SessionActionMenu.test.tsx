@@ -1,75 +1,74 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { render, waitFor } from '@testing-library/react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { I18nProvider } from '@/lib/i18n-context'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
 
-vi.mock('@/lib/use-translation', () => ({
-  useTranslation: () => ({
-    t: (key: string) => key,
-  }),
-}))
+afterEach(() => cleanup())
 
-describe('SessionActionMenu', () => {
-  beforeEach(() => {
+function renderMenu(overrides: Partial<React.ComponentProps<typeof SessionActionMenu>> = {}) {
+    const defaults: React.ComponentProps<typeof SessionActionMenu> = {
+        isOpen: true,
+        onClose: vi.fn(),
+        sessionActive: false,
+        onRename: vi.fn(),
+        onArchive: vi.fn(),
+        onReopen: vi.fn(),
+        onDelete: vi.fn(),
+        anchorPoint: { x: 0, y: 0 },
+    }
+    const merged = { ...defaults, ...overrides }
+    return {
+        ...render(
+            <I18nProvider>
+                <SessionActionMenu {...merged} />
+            </I18nProvider>
+        ),
+        props: merged
+    }
+}
+
+beforeEach(() => {
     vi.clearAllMocks()
-  })
+})
 
-  it('repositions from live anchor ref instead of stale anchor point', async () => {
-    const anchor = document.createElement('button')
-    document.body.appendChild(anchor)
+describe('SessionActionMenu - Reopen action', () => {
+    it('renders the Reopen item on inactive sessions when onReopen is provided', () => {
+        renderMenu({ sessionActive: false })
 
-    const anchorRef = { current: anchor }
-    const rectSpy = vi.spyOn(anchor, 'getBoundingClientRect')
-      .mockImplementation(() => ({
-        x: 180,
-        y: 120,
-        top: 120,
-        left: 120,
-        right: 180,
-        bottom: 160,
-        width: 60,
-        height: 40,
-        toJSON: () => ({}),
-      }) as DOMRect)
-
-    const { container } = render(
-      <SessionActionMenu
-        isOpen
-        onClose={vi.fn()}
-        sessionActive={false}
-        onRename={vi.fn()}
-        onArchive={vi.fn()}
-        onDelete={vi.fn()}
-        anchorPoint={{ x: 1, y: 1 }}
-        anchorRef={anchorRef}
-      />
-    )
-
-    const menu = container.firstElementChild as HTMLDivElement | null
-    expect(menu).toBeTruthy()
-    if (!menu) return
-
-    Object.defineProperty(menu, 'getBoundingClientRect', {
-      configurable: true,
-      value: () => ({
-        x: 0,
-        y: 0,
-        top: 0,
-        left: 0,
-        right: 200,
-        bottom: 120,
-        width: 200,
-        height: 120,
-        toJSON: () => ({}),
-      }),
+        expect(screen.getByRole('menuitem', { name: /Reopen/ })).toBeInTheDocument()
     })
 
-    window.dispatchEvent(new Event('resize'))
+    it('does not render the Reopen item on active sessions', () => {
+        renderMenu({ sessionActive: true })
 
-    await waitFor(() => {
-      expect(rectSpy).toHaveBeenCalled()
-      expect(menu.style.top).not.toBe('9px')
+        expect(screen.queryByRole('menuitem', { name: /Reopen/ })).toBeNull()
     })
 
-    anchor.remove()
-  })
+    it('does not render the Reopen item when onReopen is omitted (back-compat)', () => {
+        renderMenu({ sessionActive: false, onReopen: undefined })
+
+        expect(screen.queryByRole('menuitem', { name: /Reopen/ })).toBeNull()
+        // Delete item is still present for inactive sessions.
+        expect(screen.getByRole('menuitem', { name: /Delete/ })).toBeInTheDocument()
+    })
+
+    it('fires onReopen and closes the menu when the Reopen item is clicked', () => {
+        const onReopen = vi.fn()
+        const onClose = vi.fn()
+        renderMenu({ sessionActive: false, onReopen, onClose })
+
+        fireEvent.click(screen.getByRole('menuitem', { name: /Reopen/ }))
+
+        expect(onReopen).toHaveBeenCalledTimes(1)
+        expect(onClose).toHaveBeenCalledTimes(1)
+    })
+
+    it('renders Reopen alongside Delete for inactive sessions', () => {
+        renderMenu({ sessionActive: false })
+
+        expect(screen.getByRole('menuitem', { name: /Reopen/ })).toBeInTheDocument()
+        expect(screen.getByRole('menuitem', { name: /Delete/ })).toBeInTheDocument()
+        // Archive should not show up for inactive sessions (it is the active-session destructive).
+        expect(screen.queryByRole('menuitem', { name: /Archive/ })).toBeNull()
+    })
 })

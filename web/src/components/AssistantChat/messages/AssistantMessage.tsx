@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { MessagePrimitive, useAssistantState } from '@assistant-ui/react'
 import { MarkdownText } from '@/components/assistant-ui/markdown-text'
 import { Reasoning, ReasoningGroup } from '@/components/assistant-ui/reasoning'
@@ -7,7 +8,10 @@ import { CopyIcon, CheckIcon } from '@/components/icons'
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import type { HappyChatMessageMetadata } from '@/lib/assistant-runtime'
 import { getAssistantCopyText } from '@/components/AssistantChat/messages/assistantCopyText'
-import { useMessageSearchContext } from '@/components/AssistantChat/messageSearchContext'
+import { getConversationMessageAnchorId } from '@/chat/outline'
+import { MessageMetadata } from '@/components/AssistantChat/messages/MessageMetadata'
+import { CodexReviewCard } from '@/components/AssistantChat/messages/CodexReviewCard'
+import { MessageTimestamp } from '@/components/AssistantChat/messages/MessageTimestamp'
 
 const TOOL_COMPONENTS = {
     Fallback: HappyToolMessage
@@ -22,10 +26,15 @@ const MESSAGE_PART_COMPONENTS = {
 
 export function HappyAssistantMessage() {
     const { copied, copy } = useCopyToClipboard()
-    const search = useMessageSearchContext()
+    const [showMetadata, setShowMetadata] = useState(false)
+    const messageId = useAssistantState(({ message }) => message.id)
     const isCliOutput = useAssistantState(({ message }) => {
         const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
         return custom?.kind === 'cli-output'
+    })
+    const codexReview = useAssistantState(({ message }) => {
+        const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
+        return custom?.kind === 'codex-review' ? custom.review : undefined
     })
     const cliText = useAssistantState(({ message }) => {
         const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
@@ -41,47 +50,188 @@ export function HappyAssistantMessage() {
         if (message.role !== 'assistant') return ''
         return getAssistantCopyText(message.content)
     })
-    const searchId = useAssistantState(({ message }) => {
-        const custom = message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined
-        return custom?.searchId ?? null
-    })
-    const isSearchMatch = typeof searchId === 'string' && search.resultIds.has(searchId)
-    const isActiveSearchMatch = typeof searchId === 'string' && search.activeId === searchId
-    const searchAttrs = searchId ? { 'data-message-search-id': searchId } : {}
-    const searchClass = isSearchMatch
-        ? (isActiveSearchMatch ? 'rounded-lg ring-2 ring-amber-400 bg-amber-400/15' : 'rounded-lg ring-1 ring-amber-300/70 bg-amber-300/10')
-        : ''
+
+    const invokedAt = useAssistantState(({ message }) => (message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined)?.invokedAt)
+    const durationMs = useAssistantState(({ message }) => (message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined)?.durationMs)
+    const usage = useAssistantState(({ message }) => (message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined)?.usage)
+    const messageModel = useAssistantState(({ message }) => (message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined)?.model)
+    const turnCount = useAssistantState(({ message }) => (message.metadata.custom as Partial<HappyChatMessageMetadata> | undefined)?.turnCount)
+
+    const hasMetadata = invokedAt != null
+        || (typeof durationMs === 'number' && durationMs >= 0)
+        || usage != null
+        || (messageModel != null && messageModel !== '')
+        || (typeof turnCount === 'number' && turnCount >= 2)
+
     const rootClass = toolOnly
         ? 'py-1 min-w-0 max-w-full overflow-x-hidden'
         : 'px-1 min-w-0 max-w-full overflow-x-hidden'
 
     if (isCliOutput) {
         return (
-            <MessagePrimitive.Root className={`px-1 min-w-0 max-w-full overflow-x-hidden ${searchClass}`} {...searchAttrs}>
+            <MessagePrimitive.Root
+                id={getConversationMessageAnchorId(messageId)}
+                className="scroll-mt-4 px-1 min-w-0 max-w-full overflow-x-hidden"
+            >
                 <CliOutputBlock text={cliText} />
+                <div className="mt-1 flex items-center gap-2">
+                    <MessageTimestamp className="text-[10px] leading-none text-[var(--app-hint)]" />
+                    {hasMetadata && (
+                        <button
+                            type="button"
+                            onClick={() => setShowMetadata((open) => !open)}
+                            aria-expanded={showMetadata}
+                            className="text-[10px] text-[var(--app-hint)] underline-offset-2 hover:text-[var(--app-fg)] hover:underline"
+                        >
+                            {showMetadata ? 'Hide info' : 'Show info'}
+                        </button>
+                    )}
+                </div>
+                {showMetadata && (
+                    <MessageMetadata
+                        invokedAt={invokedAt}
+                        durationMs={durationMs}
+                        usage={usage}
+                        model={messageModel ?? null}
+                        turnCount={turnCount}
+                    />
+                )}
+            </MessagePrimitive.Root>
+        )
+    }
+
+    if (codexReview) {
+        return (
+            <MessagePrimitive.Root
+                id={getConversationMessageAnchorId(messageId)}
+                className={`${rootClass} ${copyText ? 'group/msg' : ''} scroll-mt-4`}
+            >
+                <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                        <CodexReviewCard review={codexReview} />
+                        <div className="mt-1 flex items-center gap-2">
+                            <MessageTimestamp className="text-[10px] leading-none text-[var(--app-hint)]" />
+                            {hasMetadata && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowMetadata((open) => !open)}
+                                    aria-expanded={showMetadata}
+                                    className="text-[10px] text-[var(--app-hint)] underline-offset-2 hover:text-[var(--app-fg)] hover:underline"
+                                >
+                                    {showMetadata ? 'Hide info' : 'Show info'}
+                                </button>
+                            )}
+                        </div>
+                        {showMetadata && (
+                            <MessageMetadata
+                                invokedAt={invokedAt}
+                                durationMs={durationMs}
+                                usage={usage}
+                                model={messageModel ?? null}
+                                turnCount={turnCount}
+                            />
+                        )}
+                    </div>
+                    {copyText ? (
+                        <div className="happy-message-actions-first-line hidden sm:flex shrink-0 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+                            <button
+                                type="button"
+                                title="Copy"
+                                className="p-0.5 rounded hover:bg-[var(--app-subtle-bg)] transition-colors"
+                                onClick={() => copy(copyText)}
+                            >
+                                {copied
+                                    ? <CheckIcon className="h-3.5 w-3.5 text-green-500" />
+                                    : <CopyIcon className="h-3.5 w-3.5 text-[var(--app-hint)]" />}
+                            </button>
+                        </div>
+                    ) : null}
+                </div>
+            </MessagePrimitive.Root>
+        )
+    }
+
+    if (toolOnly) {
+        return (
+            <MessagePrimitive.Root
+                id={getConversationMessageAnchorId(messageId)}
+                className={`${rootClass} ${copyText ? 'group/msg' : ''} scroll-mt-4`}
+            >
+                <div className="min-w-0">
+                    <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />
+                    <div className="mt-1 flex items-center gap-2">
+                        <MessageTimestamp className="text-[10px] leading-none text-[var(--app-hint)]" />
+                        {hasMetadata && (
+                            <button
+                                type="button"
+                                onClick={() => setShowMetadata((open) => !open)}
+                                aria-expanded={showMetadata}
+                                className="text-[10px] text-[var(--app-hint)] underline-offset-2 hover:text-[var(--app-fg)] hover:underline"
+                            >
+                                {showMetadata ? 'Hide info' : 'Show info'}
+                            </button>
+                        )}
+                    </div>
+                    {showMetadata && (
+                        <MessageMetadata
+                            invokedAt={invokedAt}
+                            durationMs={durationMs}
+                            usage={usage}
+                            model={messageModel ?? null}
+                            turnCount={turnCount}
+                        />
+                    )}
+                </div>
             </MessagePrimitive.Root>
         )
     }
 
     return (
-        <MessagePrimitive.Root className={`${rootClass} ${copyText ? 'group/msg' : ''} ${searchClass}`} {...searchAttrs}>
-            <div className="min-w-0">
-                <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />
-            </div>
-            {copyText && (
-                <div className="hidden sm:flex justify-end mt-1 opacity-0 group-hover/msg:opacity-100 transition-opacity">
-                    <button
-                        type="button"
-                        title="Copy"
-                        className="p-0.5 rounded hover:bg-[var(--app-subtle-bg)] transition-colors"
-                        onClick={() => copy(copyText)}
-                    >
-                        {copied
-                            ? <CheckIcon className="h-3.5 w-3.5 text-green-500" />
-                            : <CopyIcon className="h-3.5 w-3.5 text-[var(--app-hint)]" />}
-                    </button>
+        <MessagePrimitive.Root
+            id={getConversationMessageAnchorId(messageId)}
+            className={`${rootClass} ${copyText ? 'group/msg' : ''} scroll-mt-4`}
+        >
+            <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                    <MessagePrimitive.Content components={MESSAGE_PART_COMPONENTS} />
+                    <div className="mt-1 flex items-center gap-2">
+                        <MessageTimestamp className="text-[10px] leading-none text-[var(--app-hint)]" />
+                        {hasMetadata && (
+                            <button
+                                type="button"
+                                onClick={() => setShowMetadata((open) => !open)}
+                                aria-expanded={showMetadata}
+                                className="text-[10px] text-[var(--app-hint)] underline-offset-2 hover:text-[var(--app-fg)] hover:underline"
+                            >
+                                {showMetadata ? 'Hide info' : 'Show info'}
+                            </button>
+                        )}
+                    </div>
+                    {showMetadata && (
+                        <MessageMetadata
+                            invokedAt={invokedAt}
+                            durationMs={durationMs}
+                            usage={usage}
+                            model={messageModel ?? null}
+                            turnCount={turnCount}
+                        />
+                    )}
                 </div>
-            )}
+                {copyText ? (
+                    <div className="happy-message-actions-first-line hidden sm:flex shrink-0 opacity-0 group-hover/msg:opacity-100 transition-opacity">
+                        <button
+                            type="button"
+                            title="Copy"
+                            className="p-0.5 rounded hover:bg-[var(--app-subtle-bg)] transition-colors"
+                            onClick={() => copy(copyText)}
+                        >
+                            {copied
+                                ? <CheckIcon className="h-3.5 w-3.5 text-green-500" />
+                                : <CopyIcon className="h-3.5 w-3.5 text-[var(--app-hint)]" />}
+                        </button>
+                    </div>
+                ) : null}
+            </div>
         </MessagePrimitive.Root>
     )
 }

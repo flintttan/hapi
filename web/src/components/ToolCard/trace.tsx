@@ -3,20 +3,21 @@
  * Placed between Input and Result sections.
  */
 import { useState } from 'react'
-import { isObject } from '@hapi/protocol'
+import { isObject, safeStringify } from '@hapi/protocol'
 import type { ChatBlock, ToolCallBlock } from '@/chat/types'
 import type { SessionMetadataSummary } from '@/types/api'
 import { getToolFullViewComponent } from '@/components/ToolCard/views/_all'
 import { getToolResultViewComponent } from '@/components/ToolCard/views/_results'
+import { formatTaskChildLabel, TaskStateIcon } from '@/components/ToolCard/helpers'
 import { CodeBlock } from '@/components/CodeBlock'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { getEventPresentation } from '@/chat/presentation'
 import { useTranslation } from '@/lib/use-translation'
-import { getToolPresentation } from '@/components/ToolCard/knownTools'
+import { isSubagentToolName } from '@/chat/subagentTool'
 
-function isSubagentLikeToolName(name: string): boolean {
-    return name === 'Task' || name === 'Agent' || name === 'CodexAgent'
-}
+// ---------------------------------------------------------------------------
+// Result type narrowing (trace.tsx-internal; do NOT move to shared protocol)
+// ---------------------------------------------------------------------------
 
 type TaskToolResultSummary = {
     totalTokens?: number
@@ -40,30 +41,21 @@ function readSummaryFields(result: unknown): {
     }
 }
 
+// Keep the type alias visible for documentation purposes
 type _TaskToolResultSummary = TaskToolResultSummary
 
-function formatTaskChildLabel(child: ToolCallBlock, metadata: SessionMetadataSummary | null): string {
-    const presentation = getToolPresentation({
-        toolName: child.tool.name,
-        input: child.tool.input,
-        result: child.tool.result,
-        childrenCount: child.children.length,
-        description: child.tool.description,
-        metadata,
-    })
-    return presentation.subtitle ? `${presentation.title}: ${presentation.subtitle}` : presentation.title
-}
+// ---------------------------------------------------------------------------
+// Pure helpers (exported for unit tests)
+// ---------------------------------------------------------------------------
 
-function TaskStateIcon(props: { state: ToolCallBlock['tool']['state'] }) {
-    if (props.state === 'completed') return <span className="text-emerald-600">✓</span>
-    if (props.state === 'error') return <span className="text-red-600">✕</span>
-    if (props.state === 'pending') return <span className="text-amber-600">🔐</span>
-    return <span className="animate-pulse text-amber-600">●</span>
-}
-
+/**
+ * Returns tool-call children of the given Task/Agent block, or null if none exist.
+ */
 export function getTaskTraceChildren(block: ToolCallBlock): ToolCallBlock[] | null {
-    if (!isSubagentLikeToolName(block.tool.name)) return null
-    const children = block.children.filter((c): c is ToolCallBlock => c.kind === 'tool-call')
+    if (!isSubagentToolName(block.tool.name)) return null
+    const children = block.children.filter(
+        (c): c is ToolCallBlock => c.kind === 'tool-call',
+    )
     return children.length === 0 ? null : children
 }
 
@@ -74,6 +66,10 @@ function getTraceChildren(block: ToolCallBlock): ChatBlock[] | null {
     return getTaskTraceChildren(block)
 }
 
+/**
+ * Formats the summary line shown in the Trace header.
+ * Falls back gracefully when token / duration data is unavailable.
+ */
 export function getTraceSummaryText(
     calls: number,
     totalTokens: number | null,
@@ -95,25 +91,36 @@ export function getTraceSummaryText(
     return parts.join(' · ')
 }
 
-export function TraceSection(props: { block: ToolCallBlock; metadata: SessionMetadataSummary | null }) {
+// ---------------------------------------------------------------------------
+// TraceSection component
+// ---------------------------------------------------------------------------
+
+type TraceSectionProps = {
+    block: ToolCallBlock
+    metadata: SessionMetadataSummary | null
+}
+
+export function TraceSection({ block, metadata }: TraceSectionProps) {
     const { t } = useTranslation()
-    const children = getTraceChildren(props.block)
+    const children = getTraceChildren(block)
     if (!children) return null
 
-    const state = props.block.tool.state
-    const isCodexAgentTrace = props.block.tool.name === 'CodexAgent'
+    const state = block.tool.state
+    const isCodexAgentTrace = block.tool.name === 'CodexAgent'
     const defaultOpen = isCodexAgentTrace || state === 'running' || state === 'error' || state === 'pending'
     const fixedHeight = isCodexAgentTrace
     const mode = isCodexAgentTrace ? 'session' : 'trace'
 
-    const { totalTokens, totalDurationMs, totalToolUseCount } = readSummaryFields(props.block.tool.result)
+    // Extract summary metadata from result using typed helper
+    const { totalTokens, totalDurationMs, totalToolUseCount } = readSummaryFields(block.tool.result)
     const callCount = totalToolUseCount !== null ? totalToolUseCount : children.length
+
     const summaryText = getTraceSummaryText(callCount, totalTokens, totalDurationMs, t('tool.trace.callsSuffix'))
 
     return (
         <TraceSectionInner
             items={children}
-            metadata={props.metadata}
+            metadata={metadata}
             defaultOpen={defaultOpen}
             summaryText={summaryText}
             fixedHeight={fixedHeight}
@@ -122,53 +129,100 @@ export function TraceSection(props: { block: ToolCallBlock; metadata: SessionMet
     )
 }
 
-function TraceSectionInner(props: { items: ChatBlock[]; metadata: SessionMetadataSummary | null; defaultOpen: boolean; summaryText: string; fixedHeight: boolean; mode: 'trace' | 'session' }) {
+// ---------------------------------------------------------------------------
+// Inner component (holds open/close state)
+// ---------------------------------------------------------------------------
+
+type TraceSectionInnerProps = {
+    items: ChatBlock[]
+    metadata: SessionMetadataSummary | null
+    defaultOpen: boolean
+    summaryText: string
+    fixedHeight: boolean
+    mode: 'trace' | 'session'
+}
+
+function TraceSectionInner({
+    items,
+    metadata,
+    defaultOpen,
+    summaryText,
+    fixedHeight,
+    mode,
+}: TraceSectionInnerProps) {
     const { t } = useTranslation()
-    const [open, setOpen] = useState(props.defaultOpen)
+    const [open, setOpen] = useState(defaultOpen)
 
     return (
         <div className="flex flex-col gap-1">
+            {/* Header row — clickable to toggle */}
             <button
                 type="button"
-                className="flex items-center gap-1 text-left text-xs font-medium text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)]"
+                className="flex items-center gap-1 text-left text-xs font-medium text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors"
                 onClick={() => setOpen((v) => !v)}
                 aria-expanded={open}
             >
                 <span className="w-3 text-center select-none">{open ? '▾' : '▸'}</span>
                 <span>{t('tool.trace')}</span>
-                <span className="font-mono font-normal opacity-70">({props.summaryText})</span>
+                <span className="font-mono font-normal opacity-70">({summaryText})</span>
             </button>
 
             {open ? (
-                <div className={props.fixedHeight ? 'min-h-[260px] max-h-[45vh] overflow-y-auto pr-1' : undefined}>
-                    <TraceChildList items={props.items} metadata={props.metadata} mode={props.mode} />
+                <div className={fixedHeight ? 'min-h-[260px] max-h-[45vh] overflow-y-auto pr-1' : undefined}>
+                    <TraceChildList items={items} metadata={metadata} mode={mode} />
                 </div>
             ) : null}
         </div>
     )
 }
 
-function TraceChildList(props: { items: ChatBlock[]; metadata: SessionMetadataSummary | null; mode: 'trace' | 'session' }) {
+// ---------------------------------------------------------------------------
+// Child list
+// ---------------------------------------------------------------------------
+
+type TraceChildListProps = {
+    items: ChatBlock[]
+    metadata: SessionMetadataSummary | null
+    mode: 'trace' | 'session'
+}
+
+function TraceChildList({ items, metadata, mode }: TraceChildListProps) {
     const [expandedId, setExpandedId] = useState<string | null>(null)
 
     return (
-        <div className={props.mode === 'session' ? 'flex flex-col gap-3' : 'flex flex-col gap-1 border-l border-[var(--app-border)] pl-4'}>
-            {props.items.map((child) => (
+        <div className={mode === 'session'
+            ? 'flex flex-col gap-3'
+            : 'flex flex-col gap-1 pl-4 border-l border-[var(--app-border)]'
+        }>
+            {items.map((child) => (
                 <TraceChildRow
                     key={child.id}
                     child={child}
-                    metadata={props.metadata}
+                    metadata={metadata}
                     expanded={expandedId === child.id}
                     onToggle={() => setExpandedId((prev) => (prev === child.id ? null : child.id))}
-                    mode={props.mode}
+                    mode={mode}
                 />
             ))}
         </div>
     )
 }
 
-function TraceChildRow(props: { child: ChatBlock; metadata: SessionMetadataSummary | null; expanded: boolean; onToggle?: () => void; mode: 'trace' | 'session' }) {
-    const isSessionMode = props.mode === 'session'
+// ---------------------------------------------------------------------------
+// Individual child row
+// ---------------------------------------------------------------------------
+
+type TraceChildRowProps = {
+    child: ChatBlock
+    metadata: SessionMetadataSummary | null
+    expanded: boolean
+    onToggle?: () => void
+    mode: 'trace' | 'session'
+}
+
+function TraceChildRow({ child, metadata, expanded, onToggle, mode }: TraceChildRowProps) {
+    const { t } = useTranslation()
+    const isSessionMode = mode === 'session'
     const rowClassName = isSessionMode
         ? 'flex flex-col gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2'
         : 'flex flex-col gap-1'
@@ -176,42 +230,66 @@ function TraceChildRow(props: { child: ChatBlock; metadata: SessionMetadataSumma
         ? 'rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-2 text-sm'
         : 'ml-8 rounded border border-[var(--app-border)] p-2 text-sm'
     const detailPlainClassName = isSessionMode ? '' : 'ml-8'
-    const chevron = props.onToggle
-        ? <span className="w-3 text-center select-none">{props.expanded ? '▾' : '▸'}</span>
-        : <span className="w-3 text-center select-none text-[var(--app-hint)]">•</span>
+    const chevron = onToggle ? (
+        <span className="w-3 text-center select-none">{expanded ? '▾' : '▸'}</span>
+    ) : (
+        <span className="w-3 text-center select-none text-[var(--app-hint)]">•</span>
+    )
 
-    if (props.child.kind === 'agent-text' || props.child.kind === 'agent-reasoning') {
-        const label = props.child.kind === 'agent-reasoning' ? 'Reasoning' : 'Message'
-        const preview = props.child.text.trim().split('\n')[0] ?? ''
+    if (child.kind === 'agent-text' || child.kind === 'agent-reasoning') {
+        const label = child.kind === 'agent-reasoning' ? 'Reasoning' : 'Message'
+        const preview = child.text.trim().split('\n')[0] ?? ''
+
         return (
             <div className={rowClassName}>
-                <button type="button" className="flex items-center gap-2 text-left text-xs text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)] disabled:pointer-events-none" onClick={props.onToggle} disabled={!props.onToggle}>
+                <button
+                    type="button"
+                    className="flex items-center gap-2 text-left text-xs text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors disabled:pointer-events-none"
+                    onClick={onToggle}
+                    disabled={!onToggle}
+                >
                     {chevron}
                     <span className="font-medium">{label}</span>
                     <span className="min-w-0 truncate">{preview}</span>
                 </button>
-                {props.expanded ? <div className={detailClassName}><MarkdownRenderer content={props.child.text} /></div> : null}
+                {expanded && (
+                    <div className={detailClassName}>
+                        <MarkdownRenderer content={child.text} />
+                    </div>
+                )}
             </div>
         )
     }
 
-    if (props.child.kind === 'cli-output') {
+    if (child.kind === 'cli-output') {
         return (
             <div className={rowClassName}>
-                <button type="button" className="flex items-center gap-2 text-left text-xs text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)] disabled:pointer-events-none" onClick={props.onToggle} disabled={!props.onToggle}>
+                <button
+                    type="button"
+                    className="flex items-center gap-2 text-left text-xs text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors disabled:pointer-events-none"
+                    onClick={onToggle}
+                    disabled={!onToggle}
+                >
                     {chevron}
                     <span className="font-medium">Output</span>
-                    <span className="min-w-0 truncate">{props.child.text.trim().split('\n')[0]}</span>
+                    <span className="min-w-0 truncate">{child.text.trim().split('\n')[0]}</span>
                 </button>
-                {props.expanded ? <div className={detailPlainClassName}><CodeBlock code={props.child.text} language="text" /></div> : null}
+                {expanded && (
+                    <div className={detailPlainClassName}>
+                        <CodeBlock code={child.text} language="text" />
+                    </div>
+                )}
             </div>
         )
     }
 
-    if (props.child.kind === 'agent-event') {
-        const presentation = getEventPresentation(props.child.event)
+    if (child.kind === 'agent-event') {
+        const presentation = getEventPresentation(child.event)
         return (
-            <div className={isSessionMode ? 'flex items-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2 text-xs text-[var(--app-hint)]' : 'flex items-center gap-2 text-xs text-[var(--app-hint)]'}>
+            <div className={isSessionMode
+                ? 'flex items-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2 text-xs text-[var(--app-hint)]'
+                : 'flex items-center gap-2 text-xs text-[var(--app-hint)]'
+            }>
                 <span className="w-3 text-center select-none">•</span>
                 {presentation.icon ? <span aria-hidden="true">{presentation.icon}</span> : null}
                 <span>{presentation.text}</span>
@@ -219,29 +297,45 @@ function TraceChildRow(props: { child: ChatBlock; metadata: SessionMetadataSumma
         )
     }
 
-    if (props.child.kind !== 'tool-call') {
+    if (child.kind !== 'tool-call') {
         return null
     }
 
-    const label = formatTaskChildLabel(props.child, props.metadata)
-    const FullInputView = getToolFullViewComponent(props.child.tool.name)
-    const ResultView = getToolResultViewComponent(props.child.tool.name)
+    const label = formatTaskChildLabel(child, metadata, t)
+    const FullInputView = getToolFullViewComponent(child.tool.name)
+    const ResultView = getToolResultViewComponent(child.tool.name)
 
     return (
         <div className={rowClassName}>
-            <button type="button" className="flex items-center gap-2 text-left text-xs text-[var(--app-hint)] transition-colors hover:text-[var(--app-fg)] disabled:pointer-events-none" onClick={props.onToggle} disabled={!props.onToggle}>
+            <button
+                type="button"
+                className="flex items-center gap-2 text-left text-xs text-[var(--app-hint)] hover:text-[var(--app-fg)] transition-colors disabled:pointer-events-none"
+                onClick={onToggle}
+                disabled={!onToggle}
+            >
                 {chevron}
-                <span className="w-4 shrink-0 text-center"><TaskStateIcon state={props.child.tool.state} /></span>
-                <span className={isSessionMode ? 'min-w-0 truncate font-mono' : 'break-all font-mono'}>{label}</span>
+                <span className="w-4 text-center shrink-0">
+                    <TaskStateIcon state={child.tool.state} />
+                </span>
+                <span className={isSessionMode ? 'min-w-0 truncate font-mono' : 'font-mono break-all'}>{label}</span>
             </button>
-            {props.expanded ? (
-                <div className={detailClassName}>
-                    <div className="flex flex-col gap-2">
-                        {FullInputView ? <FullInputView block={props.child} metadata={props.metadata} /> : isObject(props.child.tool.input) ? <CodeBlock code={JSON.stringify(props.child.tool.input, null, 2)} language="json" /> : null}
-                        {ResultView && props.child.tool.result !== undefined ? <ResultView block={props.child} metadata={props.metadata} /> : null}
+
+            {expanded && (
+                <div className={isSessionMode ? 'flex flex-col gap-2' : 'ml-8 flex flex-col gap-2 rounded border border-[var(--app-border)] p-2'}>
+                    <div>
+                        <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">{t('tool.input')}</div>
+                        {FullInputView ? (
+                            <FullInputView block={child} metadata={metadata} />
+                        ) : (
+                            <CodeBlock code={safeStringify(child.tool.input)} language="json" />
+                        )}
+                    </div>
+                    <div>
+                        <div className="mb-1 text-xs font-medium text-[var(--app-hint)]">{t('tool.result')}</div>
+                        <ResultView block={child} metadata={metadata} />
                     </div>
                 </div>
-            ) : null}
+            )}
         </div>
     )
 }

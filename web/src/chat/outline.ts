@@ -29,21 +29,24 @@ function userBlockToOutlineItem(block: UserTextBlock): ConversationOutlineItem {
         targetMessageId: `user-text:${block.id}`,
         kind: 'user',
         label,
-        createdAt: block.createdAt,
+        createdAt: block.createdAt
     }
 }
 
 function isLocatableOutlineBlock(block: ChatBlock): block is UserTextBlock {
-    return block.kind === 'user-text' && !(block.invokedAt === null && block.status !== 'failed')
+    return block.kind === 'user-text'
+        && !(block.invokedAt === null && block.status !== 'failed')
 }
 
 export function buildConversationOutline(blocks: readonly ChatBlock[]): ConversationOutlineItem[] {
     const items: ConversationOutlineItem[] = []
+
     for (const block of blocks) {
         if (isLocatableOutlineBlock(block)) {
             items.push(userBlockToOutlineItem(block))
         }
     }
+
     return items
 }
 

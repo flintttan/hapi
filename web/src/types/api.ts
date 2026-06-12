@@ -1,5 +1,7 @@
 import type {
     DecryptedMessage as ProtocolDecryptedMessage,
+    Machine,
+    RunnerState,
     Session,
     SessionSummary,
     SyncEvent as ProtocolSyncEvent,
@@ -7,20 +9,82 @@ import type {
 } from '@hapi/protocol/types'
 
 export type {
+    CodexModelsResponse,
+    CodexModelSummary,
+    CommandResponse,
+    CursorModelsResponse,
+    CursorModelSummary,
+    DeleteUploadResponse,
+    DirectoryEntry,
+    FileReadResponse,
+    GitCommandResponse,
+    ListDirectoryResponse,
+    MachineDirectoryEntry,
+    MachineListDirectoryResponse,
+    MachinePathsExistsResponse,
+    MachinesResponse,
+    MessagesResponse,
+    OpencodeModelsResponse,
+    OpencodeModelSummary,
+    PathExistsResponse,
+    SlashCommand,
+    SlashCommandsResponse,
+    SessionResponse,
+    SessionsResponse,
+    SpawnResponse,
+    UploadFileResponse
+} from '@hapi/protocol/apiTypes'
+
+export type AuthResponse = {
+    token: string
+    refreshToken?: string
+    user: {
+        id: string | number
+        username?: string
+        firstName?: string
+        lastName?: string
+    }
+}
+
+export type CliTokenInfo = {
+    id: string
+    name: string | null
+    created_at: number
+    last_used_at?: number | null
+}
+
+export type CliTokensResponse = { tokens: CliTokenInfo[] }
+
+export type CliTokenCreateResponse = {
+    id: string
+    token: string
+    name: string | null
+    created_at: number
+}
+
+export type {
     AgentState,
     AttachmentMetadata,
     CodexCollaborationMode,
+    Metadata,
     PermissionMode,
+    Machine,
+    RunnerState,
     Session,
+    SessionPatch,
     SessionSummary,
     SessionSummaryMetadata,
     TeamMember,
     TeamMessage,
     TeamState,
     TeamTask,
+    ThreadGoal,
+    ThreadGoalStatus,
     TodoItem,
     WorktreeMetadata
 } from '@hapi/protocol/types'
+
+export type { HapiSessionExport } from '@hapi/protocol/sessionExport'
 
 export type SessionMetadataSummary = {
     path: string
@@ -32,95 +96,18 @@ export type SessionMetadataSummary = {
     machineId?: string
     tools?: string[]
     flavor?: string | null
+    capabilities?: {
+        terminal?: boolean
+    }
     worktree?: WorktreeMetadata
 }
 
-export type MessageStatus = 'sending' | 'sent' | 'failed' | 'queued'
+export type MessageStatus = 'queued' | 'sending' | 'sent' | 'failed'
 
 export type DecryptedMessage = ProtocolDecryptedMessage & {
     status?: MessageStatus
     originalText?: string
-}
-
-export type RunnerState = {
-    status?: string
-    pid?: number
-    httpPort?: number
-    startedAt?: number
-    shutdownRequestedAt?: number
-    shutdownSource?: string
-    lastSpawnError?: {
-        message: string
-        pid?: number
-        exitCode?: number | null
-        signal?: string | null
-        at: number
-    } | null
-}
-
-export type Machine = {
-    id: string
-    active: boolean
-    metadata: {
-        host: string
-        platform: string
-        happyCliVersion: string
-        displayName?: string
-    } | null
-    runnerState?: RunnerState | null
-}
-
-export type MachineResponse = { machine: Machine }
-
-export type AuthResponse = {
-    token: string
-    refreshToken?: string
-    user: {
-        id: number | string
-        username?: string
-        firstName?: string
-        lastName?: string
-    }
-}
-
-export type SessionsResponse = { sessions: SessionSummary[] }
-export type SessionResponse = { session: Session }
-export type MessagesResponse = {
-    messages: DecryptedMessage[]
-    page: {
-        limit: number
-        nextBeforeSeq: number | null
-        nextBeforeAt: number | null
-        hasMore: boolean
-    }
-}
-
-export type CancelMessageResponse =
-    | { status: 'cancelled'; localId: string | null }
-    | { status: 'invoked'; message: DecryptedMessage }
-
-export type MachinesResponse = { machines: Machine[] }
-export type MachinePathsExistsResponse = { exists: Record<string, boolean> }
-export type BulkArchiveSessionsResponse = { ok: boolean; archivedSessionIds: string[] }
-export type BulkDeleteSessionsResponse = { ok: boolean; deletedSessionIds: string[] }
-export type CleanupPreferencesResponse = {
-    autoCleanupEnabled: boolean
-    sessionRetentionDays: number | null
-    defaultSessionRetentionDays: number
-    effectiveSessionRetentionDays: number
-}
-
-export type SpawnResponse =
-    | { type: 'success'; sessionId: string }
-    | { type: 'requestToApproveDirectoryCreation'; directory: string }
-    | { type: 'error'; message: string }
-
-export type GitCommandResponse = {
-    success: boolean
-    stdout?: string
-    stderr?: string
-    exitCode?: number
-    error?: string
+    invokedAt?: number | null
 }
 
 export type FileSearchItem = {
@@ -133,52 +120,6 @@ export type FileSearchItem = {
 export type FileSearchResponse = {
     success: boolean
     files?: FileSearchItem[]
-    error?: string
-}
-
-export type DirectoryEntry = {
-    name: string
-    type: 'file' | 'directory' | 'other'
-    size?: number
-    modified?: number
-}
-
-export type ListDirectoryResponse = {
-    success: boolean
-    entries?: DirectoryEntry[]
-    error?: string
-}
-
-export type FileReadResponse = {
-    success: boolean
-    content?: string
-    error?: string
-}
-
-export type CliTokenInfo = {
-    id: string
-    name: string | null
-    created_at: number
-    last_used_at: number | null
-}
-
-export type CliTokensResponse = { tokens: CliTokenInfo[] }
-
-export type CliTokenCreateResponse = {
-    id: string
-    token: string
-    name: string | null
-    created_at: number
-}
-
-export type UploadFileResponse = {
-    success: boolean
-    path?: string
-    error?: string
-}
-
-export type DeleteUploadResponse = {
-    success: boolean
     error?: string
 }
 
@@ -199,20 +140,6 @@ export type GitStatusFiles = {
     branch: string | null
     totalStaged: number
     totalUnstaged: number
-}
-
-export type SlashCommand = {
-    name: string
-    description?: string
-    source: 'builtin' | 'user' | 'plugin' | 'project'
-    content?: string  // Expanded content for Codex user prompts
-    pluginName?: string
-}
-
-export type SlashCommandsResponse = {
-    success: boolean
-    commands?: SlashCommand[]
-    error?: string
 }
 
 export type SkillSummary = {
@@ -242,6 +169,75 @@ export type PushUnsubscribePayload = {
 
 export type PushVapidPublicKeyResponse = {
     publicKey: string
+}
+
+export type CodexDesktopScriptResponse = {
+    success: boolean
+    message?: string
+    pid?: number
+    command?: string
+    script?: string
+    cwd?: string
+    output?: string
+    error?: string
+    codexDesktopRunning?: boolean
+    codexClientAvailable?: boolean
+    // 中文注释：多选导入时返回实际处理完成的 Codex 会话数量，用于前端提示本次导入条数。
+    syncedCount?: number
+    // 中文注释：这里存放本次导入对应的 Codex thread ID 列表，方便日志和排查 direct import 结果。
+    sessionIds?: string[]
+}
+
+export type CodexLocalSessionSummary = {
+    id: string
+    title: string
+    lastUserMessage?: string | null
+    cwd?: string | null
+    file: string
+    modifiedAt: number
+    originator?: string | null
+    cliVersion?: string | null
+}
+
+export type CodexLocalSessionsResponse = {
+    success: true
+    sessions: CodexLocalSessionSummary[]
+}
+
+export type CodexDesktopSyncRequest = {
+    // 中文注释：前端弹窗直接提交 Codex thread ID，后端会按这些 transcript 直接导入到 Hapi。
+    sessionIds: string[]
+}
+
+export type CodexDesktopStatusResponse = {
+    success: true
+    codexDesktopRunning: boolean
+    codexClientAvailable: boolean
+}
+
+export type CodexDuplicateSessionGroup = {
+    codexSessionId: string
+    hapiSessionIds: string[]
+    canonicalSessionId?: string
+    removedSessionIds?: string[]
+}
+
+export type CodexDuplicateSessionsResponse = {
+    success: true
+    // 中文注释：这里只返回本次选中导入的 codexSessionId 中检测出来的重复会话，不包含未勾选的其它会话。
+    duplicates: CodexDuplicateSessionGroup[]
+} | {
+    success: false
+    error: string
+}
+
+export type CodexMergeDuplicateSessionsResponse = {
+    success: true
+    merged: CodexDuplicateSessionGroup[]
+    mergedCount: number
+} | {
+    success: false
+    error: string
 }
 
 export type VisibilityPayload = {

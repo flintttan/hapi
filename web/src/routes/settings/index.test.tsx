@@ -1,6 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen } from '@testing-library/react'
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react'
 import { I18nContext, I18nProvider } from '@/lib/i18n-context'
 import { en } from '@/lib/locales'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
@@ -15,25 +14,6 @@ vi.mock('@tanstack/react-router', () => ({
     useNavigate: () => vi.fn(),
     useRouter: () => ({ history: { back: vi.fn() } }),
     useLocation: () => '/settings',
-}))
-
-// Mock app context
-vi.mock('@/lib/app-context', () => ({
-    useAppContext: () => ({
-        api: {
-            getMachines: vi.fn(async () => ({ machines: [] })),
-            getCleanupPreferences: vi.fn(async () => ({
-                autoCleanupEnabled: true,
-                sessionRetentionDays: null,
-                defaultSessionRetentionDays: 30,
-                effectiveSessionRetentionDays: 30,
-            })),
-            setCleanupPreferences: vi.fn(),
-            setMachineDisplayName: vi.fn(),
-        },
-        user: { id: 'user-1', username: 'alice' },
-        onLogout: vi.fn(),
-    }),
 }))
 
 // Mock useFontScale hook
@@ -55,6 +35,55 @@ vi.mock('@/hooks/useTerminalFontSize', () => ({
     ],
 }))
 
+vi.mock('@/hooks/useComposerEnterBehavior', () => ({
+    useComposerEnterBehavior: () => ({ composerEnterBehavior: 'send', setComposerEnterBehavior: vi.fn() }),
+    getComposerEnterBehaviorOptions: () => [
+        { value: 'send', labelKey: 'settings.chat.enterBehavior.send' },
+        { value: 'newline', labelKey: 'settings.chat.enterBehavior.newline' },
+    ],
+}))
+
+vi.mock('@/hooks/useTerminalToolDisplayMode', () => ({
+    useTerminalToolDisplayMode: () => ({ terminalToolDisplayMode: 'compact', setTerminalToolDisplayMode: vi.fn() }),
+    getTerminalToolDisplayModeOptions: () => [
+        { value: 'compact', labelKey: 'settings.chat.terminalToolDisplay.compact' },
+        { value: 'detailed', labelKey: 'settings.chat.terminalToolDisplay.detailed' },
+    ],
+}))
+
+vi.mock('@/hooks/useSessionListStatusMode', () => ({
+    useSessionListStatusMode: () => ({ sessionListStatusMode: 'standard', setSessionListStatusMode: vi.fn() }),
+    getSessionListStatusModeOptions: () => [
+        { value: 'standard', labelKey: 'settings.display.sessionListStatus.standard' },
+        { value: 'detailed', labelKey: 'settings.display.sessionListStatus.detailed' },
+    ],
+}))
+
+vi.mock('@/hooks/useSessionPreviewLimit', () => ({
+    MIN_SESSION_PREVIEW_LIMIT: 1,
+    MAX_SESSION_PREVIEW_LIMIT: 99,
+    normalizeSessionPreviewLimit: (value: number) => Number.isInteger(value) ? Math.min(99, Math.max(1, value)) : 8,
+    useSessionPreviewLimit: () => ({ sessionPreviewLimit: 8, setSessionPreviewLimit: vi.fn() }),
+}))
+
+vi.mock('@/hooks/useChatSurfaceColors', () => ({
+    useChatSurfaceColors: () => ({
+        toolGroupBackground: 'default',
+        userMessageBackground: 'preset:soft-blue',
+        setToolGroupBackground: vi.fn(),
+        setUserMessageBackground: vi.fn(),
+    }),
+    getChatSurfaceColorPresetOptions: () => [
+        { value: 'default', labelKey: 'settings.chat.surfaceColor.default' },
+        { value: 'soft-blue', labelKey: 'settings.chat.surfaceColor.softBlue' },
+        { value: 'soft-green', labelKey: 'settings.chat.surfaceColor.softGreen' },
+        { value: 'soft-yellow', labelKey: 'settings.chat.surfaceColor.softYellow' },
+    ],
+    getChatSurfaceColorPickerValue: () => '#7db7ff',
+    toPresetChatSurfaceColorPreference: (value: string) => value === 'default' ? 'default' : `preset:${value}`,
+    toCustomChatSurfaceColorPreference: (value: string) => `custom:${value}`,
+}))
+
 // Mock useTheme hook
 vi.mock('@/hooks/useTheme', () => ({
     useAppearance: () => ({ appearance: 'system', setAppearance: vi.fn() }),
@@ -74,31 +103,60 @@ vi.mock('@/lib/languages', () => ({
     getLanguageDisplayName: (lang: { code: string | null; name: string }) => lang.name,
 }))
 
+// Use vi.hoisted so these mocks are available when vi.mock factories run
+const { mockFetchVoices, mockFetchVoiceBackend, mockApi } = vi.hoisted(() => {
+    const mockFetchVoices = vi.fn(() => Promise.resolve<unknown[]>([]))
+    const mockFetchVoiceBackend = vi.fn(() => Promise.resolve({
+        backend: 'elevenlabs' as 'elevenlabs' | 'gemini-live' | 'qwen-realtime',
+        backends: ['elevenlabs'] as Array<'elevenlabs' | 'gemini-live' | 'qwen-realtime'>
+    }))
+    const mockApi = {
+        fetchVoices: vi.fn(() => Promise.resolve({ voices: [] })),
+    }
+    return { mockFetchVoices, mockFetchVoiceBackend, mockApi }
+})
+
+// Mock static voices list
+vi.mock('@/lib/voices', () => ({
+    VOICES: [{ id: 'voice1', name: 'Jessica', gender: 'female', description: 'Default' }],
+    DEFAULT_VOICE_ID: 'voice1',
+    getVoiceById: (id: string | null) =>
+        id === 'voice1' ? { id: 'voice1', name: 'Jessica', gender: 'female', description: 'Default' } : undefined,
+    getFallbackVoices: () => [{ id: 'voice1', name: 'Jessica', gender: 'female', description: 'Default' }],
+}))
+
+// Mock fetchVoices to return a resolved list by default
+vi.mock('@/api/voice', () => ({
+    fetchVoices: mockFetchVoices,
+    fetchVoiceBackend: mockFetchVoiceBackend,
+    fetchVoiceToken: vi.fn(() => Promise.resolve({ allowed: true, token: 'tok' })),
+}))
+
+// Mock useAppContext so the page doesn't throw "AppContext is not available"
+vi.mock('@/lib/app-context', () => ({
+    useAppContext: () => ({ api: mockApi, token: 'test', baseUrl: '' }),
+    AppContextProvider: ({ children }: { children: React.ReactNode }) => children,
+}))
+
+
+afterEach(() => {
+    cleanup()
+})
 function renderWithProviders(ui: React.ReactElement) {
-    const queryClient = new QueryClient({
-        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
     return render(
-        <QueryClientProvider client={queryClient}>
-            <I18nProvider>
-                {ui}
-            </I18nProvider>
-        </QueryClientProvider>
+        <I18nProvider>
+            {ui}
+        </I18nProvider>
     )
 }
 
 function renderWithSpyT(ui: React.ReactElement) {
     const translations = en as Record<string, string>
     const spyT = vi.fn((key: string) => translations[key] ?? key)
-    const queryClient = new QueryClient({
-        defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
-    })
     render(
-        <QueryClientProvider client={queryClient}>
-            <I18nContext.Provider value={{ t: spyT, locale: 'en', setLocale: vi.fn() }}>
-                {ui}
-            </I18nContext.Provider>
-        </QueryClientProvider>
+        <I18nContext.Provider value={{ t: spyT, locale: 'en', setLocale: vi.fn() }}>
+            {ui}
+        </I18nContext.Provider>
     )
     return spyT
 }
@@ -106,25 +164,24 @@ function renderWithSpyT(ui: React.ReactElement) {
 describe('SettingsPage', () => {
     beforeEach(() => {
         vi.clearAllMocks()
+        mockFetchVoiceBackend.mockResolvedValue({ backend: 'elevenlabs', backends: ['elevenlabs'] })
+        // Reset fetchVoices mock to return empty list by default
+        mockFetchVoices.mockResolvedValue([])
         // Mock localStorage
         const localStorageMock = {
-            getItem: vi.fn(() => 'en'),
+            getItem: vi.fn(() => null),
             setItem: vi.fn(),
             removeItem: vi.fn(),
+            clear: vi.fn(),
+            key: vi.fn(() => null),
+            length: 0,
         }
-        Object.defineProperty(window, 'localStorage', { value: localStorageMock })
+        Object.defineProperty(window, 'localStorage', { value: localStorageMock, configurable: true })
     })
 
     it('renders the About section', () => {
         renderWithProviders(<SettingsPage />)
         expect(screen.getByText('About')).toBeInTheDocument()
-    })
-
-    it('renders the Account section', () => {
-        renderWithProviders(<SettingsPage />)
-        expect(screen.getByText('Account')).toBeInTheDocument()
-        expect(screen.getByText('Current user')).toBeInTheDocument()
-        expect(screen.getByText('@alice')).toBeInTheDocument()
     })
 
     it('displays the App Version with correct value', () => {
@@ -153,9 +210,6 @@ describe('SettingsPage', () => {
     it('uses correct i18n keys for About section', () => {
         const spyT = renderWithSpyT(<SettingsPage />)
         const calledKeys = spyT.mock.calls.map((call) => call[0])
-        expect(calledKeys).toContain('settings.account.title')
-        expect(calledKeys).toContain('settings.account.currentUser')
-        expect(calledKeys).toContain('settings.account.logout')
         expect(calledKeys).toContain('settings.about.title')
         expect(calledKeys).toContain('settings.about.website')
         expect(calledKeys).toContain('settings.about.appVersion')
@@ -173,11 +227,289 @@ describe('SettingsPage', () => {
         const calledKeys = spyT.mock.calls.map((call) => call[0])
         expect(calledKeys).toContain('settings.display.appearance')
         expect(calledKeys).toContain('settings.display.appearance.system')
+        expect(calledKeys).toContain('settings.display.sessionPreviewLimit')
+        expect(calledKeys).toContain('settings.display.sessionPreviewLimit.decrease')
+        expect(calledKeys).toContain('settings.display.sessionPreviewLimit.increase')
+        expect(calledKeys).toContain('settings.display.sessionListStatus')
+        expect(calledKeys).toContain('settings.display.sessionListStatus.standard')
     })
 
     it('renders the Terminal Font Size setting', () => {
         renderWithProviders(<SettingsPage />)
         expect(screen.getAllByText('Terminal Font Size').length).toBeGreaterThanOrEqual(1)
         expect(screen.getAllByText('13px').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('renders the Session Preview Limit setting', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getAllByText('Sessions Before Folding').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getByLabelText('Sessions Before Folding')).toHaveValue(8)
+        expect(screen.getAllByLabelText('Show fewer sessions before folding').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByLabelText('Show more sessions before folding').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('renders the Session list status setting', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getAllByText('Session list status').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByText('Standard').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('renders the Enter Key setting', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getAllByText('Enter Key').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByText('Send message').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('renders the Terminal Tool Display setting', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getAllByText('Terminal Tool Cards').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByText('Compact (command only)').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('renders grouped tool and user message background settings', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getAllByText('Grouped Tool Use Background').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByText('User Message Background').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByText('Default color').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByText('Soft blue').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByText('Soft green').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByText('Soft yellow').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByLabelText('Custom color').length).toBeGreaterThanOrEqual(2)
+    })
+
+    it('uses correct i18n keys for the Enter Key setting', () => {
+        const spyT = renderWithSpyT(<SettingsPage />)
+        const calledKeys = spyT.mock.calls.map((call) => call[0])
+        expect(calledKeys).toContain('settings.chat.title')
+        expect(calledKeys).toContain('settings.chat.enterBehavior')
+        expect(calledKeys).toContain('settings.chat.enterBehavior.send')
+        expect(calledKeys).toContain('settings.chat.terminalToolDisplay')
+        expect(calledKeys).toContain('settings.chat.terminalToolDisplay.compact')
+        expect(calledKeys).toContain('settings.chat.groupedToolBackground')
+        expect(calledKeys).toContain('settings.chat.userMessageBackground')
+        expect(calledKeys).toContain('settings.chat.surfaceColor.default')
+    })
+
+    // Voice picker tests
+    it('renders the Voice section with "Voice" label', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getAllByText('Voice').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('uses correct i18n keys for the voice picker', () => {
+        const spyT = renderWithSpyT(<SettingsPage />)
+        const calledKeys = spyT.mock.calls.map((call) => call[0])
+        expect(calledKeys).toContain('settings.voice.voice')
+        expect(calledKeys).toContain('settings.voice.voiceDefault')
+    })
+
+    it('voice picker shows "Default" option when opened', () => {
+        renderWithProviders(<SettingsPage />)
+        // The current value "Default" is shown in the closed picker button
+        expect(screen.getAllByText('Default').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('opens voice picker and shows "Default" option in the list', () => {
+        renderWithProviders(<SettingsPage />)
+        // Click the voice picker button (aria-label target via the label text)
+        const voiceButtons = screen.getAllByRole('button', { name: /Default/i })
+        // Find the button that has aria-haspopup — that's the voice picker trigger
+        const pickerButton = voiceButtons.find(btn => btn.getAttribute('aria-haspopup') === 'listbox')
+        expect(pickerButton).toBeTruthy()
+        fireEvent.click(pickerButton!)
+        // The listbox should appear with a "Default" option inside
+        const listbox = screen.getByRole('listbox', { name: 'Voice' })
+        expect(listbox).toBeInTheDocument()
+        expect(listbox.textContent).toContain('Default')
+    })
+
+    it('shows dynamic voices in picker when fetchVoices returns a list', async () => {
+        mockFetchVoices.mockResolvedValue([
+            { id: 'dyn1', name: 'Alice', previewUrl: '', category: 'premade' },
+            { id: 'dyn2', name: 'Bob', previewUrl: 'https://example.com/bob.mp3', category: 'premade' },
+        ])
+
+        renderWithProviders(<SettingsPage />)
+
+        const pickerButton = screen.getByRole('button', { name: /Voice\s*Default/i })
+        fireEvent.click(pickerButton)
+
+        await waitFor(() => {
+            expect(screen.getByText('Alice')).toBeInTheDocument()
+            expect(screen.getByText('Bob')).toBeInTheDocument()
+        })
+    })
+
+
+    it('shows a disabled preview button with tooltip when previewUrl is missing', async () => {
+        mockFetchVoices.mockResolvedValue([
+            { id: 'dyn1', name: 'Alice', previewUrl: '', category: 'premade' },
+        ])
+
+        renderWithProviders(<SettingsPage />)
+
+        const pickerButton = screen.getByRole('button', { name: /Voice\s*Default/i })
+        fireEvent.click(pickerButton)
+
+        const previewButton = await screen.findByLabelText('Preview voice')
+        expect(previewButton).toBeDisabled()
+        expect(previewButton).toHaveAttribute('title', 'Preview unavailable without an ElevenLabs API key')
+    })
+
+    it('shows a play button for voices with a previewUrl', async () => {
+        mockFetchVoices.mockResolvedValue([
+            { id: 'dyn1', name: 'Alice', previewUrl: 'https://example.com/alice.mp3', category: 'premade' },
+        ])
+
+        renderWithProviders(<SettingsPage />)
+
+        const pickerButton = screen.getByRole('button', { name: /Voice\s*Default/i })
+        fireEvent.click(pickerButton)
+
+        await screen.findByText('Alice')
+        expect(screen.getByLabelText('Preview voice')).toBeInTheDocument()
+        expect(screen.getByLabelText('Preview voice')).not.toBeDisabled()
+    })
+
+    it('stops preview audio on unmount', async () => {
+        mockFetchVoices.mockResolvedValue([
+            { id: 'dyn1', name: 'Alice', previewUrl: 'https://example.com/alice.mp3', category: 'premade' },
+        ])
+
+        const pause = vi.fn()
+        const play = vi.fn(() => Promise.resolve())
+        const addEventListener = vi.fn()
+        class MockAudio {
+            pause = pause
+            play = play
+            addEventListener = addEventListener
+            constructor(_url: string) {}
+        }
+        const OriginalAudio = globalThis.Audio
+        const OriginalWindowAudio = window.Audio
+        // @ts-expect-error test override
+        globalThis.Audio = MockAudio
+        // @ts-expect-error test override
+        window.Audio = MockAudio
+
+        const view = renderWithProviders(<SettingsPage />)
+        const pickerButton = screen.getByRole('button', { name: /Voice\s*Default/i })
+        fireEvent.click(pickerButton)
+        const aliceLabel = await screen.findByText('Alice')
+        const optionRow = aliceLabel.closest('[role="option"]')
+        expect(optionRow).toBeTruthy()
+        const enabledPreview = optionRow?.querySelector('button[aria-label="Preview voice"]') as HTMLButtonElement | null
+        expect(enabledPreview).toBeTruthy()
+        expect(enabledPreview?.disabled).toBe(false)
+        fireEvent.click(enabledPreview as HTMLElement)
+
+        view.unmount()
+        expect(pause).toHaveBeenCalled()
+
+        globalThis.Audio = OriginalAudio
+        window.Audio = OriginalWindowAudio
+    })
+
+    it('selecting a voice calls localStorage.setItem with the voice id', async () => {
+        mockFetchVoices.mockResolvedValue([
+            { id: 'dyn1', name: 'Alice', previewUrl: '', category: 'premade' },
+        ])
+
+        renderWithProviders(<SettingsPage />)
+
+        const pickerButton = screen.getByRole('button', { name: /Voice\s*Default/i })
+        fireEvent.click(pickerButton)
+
+        const alice = await screen.findByText('Alice')
+        fireEvent.click(alice)
+        expect(window.localStorage.setItem).toHaveBeenCalledWith('hapi-voice-elevenlabs', 'dyn1')
+    })
+
+    it('shows Gemini static voices when hub backend is gemini-live', async () => {
+        mockFetchVoiceBackend.mockResolvedValue({ backend: 'gemini-live', backends: ['gemini-live'] })
+
+        renderWithProviders(<SettingsPage />)
+
+        const pickerButton = await screen.findByRole('button', { name: /Voice\s*Default/i })
+        fireEvent.click(pickerButton)
+
+        await waitFor(() => {
+            expect(screen.getByText('Puck')).toBeInTheDocument()
+            expect(screen.getByText('Aoede')).toBeInTheDocument()
+            expect(screen.getByText('Conversational, friendly')).toBeInTheDocument()
+        })
+        expect(mockFetchVoices).not.toHaveBeenCalled()
+    })
+
+    it('shows static catalog hint when Gemini backend is selected', async () => {
+        mockFetchVoiceBackend.mockResolvedValue({ backend: 'gemini-live', backends: ['gemini-live'] })
+
+        renderWithProviders(<SettingsPage />)
+
+        await waitFor(() => {
+            expect(screen.getByText('Open the list to see voice character notes. Audio preview is ElevenLabs only.')).toBeInTheDocument()
+        })
+    })
+
+    it('persists Gemini voice selection under gemini storage key', async () => {
+        mockFetchVoiceBackend.mockResolvedValue({ backend: 'gemini-live', backends: ['gemini-live'] })
+
+        renderWithProviders(<SettingsPage />)
+
+        const pickerButton = await screen.findByRole('button', { name: /Voice\s*Default/i })
+        fireEvent.click(pickerButton)
+
+        const puck = await screen.findByText('Puck')
+        fireEvent.click(puck)
+        expect(window.localStorage.setItem).toHaveBeenCalledWith('hapi-voice-gemini', 'Puck')
+    })
+
+    it('shows backend chooser when hub has multiple configured backends', async () => {
+        mockFetchVoiceBackend.mockResolvedValue({
+            backend: 'gemini-live',
+            backends: ['elevenlabs', 'gemini-live']
+        })
+        ;(window.localStorage.getItem as ReturnType<typeof vi.fn>).mockImplementation((key: string) => {
+            if (key === 'hapi-voice-backend') return 'elevenlabs'
+            return null
+        })
+
+        renderWithProviders(<SettingsPage />)
+
+        await waitFor(() => {
+            expect(screen.getByText('Voice backend')).toBeInTheDocument()
+            expect(screen.getByText('Voice Assistant')).toBeInTheDocument()
+            expect(screen.getByText('Connection & provider')).toBeInTheDocument()
+        })
+
+        const backendButton = screen.getByRole('button', { name: /Voice backend\s*ElevenLabs/i })
+        fireEvent.click(backendButton)
+
+        const listbox = screen.getByRole('listbox', { name: 'Voice backend' })
+        expect(listbox.textContent).toContain('Gemini Live')
+    })
+
+    it('switches to ElevenLabs voices when backend chooser selects elevenlabs', async () => {
+        mockFetchVoiceBackend.mockResolvedValue({
+            backend: 'gemini-live',
+            backends: ['elevenlabs', 'gemini-live']
+        })
+        mockFetchVoices.mockResolvedValue([
+            { id: 'dyn1', name: 'Alice', previewUrl: '', category: 'premade' },
+        ])
+
+        renderWithProviders(<SettingsPage />)
+
+        const backendButton = await screen.findByRole('button', { name: /Voice backend/i })
+        fireEvent.click(backendButton)
+        fireEvent.click(screen.getByRole('option', { name: /ElevenLabs/i }))
+
+        const voicePickerButton = await screen.findByRole('button', { name: /Voice\s*Default/i })
+        fireEvent.click(voicePickerButton)
+
+        await waitFor(() => {
+            expect(screen.getByText('Alice')).toBeInTheDocument()
+        })
+        expect(window.localStorage.setItem).toHaveBeenCalledWith('hapi-voice-backend', 'elevenlabs')
     })
 })

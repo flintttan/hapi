@@ -39,7 +39,6 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): {
     connect: (cols: number, rows: number) => void
     write: (data: string) => void
     resize: (cols: number, rows: number) => void
-    close: () => void
     disconnect: () => void
     onOutput: (handler: (data: string) => void) => void
     onExit: (handler: (code: number | null, signal: string | null) => void) => void
@@ -178,12 +177,7 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): {
                 setState({ status: 'idle' })
                 return
             }
-            if (reason === 'io server disconnect') {
-                setErrorState('Disconnected by server.')
-                return
-            }
-            // Let Socket.IO handle reconnection. Avoid flashing hard errors for transient disconnects.
-            setState({ status: 'connecting' })
+            setErrorState(`Disconnected: ${reason}`)
         })
 
         socket.connect()
@@ -204,14 +198,6 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): {
             return
         }
         socket.emit('terminal:resize', { terminalId: terminalIdRef.current, cols, rows })
-    }, [])
-
-    const close = useCallback(() => {
-        const socket = socketRef.current
-        if (!socket || !socket.connected) {
-            return
-        }
-        socket.emit('terminal:close', { terminalId: terminalIdRef.current })
     }, [])
 
     const disconnect = useCallback(() => {
@@ -238,7 +224,6 @@ export function useTerminalSocket(options: UseTerminalSocketOptions): {
         connect,
         write,
         resize,
-        close,
         disconnect,
         onOutput,
         onExit

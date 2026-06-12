@@ -8,6 +8,7 @@ import { useSession } from '@/hooks/queries/useSession'
 import { useTerminalSocket } from '@/hooks/useTerminalSocket'
 import { useLongPress } from '@/hooks/useLongPress'
 import { useTranslation } from '@/lib/use-translation'
+import { randomId } from '@/lib/randomId'
 import { TerminalView } from '@/components/Terminal/TerminalView'
 import { LoadingState } from '@/components/LoadingState'
 import { Button } from '@/components/ui/button'
@@ -91,6 +92,8 @@ function shouldResetModifiers(sequence: string, state: ModifierState): boolean {
     }
     return state.ctrl || state.alt
 }
+
+const EXIT_NAVIGATION_DELAY_MS = 700
 
 const QUICK_INPUT_ROWS: QuickInput[][] = [
     [
@@ -186,17 +189,13 @@ export default function TerminalPage() {
     const goBack = useAppGoBack()
     const { session } = useSession(api, sessionId)
     const terminalSupported = isRemoteTerminalSupported(session?.metadata)
-    const terminalId = useMemo(() => {
-        if (typeof crypto?.randomUUID === 'function') {
-            return crypto.randomUUID()
-        }
-        return `${Date.now()}-${Math.random().toString(16).slice(2)}`
-    }, [sessionId])
+    const terminalId = useMemo(() => randomId(), [sessionId])
     const terminalRef = useRef<Terminal | null>(null)
     const inputDisposableRef = useRef<{ dispose: () => void } | null>(null)
     const connectOnceRef = useRef(false)
     const lastSizeRef = useRef<{ cols: number; rows: number } | null>(null)
     const modifierStateRef = useRef<ModifierState>({ ctrl: false, alt: false })
+    const exitNavTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
     const [exitInfo, setExitInfo] = useState<{ code: number | null; signal: string | null } | null>(null)
     const [ctrlActive, setCtrlActive] = useState(false)
     const [altActive, setAltActive] = useState(false)
@@ -228,8 +227,15 @@ export default function TerminalPage() {
         onExit((code, signal) => {
             setExitInfo({ code, signal })
             terminalRef.current?.write(`\r\n[process exited${code !== null ? ` with code ${code}` : ''}]`)
+            if (exitNavTimerRef.current) {
+                clearTimeout(exitNavTimerRef.current)
+            }
+            exitNavTimerRef.current = setTimeout(() => {
+                exitNavTimerRef.current = null
+                goBack()
+            }, EXIT_NAVIGATION_DELAY_MS)
         })
-    }, [onExit])
+    }, [onExit, goBack])
 
     useEffect(() => {
         modifierStateRef.current = { ctrl: ctrlActive, alt: altActive }
@@ -258,6 +264,7 @@ export default function TerminalPage() {
                 const modifierState = modifierStateRef.current
                 dispatchSequence(data, modifierState)
             })
+            terminal.focus()
         },
         [dispatchSequence]
     )
@@ -296,6 +303,10 @@ export default function TerminalPage() {
     useEffect(() => {
         connectOnceRef.current = false
         setExitInfo(null)
+        if (exitNavTimerRef.current) {
+            clearTimeout(exitNavTimerRef.current)
+            exitNavTimerRef.current = null
+        }
         disconnect()
     }, [sessionId, disconnect])
 
@@ -303,6 +314,10 @@ export default function TerminalPage() {
         return () => {
             inputDisposableRef.current?.dispose()
             connectOnceRef.current = false
+            if (exitNavTimerRef.current) {
+                clearTimeout(exitNavTimerRef.current)
+                exitNavTimerRef.current = null
+            }
             disconnect()
         }
     }, [disconnect])
@@ -317,6 +332,10 @@ export default function TerminalPage() {
     useEffect(() => {
         if (terminalState.status === 'connecting' || terminalState.status === 'connected') {
             setExitInfo(null)
+            if (exitNavTimerRef.current) {
+                clearTimeout(exitNavTimerRef.current)
+                exitNavTimerRef.current = null
+            }
         }
     }, [terminalState.status])
 

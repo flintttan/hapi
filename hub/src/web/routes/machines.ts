@@ -1,36 +1,20 @@
+import {
+    MachineListDirectoryRequestSchema,
+    MachinePathsExistsRequestSchema,
+    SpawnSessionRequestSchema
+} from '@hapi/protocol'
 import { Hono } from 'hono'
-import { z } from 'zod'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
-import { requireMachine, requireSyncEngine } from './guards'
-
-const spawnBodySchema = z.object({
-    directory: z.string().min(1),
-    agent: z.enum(['claude', 'codex', 'cursor', 'gemini', 'opencode']).optional(),
-    model: z.string().optional(),
-    effort: z.string().optional(),
-    modelReasoningEffort: z.string().optional(),
-    yolo: z.boolean().optional(),
-    sessionType: z.enum(['simple', 'worktree']).optional(),
-    worktreeName: z.string().optional(),
-    approvedNewDirectoryCreation: z.boolean().optional()
-})
-
-const pathsExistsSchema = z.object({
-    paths: z.array(z.string().min(1)).max(1000)
-})
-
-const machineDisplayNameSchema = z.object({
-    displayName: z.string().trim().max(80).nullable()
-})
+import { requireMachine } from './guards'
 
 export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
     app.get('/machines', (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not connected' }, 503)
         }
 
         const namespace = c.get('namespace')
@@ -38,47 +22,10 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         return c.json({ machines })
     })
 
-    app.patch('/machines/:id/display-name', async (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
-        }
-
-        const machineId = c.req.param('id')
-        const machine = requireMachine(c, engine, machineId)
-        if (machine instanceof Response) {
-            return machine
-        }
-
-        const body = await c.req.json().catch(() => null)
-        const parsed = machineDisplayNameSchema.safeParse(body)
-        if (!parsed.success) {
-            return c.json({ error: 'Invalid body' }, 400)
-        }
-
-        try {
-            const updated = engine.updateMachineDisplayName(
-                machineId,
-                c.get('namespace'),
-                parsed.data.displayName
-            )
-            if (!updated) {
-                return c.json({ error: 'Machine not found' }, 404)
-            }
-            return c.json({ machine: updated })
-        } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to update machine display name'
-            if (message.includes('concurrently') || message.includes('version')) {
-                return c.json({ error: message }, 409)
-            }
-            return c.json({ error: message }, 500)
-        }
-    })
-
     app.post('/machines/:id/spawn', async (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not connected' }, 503)
         }
 
         const machineId = c.req.param('id')
@@ -88,7 +35,7 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const body = await c.req.json().catch(() => null)
-        const parsed = spawnBodySchema.safeParse(body)
+        const parsed = SpawnSessionRequestSchema.safeParse(body)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body' }, 400)
         }
@@ -103,17 +50,15 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             parsed.data.sessionType,
             parsed.data.worktreeName,
             undefined,
-            parsed.data.effort,
-            undefined,
-            parsed.data.approvedNewDirectoryCreation
+            parsed.data.effort
         )
         return c.json(result)
     })
 
-    app.post('/machines/:id/paths/exists', async (c) => {
-        const engine = requireSyncEngine(c, getSyncEngine)
-        if (engine instanceof Response) {
-            return engine
+    app.post('/machines/:id/list-directory', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not connected' }, 503)
         }
 
         const machineId = c.req.param('id')
@@ -123,7 +68,33 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const body = await c.req.json().catch(() => null)
-        const parsed = pathsExistsSchema.safeParse(body)
+        const parsed = MachineListDirectoryRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        try {
+            const result = await engine.listMachineDirectory(machineId, parsed.data.path)
+            return c.json(result)
+        } catch (error) {
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to list directory' }, 500)
+        }
+    })
+
+    app.post('/machines/:id/paths/exists', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not connected' }, 503)
+        }
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) {
+            return machine
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = MachinePathsExistsRequestSchema.safeParse(body)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body' }, 400)
         }
@@ -137,11 +108,81 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             const exists = await engine.checkPathsExist(machineId, uniquePaths)
             return c.json({ exists })
         } catch (error) {
-            const message = error instanceof Error ? error.message : 'Failed to check paths'
-            if (message.includes('RPC handler not registered') && message.includes(':path-exists')) {
-                return c.json({ exists: {} })
-            }
-            return c.json({ error: message }, 500)
+            return c.json({ error: error instanceof Error ? error.message : 'Failed to check paths' }, 500)
+        }
+    })
+
+    app.get('/machines/:id/codex-models', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'Not connected' }, 503)
+        }
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) {
+            return machine
+        }
+
+        try {
+            const result = await engine.listCodexModelsForMachine(machineId)
+            return c.json(result)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list Codex models'
+            }, 500)
+        }
+    })
+
+    app.get('/machines/:id/opencode-models', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'Not connected' }, 503)
+        }
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) {
+            return machine
+        }
+
+        const cwd = (c.req.query('cwd') ?? '').trim()
+        if (!cwd) {
+            return c.json({ success: false, error: 'cwd query parameter is required' }, 400)
+        }
+
+        try {
+            const result = await engine.listOpencodeModelsForCwd(machineId, cwd)
+            return c.json(result)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list OpenCode models'
+            }, 500)
+        }
+    })
+
+    app.get('/machines/:id/cursor-models', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ success: false, error: 'Not connected' }, 503)
+        }
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) {
+            return machine
+        }
+
+        try {
+            const result = await engine.listCursorModelsForMachine(machineId)
+            return c.json(result)
+        } catch (error) {
+            return c.json({
+                success: false,
+                error: error instanceof Error ? error.message : 'Failed to list Cursor models'
+            }, 500)
         }
     })
 

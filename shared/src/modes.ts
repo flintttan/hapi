@@ -11,7 +11,7 @@ export const AGENT_FLAVORS = ['claude', 'codex', 'cursor', 'gemini', 'kimi', 'op
 export type AgentFlavor = typeof AGENT_FLAVORS[number]
 export const AgentFlavorSchema = z.enum(AGENT_FLAVORS)
 
-export const CLAUDE_PERMISSION_MODES = ['default', 'acceptEdits', 'bypassPermissions', 'plan'] as const
+export const CLAUDE_PERMISSION_MODES = ['default', 'acceptEdits', 'auto', 'bypassPermissions', 'plan'] as const
 export type ClaudePermissionMode = typeof CLAUDE_PERMISSION_MODES[number]
 
 export const CODEX_PERMISSION_MODES = ['default', 'read-only', 'safe-yolo', 'yolo'] as const
@@ -29,15 +29,17 @@ export type KimiPermissionMode = typeof KIMI_PERMISSION_MODES[number]
 export const OPENCODE_PERMISSION_MODES = ['default', 'plan', 'yolo'] as const
 export type OpencodePermissionMode = typeof OPENCODE_PERMISSION_MODES[number]
 
-export const CURSOR_PERMISSION_MODES = ['default', 'plan', 'ask', 'yolo'] as const
+export const CURSOR_PERMISSION_MODES = ['default', 'plan', 'ask', 'debug', 'yolo'] as const
 export type CursorPermissionMode = typeof CURSOR_PERMISSION_MODES[number]
 
 export const PERMISSION_MODES = [
     'default',
     'acceptEdits',
+    'auto',
     'bypassPermissions',
     'plan',
     'ask',
+    'debug',
     'read-only',
     'safe-yolo',
     'yolo'
@@ -48,8 +50,10 @@ export type PermissionMode = typeof PERMISSION_MODES[number]
 export const PERMISSION_MODE_LABELS: Record<PermissionMode, string> = {
     default: 'Default',
     acceptEdits: 'Accept Edits',
+    auto: 'Auto',
     plan: 'Plan Mode',
     ask: 'Ask Mode',
+    debug: 'Debug Mode',
     bypassPermissions: 'Yolo',
     'read-only': 'Read Only',
     'safe-yolo': 'Safe Yolo',
@@ -61,8 +65,10 @@ export type PermissionModeTone = 'neutral' | 'info' | 'warning' | 'danger'
 export const PERMISSION_MODE_TONES: Record<PermissionMode, PermissionModeTone> = {
     default: 'neutral',
     acceptEdits: 'warning',
+    auto: 'warning',
     plan: 'info',
     ask: 'info',
+    debug: 'info',
     bypassPermissions: 'danger',
     'read-only': 'warning',
     'safe-yolo': 'warning',

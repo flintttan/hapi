@@ -1,13 +1,16 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
 import type { Session } from '@/types/api'
 import type { ApiClient } from '@/api/client'
 import { isTelegramApp } from '@/hooks/useTelegram'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { SessionActionMenu } from '@/components/SessionActionMenu'
+import { SessionExportDialog } from '@/components/SessionExportDialog'
 import { RenameSessionDialog } from '@/components/RenameSessionDialog'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
+import { formatReopenError } from '@/lib/reopenError'
 import { getSessionModelLabel } from '@/lib/sessionModelLabel'
 import { useTranslation } from '@/lib/use-translation'
+import { AgentFlavorIcon } from '@/components/AgentFlavorIcon'
 
 function getSessionTitle(session: Session): string {
     if (session.metadata?.name) {
@@ -43,7 +46,7 @@ function FilesIcon(props: { className?: string }) {
     )
 }
 
-function SearchIcon(props: { className?: string }) {
+function OutlineIcon(props: { className?: string }) {
     return (
         <svg
             xmlns="http://www.w3.org/2000/svg"
@@ -57,8 +60,12 @@ function SearchIcon(props: { className?: string }) {
             strokeLinejoin="round"
             className={props.className}
         >
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
+            <path d="M8 6h13" />
+            <path d="M8 12h13" />
+            <path d="M8 18h13" />
+            <path d="M3 6h.01" />
+            <path d="M3 12h.01" />
+            <path d="M3 18h.01" />
         </svg>
     )
 }
@@ -84,23 +91,13 @@ export function SessionHeader(props: {
     session: Session
     onBack: () => void
     onViewFiles?: () => void
+    onOpenOutline?: () => void
     api: ApiClient | null
     onSessionDeleted?: () => void
-    searchOpen?: boolean
-    searchQuery?: string
-    searchResultCount?: number
-    activeSearchIndex?: number
-    onSearchOpenChange?: (open: boolean) => void
-    onSearchQueryChange?: (value: string) => void
-    onSearchPrev?: () => void
-    onSearchNext?: () => void
-    searchHint?: string | null
-    outlineOpen?: boolean
-    outlineCount?: number
-    onOutlineOpenChange?: (open: boolean) => void
+    onSessionReopened?: (newSessionId: string) => void
 }) {
     const { t } = useTranslation()
-    const { session, api, onSessionDeleted } = props
+    const { session, api, onSessionDeleted, onSessionReopened } = props
     const title = useMemo(() => getSessionTitle(session), [session])
     const worktreeBranch = session.metadata?.worktree?.branch
     const modelLabel = getSessionModelLabel(session)
@@ -109,28 +106,33 @@ export function SessionHeader(props: {
     const [menuAnchorPoint, setMenuAnchorPoint] = useState<{ x: number; y: number }>({ x: 0, y: 0 })
     const menuId = useId()
     const menuAnchorRef = useRef<HTMLButtonElement | null>(null)
-    const searchInputRef = useRef<HTMLInputElement | null>(null)
     const [renameOpen, setRenameOpen] = useState(false)
+    const [exportOpen, setExportOpen] = useState(false)
     const [archiveOpen, setArchiveOpen] = useState(false)
     const [deleteOpen, setDeleteOpen] = useState(false)
 
-    const { archiveSession, renameSession, deleteSession, isPending } = useSessionActions(
+    const { archiveSession, reopenSession, renameSession, deleteSession, isPending } = useSessionActions(
         api,
         session.id,
         session.metadata?.flavor ?? null
     )
-
-    useEffect(() => {
-        if (!props.searchOpen) {
-            return
-        }
-        searchInputRef.current?.focus()
-        searchInputRef.current?.select()
-    }, [props.searchOpen])
+    const [reopenError, setReopenError] = useState<string | null>(null)
 
     const handleDelete = async () => {
         await deleteSession()
         onSessionDeleted?.()
+    }
+
+    const handleReopen = async () => {
+        setReopenError(null)
+        try {
+            const result = await reopenSession()
+            if (result.sessionId && result.sessionId !== session.id) {
+                onSessionReopened?.(result.sessionId)
+            }
+        } catch (error) {
+            setReopenError(formatReopenError(error))
+        }
     }
 
     const handleMenuToggle = () => {
@@ -141,29 +143,14 @@ export function SessionHeader(props: {
         setMenuOpen((open) => !open)
     }
 
-    const handleSearchToggle = () => {
-        const nextOpen = !props.searchOpen
-        props.onSearchOpenChange?.(nextOpen)
-        if (!nextOpen) {
-            props.onSearchQueryChange?.('')
-        }
-    }
-
     // In Telegram, don't render header (Telegram provides its own)
     if (isTelegramApp()) {
         return null
     }
 
-    const searchResultCount = props.searchResultCount ?? 0
-    const activeSearchIndex = props.activeSearchIndex ?? 0
-    const searchStatus = searchResultCount > 0
-        ? `${activeSearchIndex + 1}/${searchResultCount}`
-        : (props.searchQuery?.trim() ? t('session.search.noResults') : t('session.search.empty'))
-    const searchDisabled = searchResultCount === 0
-
     return (
         <>
-            <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)] border-b border-[var(--app-border)]">
+            <div className="bg-[var(--app-bg)] pt-[env(safe-area-inset-top)]">
                 <div className="mx-auto w-full max-w-content flex items-center gap-2 p-3">
                     {/* Back button */}
                     <button
@@ -193,7 +180,7 @@ export function SessionHeader(props: {
                         </div>
                         <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-[var(--app-hint)]">
                             <span className="inline-flex items-center gap-1">
-                                <span aria-hidden="true">❖</span>
+                                <AgentFlavorIcon flavor={session.metadata?.flavor} className="h-3.5 w-3.5 shrink-0" />
                                 {session.metadata?.flavor?.trim() || 'unknown'}
                             </span>
                             {modelLabel ? (
@@ -207,28 +194,6 @@ export function SessionHeader(props: {
                         </div>
                     </div>
 
-                    {props.onOutlineOpenChange ? (
-                        <button
-                            type="button"
-                            onClick={() => props.onOutlineOpenChange?.(!props.outlineOpen)}
-                            className={`flex h-8 items-center gap-1 rounded-full px-2 text-xs transition-colors ${props.outlineOpen ? 'bg-[var(--app-secondary-bg)] text-[var(--app-fg)]' : 'text-[var(--app-hint)] hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]'}`}
-                            title={t('session.outline.title')}
-                        >
-                            <span>≡</span>
-                            <span>{t('session.outline.trigger')}</span>
-                            {typeof props.outlineCount === 'number' ? <span>({props.outlineCount})</span> : null}
-                        </button>
-                    ) : null}
-
-                    <button
-                        type="button"
-                        onClick={handleSearchToggle}
-                        className={`flex h-8 w-8 items-center justify-center rounded-full transition-colors ${props.searchOpen ? 'bg-[var(--app-secondary-bg)] text-[var(--app-fg)]' : 'text-[var(--app-hint)] hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]'}`}
-                        title={t('session.search.title')}
-                    >
-                        <SearchIcon />
-                    </button>
-
                     {props.onViewFiles ? (
                         <button
                             type="button"
@@ -237,6 +202,18 @@ export function SessionHeader(props: {
                             title={t('session.title')}
                         >
                             <FilesIcon />
+                        </button>
+                    ) : null}
+
+                    {props.onOpenOutline ? (
+                        <button
+                            type="button"
+                            onClick={props.onOpenOutline}
+                            className="flex h-8 w-8 items-center justify-center rounded-full text-[var(--app-hint)] transition-colors hover:bg-[var(--app-secondary-bg)] hover:text-[var(--app-fg)]"
+                            title={t('session.outline.open')}
+                            aria-label={t('session.outline.open')}
+                        >
+                            <OutlineIcon />
                         </button>
                     ) : null}
 
@@ -254,59 +231,6 @@ export function SessionHeader(props: {
                         <MoreVerticalIcon />
                     </button>
                 </div>
-
-                {props.searchOpen ? (
-                    <div className="mx-auto w-full max-w-content px-3 pb-3">
-                        <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-secondary-bg)]/70 p-2.5 shadow-sm">
-                            <div className="flex items-center gap-2">
-                                <input
-                                    ref={searchInputRef}
-                                    type="search"
-                                    value={props.searchQuery ?? ''}
-                                    onChange={(event) => props.onSearchQueryChange?.(event.target.value)}
-                                    onKeyDown={(event) => {
-                                        if (event.key === 'Escape') {
-                                            props.onSearchOpenChange?.(false)
-                                            props.onSearchQueryChange?.('')
-                                        } else if (event.key === 'Enter') {
-                                            event.preventDefault()
-                                            if (event.shiftKey) {
-                                                props.onSearchPrev?.()
-                                            } else {
-                                                props.onSearchNext?.()
-                                            }
-                                        }
-                                    }}
-                                    placeholder={t('session.search.placeholder')}
-                                    className="h-9 min-w-0 flex-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] px-3 text-sm outline-none transition focus:border-[var(--app-link)] focus:ring-2 focus:ring-[var(--app-link)]/20"
-                                    aria-label={t('session.search.title')}
-                                />
-                                <button
-                                    type="button"
-                                    onClick={props.onSearchPrev}
-                                    disabled={searchDisabled}
-                                    className="rounded-xl border border-[var(--app-border)] px-2.5 py-2 text-xs text-[var(--app-fg)] transition hover:bg-[var(--app-subtle-bg)] disabled:opacity-40"
-                                    title={t('session.search.previous')}
-                                >
-                                    {t('session.search.previous')}
-                                </button>
-                                <button
-                                    type="button"
-                                    onClick={props.onSearchNext}
-                                    disabled={searchDisabled}
-                                    className="rounded-xl border border-[var(--app-border)] px-2.5 py-2 text-xs text-[var(--app-fg)] transition hover:bg-[var(--app-subtle-bg)] disabled:opacity-40"
-                                    title={t('session.search.next')}
-                                >
-                                    {t('session.search.next')}
-                                </button>
-                            </div>
-                            <div className="mt-2 flex items-center justify-between gap-3 text-xs text-[var(--app-hint)]">
-                                <span>{searchStatus}</span>
-                                {props.searchHint ? <span className="text-right">{props.searchHint}</span> : null}
-                            </div>
-                        </div>
-                    </div>
-                ) : null}
             </div>
 
             <SessionActionMenu
@@ -314,12 +238,26 @@ export function SessionHeader(props: {
                 onClose={() => setMenuOpen(false)}
                 sessionActive={session.active}
                 onRename={() => setRenameOpen(true)}
+                onExport={() => setExportOpen(true)}
                 onArchive={() => setArchiveOpen(true)}
+                onReopen={handleReopen}
                 onDelete={() => setDeleteOpen(true)}
                 anchorPoint={menuAnchorPoint}
-                anchorRef={menuAnchorRef}
                 menuId={menuId}
             />
+
+            {reopenError ? (
+                <ConfirmDialog
+                    isOpen={true}
+                    onClose={() => setReopenError(null)}
+                    title={t('dialog.reopen.errorTitle')}
+                    description={reopenError}
+                    confirmLabel={t('dialog.reopen.dismiss')}
+                    confirmingLabel={t('dialog.reopen.dismiss')}
+                    onConfirm={async () => setReopenError(null)}
+                    isPending={false}
+                />
+            ) : null}
 
             <RenameSessionDialog
                 isOpen={renameOpen}
@@ -327,6 +265,13 @@ export function SessionHeader(props: {
                 currentName={title}
                 onRename={renameSession}
                 isPending={isPending}
+            />
+
+            <SessionExportDialog
+                isOpen={exportOpen}
+                onClose={() => setExportOpen(false)}
+                session={session}
+                api={api}
             />
 
             <ConfirmDialog

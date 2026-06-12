@@ -101,6 +101,13 @@ function createModeWithEffort(model: string | undefined, modelReasoningEffort: s
     };
 }
 
+function createResetMode(): OpencodeMode {
+    return {
+        permissionMode: 'default' as PermissionMode,
+        model: null
+    };
+}
+
 function createSessionStub(items: Array<{ message: string; mode: OpencodeMode }>) {
     const queue = new MessageQueue2<OpencodeMode>((mode) => JSON.stringify(mode));
     items.forEach(({ message, mode }, index) => {
@@ -248,7 +255,79 @@ describe('opencodeRemoteLauncher inline model switch', () => {
         expect(harness.promptCount).toBe(2);
     });
 
+    it('rejects unsupported reasoning effort values before calling setConfigOption', async () => {
+        harness.thoughtLevelOption = {
+            id: 'effort',
+            currentValue: 'low',
+            options: [
+                { value: 'low', name: 'Low' },
+                { value: 'medium', name: 'Medium' }
+            ]
+        };
+        const { session, setModelReasoningEffort } = createSessionStub([
+            { message: 'first', mode: createModeWithEffort(undefined, 'high') }
+        ]);
 
+        await opencodeRemoteLauncher(session as never);
+
+        expect(harness.setConfigOptionArgs).toEqual([]);
+        expect(setModelReasoningEffort).toHaveBeenCalledWith('low');
+        expect(harness.promptCount).toBe(1);
+    });
+
+    it('syncs hub effort state after coercing an unsupported request to a different supported value', async () => {
+        harness.thoughtLevelOption = {
+            id: 'effort',
+            currentValue: 'high',
+            options: [
+                { value: 'low', name: 'Low' },
+                { value: 'medium', name: 'Medium' }
+            ]
+        };
+        const { session, setModelReasoningEffort, pushKeepAlive } = createSessionStub([
+            { message: 'first', mode: createModeWithEffort(undefined, 'max') }
+        ]);
+
+        await opencodeRemoteLauncher(session as never);
+
+        expect(harness.setConfigOptionArgs).toEqual([
+            { sessionId: 'acp-session-1', configId: 'effort', value: 'low' }
+        ]);
+        expect(setModelReasoningEffort).toHaveBeenCalledWith('low');
+        expect(pushKeepAlive).toHaveBeenCalledTimes(1);
+        expect(harness.promptCount).toBe(1);
+    });
+
+    it('resets to the backend launch-time default model when the queued mode.model is null', async () => {
+        // Seed the backend with a launch-time default model so the launcher
+        // captures it as `defaultBackendModel`. Without that, `/model default`
+        // resolves to null and the launcher has nothing to switch back to.
+        const opencodeBackendModule = await import('./utils/opencodeBackend');
+        const factory = (opencodeBackendModule as unknown as { createOpencodeBackend: ReturnType<typeof vi.fn> }).createOpencodeBackend;
+        const originalImpl = factory.getMockImplementation();
+        factory.mockImplementationOnce(() => {
+            const backend = (originalImpl as () => Record<string, unknown>)();
+            backend.getSessionModelsMetadata = vi.fn(() => ({
+                currentModelId: 'ollama/launch-default',
+                availableModels: []
+            }));
+            return backend;
+        });
+
+        const { session } = createSessionStub([
+            { message: 'first', mode: createMode('ollama/custom') },
+            { message: 'second', mode: createResetMode() }
+        ]);
+
+        await opencodeRemoteLauncher(session as never);
+
+        // Switch to custom on turn 1, then back to the launch-time default on turn 2.
+        expect(harness.setModelArgs).toEqual([
+            { sessionId: 'acp-session-1', modelId: 'ollama/custom', flavor: 'opencode' },
+            { sessionId: 'acp-session-1', modelId: 'ollama/launch-default', flavor: 'opencode' }
+        ]);
+        expect(harness.promptCount).toBe(2);
+    });
 
     it('calls setConfigOption for OpenCode reasoning effort changes', async () => {
         harness.thoughtLevelOption = {
@@ -373,6 +452,48 @@ describe('opencodeRemoteLauncher inline model switch', () => {
         expect(result).toEqual({
             success: false,
             error: 'OpenCode model metadata is not available'
+        });
+    });
+
+    it('registers a listOpencodeReasoningEffortOptions RPC handler that returns ACP options', async () => {
+        harness.thoughtLevelOption = {
+            id: 'effort',
+            currentValue: 'low',
+            options: [
+                { value: 'low', name: 'Low' },
+                { value: 'medium', name: 'Medium' }
+            ]
+        };
+        const { session, rpcHandlers } = createSessionStub([
+            { message: 'first', mode: createMode() }
+        ]);
+        await opencodeRemoteLauncher(session as never);
+
+        const handler = rpcHandlers.get('listOpencodeReasoningEffortOptions');
+        expect(handler).toBeDefined();
+        const result = await handler!(undefined) as Record<string, unknown>;
+        expect(result).toEqual({
+            success: true,
+            options: [
+                { value: 'low', name: 'Low' },
+                { value: 'medium', name: 'Medium' }
+            ],
+            currentValue: 'low'
+        });
+    });
+
+    it('listOpencodeReasoningEffortOptions handler returns unavailable when backend has no thought level option', async () => {
+        const { session, rpcHandlers } = createSessionStub([
+            { message: 'first', mode: createMode() }
+        ]);
+        await opencodeRemoteLauncher(session as never);
+
+        const handler = rpcHandlers.get('listOpencodeReasoningEffortOptions');
+        expect(handler).toBeDefined();
+        const result = await handler!(undefined) as Record<string, unknown>;
+        expect(result).toEqual({
+            success: false,
+            error: 'OpenCode reasoning effort options are not available'
         });
     });
 

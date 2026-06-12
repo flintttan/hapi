@@ -1,11 +1,8 @@
-import type { InfiniteData } from '@tanstack/react-query'
-import type { DecryptedMessage, MessagesResponse } from '@/types/api'
+import type { DecryptedMessage } from '@/types/api'
+import { randomId } from '@/lib/randomId'
 
 export function makeClientSideId(prefix: string): string {
-    if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-        return `${prefix}-${crypto.randomUUID()}`
-    }
-    return `${prefix}-${Date.now()}-${Math.random()}`
+    return `${prefix}-${randomId()}`
 }
 
 export function isUserMessage(msg: DecryptedMessage): boolean {
@@ -16,46 +13,32 @@ export function isUserMessage(msg: DecryptedMessage): boolean {
     return false
 }
 
+/** A user message that is still waiting for the CLI ack (messages-consumed).
+ *  Strict null on `invokedAt` so a pre-V8 hub response that omits the field
+ *  (`undefined`) is treated as already-invoked; only optimistic / V8-loaded
+ *  rows that explicitly carry `invokedAt: null` are queued. `failed` rows are
+ *  not queued either — they're surfaced as send errors, not pending work. */
+export function isQueuedForInvocation(msg: DecryptedMessage): boolean {
+    return isUserMessage(msg) && msg.invokedAt === null && msg.status !== 'failed'
+}
+
 function isOptimisticMessage(msg: DecryptedMessage): boolean {
     return Boolean(msg.localId && msg.id === msg.localId)
 }
 
-function hasInvokedAt(msg: DecryptedMessage): boolean {
-    return msg.invokedAt !== null && msg.invokedAt !== undefined
-}
-
-function resolveMessageStatus(current?: DecryptedMessage['status'], incoming?: DecryptedMessage['status']): DecryptedMessage['status'] {
-    if (current === 'failed' || incoming === 'failed') {
-        return current === 'failed' ? current : incoming
-    }
-    if (current === 'sent' || incoming === 'sent') {
-        return current === 'sent' ? current : incoming
-    }
-    if (current === 'queued' || incoming === 'queued') {
-        return current === 'queued' ? current : incoming
-    }
-    return current ?? incoming
-}
-
-function mergeMessageState(base: DecryptedMessage, candidate: DecryptedMessage): DecryptedMessage {
-    return {
-        ...candidate,
-        invokedAt: hasInvokedAt(base) ? base.invokedAt : candidate.invokedAt,
-        status: resolveMessageStatus(base.status, candidate.status),
-        originalText: base.originalText ?? candidate.originalText,
-    }
-}
-
 function compareMessages(a: DecryptedMessage, b: DecryptedMessage): number {
+    const aTime = a.invokedAt ?? a.createdAt
+    const bTime = b.invokedAt ?? b.createdAt
+
+    if (aTime !== bTime) {
+        return aTime - bTime
+    }
+
     const aSeq = typeof a.seq === 'number' ? a.seq : null
     const bSeq = typeof b.seq === 'number' ? b.seq : null
 
     if (aSeq !== null && bSeq !== null && aSeq !== bSeq) {
         return aSeq - bSeq
-    }
-
-    if (a.createdAt !== b.createdAt) {
-        return a.createdAt - b.createdAt
     }
     return a.id.localeCompare(b.id)
 }
@@ -73,35 +56,15 @@ export function mergeMessages(existing: DecryptedMessage[], incoming: DecryptedM
         byId.set(msg.id, msg)
     }
     for (const msg of incoming) {
-        const current = byId.get(msg.id)
-        if (current) {
-            byId.set(msg.id, mergeMessageState(current, msg))
-            continue
+        const existing = byId.get(msg.id)
+        if (existing && existing.invokedAt != null && msg.invokedAt == null) {
+            byId.set(msg.id, { ...msg, invokedAt: existing.invokedAt })
+        } else {
+            byId.set(msg.id, msg)
         }
-        byId.set(msg.id, msg)
     }
 
     let merged = Array.from(byId.values())
-
-    const optimisticByLocalId = new Map<string, DecryptedMessage>()
-    for (const msg of merged) {
-        if (msg.localId && isOptimisticMessage(msg)) {
-            optimisticByLocalId.set(msg.localId, msg)
-        }
-    }
-
-    if (optimisticByLocalId.size > 0) {
-        merged = merged.map((msg) => {
-            if (!msg.localId || isOptimisticMessage(msg)) {
-                return msg
-            }
-            const optimistic = optimisticByLocalId.get(msg.localId)
-            if (!optimistic) {
-                return msg
-            }
-            return mergeMessageState(optimistic, msg)
-        })
-    }
 
     const incomingStoredLocalIds = new Set<string>()
     for (const msg of incoming) {
@@ -111,13 +74,45 @@ export function mergeMessages(existing: DecryptedMessage[], incoming: DecryptedM
     }
 
     // If we received stored messages with a localId, drop any optimistic bubbles with the same localId.
+    // Preserve client-side status (e.g. 'queued') and invokedAt on the replacing server message.
     if (incomingStoredLocalIds.size > 0) {
+        const optimisticStatusByLocalId = new Map<string, DecryptedMessage['status']>()
+        const optimisticInvokedAtByLocalId = new Map<string, number | null | undefined>()
+        for (const msg of merged) {
+            if (msg.localId && isOptimisticMessage(msg) && incomingStoredLocalIds.has(msg.localId)) {
+                if (msg.status) {
+                    optimisticStatusByLocalId.set(msg.localId, msg.status)
+                }
+                if (msg.invokedAt !== undefined) {
+                    optimisticInvokedAtByLocalId.set(msg.localId, msg.invokedAt)
+                }
+            }
+        }
         merged = merged.filter((msg) => {
             if (!msg.localId || !incomingStoredLocalIds.has(msg.localId)) {
                 return true
             }
             return !isOptimisticMessage(msg)
         })
+        if (optimisticStatusByLocalId.size > 0 || optimisticInvokedAtByLocalId.size > 0) {
+            merged = merged.map((msg) => {
+                if (!msg.localId) return msg
+                const update: Partial<DecryptedMessage> = {}
+                if (optimisticStatusByLocalId.has(msg.localId) && !msg.status) {
+                    update.status = optimisticStatusByLocalId.get(msg.localId)
+                }
+                if (optimisticInvokedAtByLocalId.has(msg.localId) && msg.invokedAt == null) {
+                    const optimisticInvokedAt = optimisticInvokedAtByLocalId.get(msg.localId)
+                    if (optimisticInvokedAt != null) {
+                        update.invokedAt = optimisticInvokedAt
+                    }
+                }
+                if (Object.keys(update).length > 0) {
+                    return { ...msg, ...update }
+                }
+                return msg
+            })
+        }
     }
 
     // Fallback: if an optimistic message was marked as sent but we didn't get a localId echo,
@@ -128,9 +123,14 @@ export function mergeMessages(existing: DecryptedMessage[], incoming: DecryptedM
 
     for (const optimistic of optimisticMessages) {
         if (optimistic.status === 'sent') {
+            // Compare by the position key (invokedAt ?? createdAt). A late ack can
+            // attach `invokedAt` long after `createdAt`, so the optimistic copy and
+            // the server echo end up at the same byPosition slot — using
+            // `createdAt` alone misses that match and renders both as duplicates.
+            const optimisticTime = optimistic.invokedAt ?? optimistic.createdAt
             const hasServerUserMessage = nonOptimisticMessages.some((m) =>
                 isUserMessage(m) &&
-                Math.abs(m.createdAt - optimistic.createdAt) < 10_000
+                Math.abs((m.invokedAt ?? m.createdAt) - optimisticTime) < 10_000
             )
             if (hasServerUserMessage) {
                 continue
@@ -141,40 +141,4 @@ export function mergeMessages(existing: DecryptedMessage[], incoming: DecryptedM
 
     result.sort(compareMessages)
     return result
-}
-
-export function upsertMessagesInCache(
-    data: InfiniteData<MessagesResponse> | undefined,
-    incoming: DecryptedMessage[],
-): InfiniteData<MessagesResponse> {
-    const mergedIncoming = mergeMessages([], incoming)
-
-    if (!data || data.pages.length === 0) {
-        return {
-            pages: [
-                {
-                    messages: mergedIncoming,
-                    page: {
-                        limit: 50,
-                        nextBeforeSeq: null,
-                        nextBeforeAt: null,
-                        hasMore: false,
-                    },
-                },
-            ],
-            pageParams: [null],
-        }
-    }
-
-    const pages = data.pages.slice()
-    const first = pages[0]
-    pages[0] = {
-        ...first,
-        messages: mergeMessages(first.messages, mergedIncoming),
-    }
-
-    return {
-        ...data,
-        pages,
-    }
 }

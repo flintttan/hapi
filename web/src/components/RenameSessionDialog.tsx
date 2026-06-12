@@ -3,8 +3,7 @@ import {
     Dialog,
     DialogContent,
     DialogHeader,
-    DialogTitle,
-    DialogDescription,
+    DialogTitle
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { useTranslation } from '@/lib/use-translation'
@@ -23,29 +22,15 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
     const [name, setName] = useState(currentName)
     const [error, setError] = useState<string | null>(null)
     const inputRef = useRef<HTMLInputElement>(null)
-    const focusFrameRef = useRef<number | null>(null)
 
     useEffect(() => {
-        if (!isOpen) {
-            if (focusFrameRef.current !== null) {
-                cancelAnimationFrame(focusFrameRef.current)
-                focusFrameRef.current = null
-            }
-            return
-        }
-        setName(currentName)
-        setError(null)
-        focusFrameRef.current = requestAnimationFrame(() => {
-            inputRef.current?.focus()
-            inputRef.current?.select()
-            focusFrameRef.current = null
-        })
-
-        return () => {
-            if (focusFrameRef.current !== null) {
-                cancelAnimationFrame(focusFrameRef.current)
-                focusFrameRef.current = null
-            }
+        if (isOpen) {
+            setName(currentName)
+            setError(null)
+            setTimeout(() => {
+                inputRef.current?.focus()
+                inputRef.current?.select()
+            }, 100)
         }
     }, [isOpen, currentName])
 
@@ -76,9 +61,6 @@ export function RenameSessionDialog(props: RenameSessionDialogProps) {
             <DialogContent className="max-w-sm">
                 <DialogHeader>
                     <DialogTitle>{t('dialog.rename.title')}</DialogTitle>
-                    <DialogDescription>
-                        {t('dialog.rename.placeholder')}
-                    </DialogDescription>
                 </DialogHeader>
                 <form onSubmit={handleSubmit} className="mt-4 flex flex-col gap-4">
                     <input

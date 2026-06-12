@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Outlet, useLocation, useMatchRoute, useRouter } from '@tanstack/react-router'
 import { useQueryClient } from '@tanstack/react-query'
 import { getTelegramWebApp, isTelegramApp } from '@/hooks/useTelegram'
+import { initializeChatSurfaceColors } from '@/hooks/useChatSurfaceColors'
 import { initializeTheme } from '@/hooks/useTheme'
 import { useAuth } from '@/hooks/useAuth'
 import { useAuthSource } from '@/hooks/useAuthSource'
@@ -13,11 +14,12 @@ import { useViewportHeight } from '@/hooks/useViewportHeight'
 import { useVisibilityReporter } from '@/hooks/useVisibilityReporter'
 import { queryKeys } from '@/lib/query-keys'
 import { AppContextProvider } from '@/lib/app-context'
-import { fetchLatestMessages } from '@/lib/message-window-store'
+import { clearMessageWindow, fetchLatestMessages } from '@/lib/message-window-store'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { useTranslation } from '@/lib/use-translation'
 import { VoiceProvider } from '@/lib/voice-context'
 import { requireHubUrlForLogin } from '@/lib/runtime-config'
+import { getAppGlobalSseSubscription, getAppSessionSseSubscription } from '@/lib/appSseSubscriptions'
 import { LoginPrompt } from '@/components/LoginPrompt'
 import { InstallPrompt } from '@/components/InstallPrompt'
 import { OfflineBanner } from '@/components/OfflineBanner'
@@ -26,7 +28,6 @@ import { ReconnectingBanner } from '@/components/ReconnectingBanner'
 import { VoiceErrorBanner } from '@/components/VoiceErrorBanner'
 import { LoadingState } from '@/components/LoadingState'
 import { ToastContainer } from '@/components/ToastContainer'
-import { PwaUpdateToastBridge } from '@/components/PwaUpdateToastBridge'
 import { ToastProvider, useToast } from '@/lib/toast-context'
 import type { SyncEvent } from '@/types/api'
 
@@ -45,8 +46,8 @@ export function App() {
 function AppInner() {
     const { t } = useTranslation()
     const { serverUrl, baseUrl, setServerUrl, clearServerUrl } = useServerUrl()
-    const { authSource, storedUser, isLoading: isAuthSourceLoading, setAccessToken, clearAuth } = useAuthSource(baseUrl)
-    const { token, api, user, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl, storedUser)
+    const { authSource, isLoading: isAuthSourceLoading, setAccessToken } = useAuthSource(baseUrl)
+    const { token, api, isLoading: isAuthLoading, error: authError, needsBinding, bind } = useAuth(authSource, baseUrl)
     const goBack = useAppGoBack()
     const pathname = useLocation({ select: (location) => location.pathname })
     const matchRoute = useMatchRoute()
@@ -58,6 +59,7 @@ function AppInner() {
         tg?.ready()
         tg?.expand()
         initializeTheme()
+        initializeChatSurfaceColors()
     }, [])
 
     // Track visual viewport height for mobile keyboard avoidance (see useViewportHeight.ts)
@@ -128,11 +130,6 @@ function AppInner() {
     const baseUrlRef = useRef(baseUrl)
     const pushPromptedRef = useRef(false)
     const { isSupported: isPushSupported, permission: pushPermission, requestPermission, subscribe } = usePushNotifications(api)
-
-    const handleLogout = useCallback(() => {
-        clearAuth()
-        queryClient.clear()
-    }, [clearAuth, queryClient])
 
     useEffect(() => {
         if (baseUrlRef.current === baseUrl) {
@@ -235,38 +232,108 @@ function AppInner() {
         }
     }, [])
 
-    const handleSseEvent = useCallback(() => {}, [])
+    const handleSseEvent = useCallback((event: SyncEvent) => {
+        if (event.type !== 'messages-invalidated') {
+            return
+        }
+        if (!api || event.sessionId !== selectedSessionId) {
+            return
+        }
+        clearMessageWindow(event.sessionId)
+        void fetchLatestMessages(api, event.sessionId)
+    }, [api, selectedSessionId])
+    const translateIncomingToast = useCallback((title: string, body: string): { title: string; body: string } => {
+        const normalizedTitle = title.trim()
+        const normalizedBody = body.trim()
+
+        if (normalizedTitle === 'Ready for input') {
+            const waitingMatch = normalizedBody.match(/^(.+)\s+is waiting in\s+(.+)$/i)
+            if (waitingMatch) {
+                const agent = waitingMatch[1]?.trim() ?? ''
+                const sessionName = waitingMatch[2]?.trim() ?? ''
+                return {
+                    title: t('toast.ready.title'),
+                    body: t('toast.ready.body', { agent, session: sessionName })
+                }
+            }
+            return {
+                title: t('toast.ready.title'),
+                body: normalizedBody
+            }
+        }
+
+        if (normalizedTitle === 'Permission Request') {
+            return {
+                title: t('toast.permission.title'),
+                body: normalizedBody
+            }
+        }
+
+        if (normalizedTitle === 'Task completed') {
+            return {
+                title: t('toast.task.completed'),
+                body: normalizedBody
+            }
+        }
+
+        if (normalizedTitle === 'Task failed') {
+            return {
+                title: t('toast.task.failed'),
+                body: normalizedBody
+            }
+        }
+
+        return { title, body }
+    }, [t])
+
     const handleToast = useCallback((event: ToastEvent) => {
+        const localized = translateIncomingToast(event.data.title, event.data.body)
         addToast({
-            title: event.data.title,
-            body: event.data.body,
+            title: localized.title,
+            body: localized.body,
             sessionId: event.data.sessionId,
             url: event.data.url
         })
-    }, [addToast])
+    }, [addToast, translateIncomingToast])
 
-    const eventSubscription = useMemo(() => {
-        if (selectedSessionId) {
-            return { sessionId: selectedSessionId }
-        }
-        return { all: true }
-    }, [selectedSessionId])
+    const globalEventSubscription = useMemo(() => getAppGlobalSseSubscription(), [])
+    const sessionEventSubscription = useMemo(
+        () => getAppSessionSseSubscription(selectedSessionId),
+        [selectedSessionId]
+    )
+    const sseEnabled = Boolean(api && token)
 
-    const { subscriptionId } = useSSE({
-        enabled: Boolean(api && token),
+    const { subscriptionId: globalSubscriptionId } = useSSE({
+        enabled: sseEnabled,
         token: token ?? '',
         baseUrl,
-        subscription: eventSubscription,
+        subscription: globalEventSubscription,
+        scope: 'global',
         onConnect: handleSseConnect,
         onDisconnect: handleSseDisconnect,
-        onEvent: handleSseEvent,
+        onEvent: () => {},
         onToast: handleToast
+    })
+
+    const { subscriptionId: sessionSubscriptionId } = useSSE({
+        enabled: sseEnabled && Boolean(sessionEventSubscription),
+        token: token ?? '',
+        baseUrl,
+        subscription: sessionEventSubscription ?? undefined,
+        scope: 'full',
+        onEvent: handleSseEvent
     })
 
     useVisibilityReporter({
         api,
-        subscriptionId,
-        enabled: Boolean(api && token)
+        subscriptionId: globalSubscriptionId,
+        enabled: sseEnabled
+    })
+
+    useVisibilityReporter({
+        api,
+        subscriptionId: sessionSubscriptionId,
+        enabled: sseEnabled && Boolean(sessionEventSubscription)
     })
 
     // Loading auth source
@@ -319,7 +386,7 @@ function AppInner() {
     // Auth error
     if (authError || !token || !api) {
         // If using access token and auth failed, show login again
-        if (authSource.type === 'accessToken' || authSource.type === 'refreshToken' || authSource.type === 'password') {
+        if (authSource.type === 'accessToken') {
             return (
                 <LoginPrompt
                     onLogin={setAccessToken}
@@ -348,7 +415,7 @@ function AppInner() {
     }
 
     return (
-        <AppContextProvider value={{ api, token, baseUrl, user, onLogout: handleLogout }}>
+        <AppContextProvider value={{ api, token, baseUrl }}>
             <VoiceProvider>
                 <SyncingBanner isSyncing={isSyncing} />
                 <ReconnectingBanner
@@ -360,7 +427,6 @@ function AppInner() {
                 <div className="h-full min-h-0 flex flex-col">
                     <Outlet />
                 </div>
-                <PwaUpdateToastBridge />
                 <ToastContainer />
                 <InstallPrompt />
             </VoiceProvider>

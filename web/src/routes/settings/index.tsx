@@ -1,15 +1,42 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useState, useRef, useEffect } from 'react'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { getElevenLabsSupportedLanguages, getLanguageDisplayName, type Language } from '@/lib/languages'
+import { VOICES, getFallbackVoices } from '@/lib/voices'
+import { useAppContext } from '@/lib/app-context'
+import { fetchVoiceBackend, fetchVoices, type VoiceInfo } from '@/api/voice'
+import {
+    getStaticVoiceOptions,
+    readStoredVoiceSelection,
+    resolveSelectedVoiceBackend,
+    writeStoredVoiceBackendPreference,
+    writeStoredVoiceSelection,
+} from '@/lib/voicePickerPreferences'
+import { VOICE_BACKEND_LABELS } from '@hapi/protocol/voicePickerCatalog'
+import type { VoiceBackendType } from '@hapi/protocol/voice'
 import { getFontScaleOptions, useFontScale, type FontScale } from '@/hooks/useFontScale'
 import { getTerminalFontSizeOptions, useTerminalFontSize, type TerminalFontSize } from '@/hooks/useTerminalFontSize'
+import { getComposerEnterBehaviorOptions, useComposerEnterBehavior, type ComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
+import { getTerminalToolDisplayModeOptions, useTerminalToolDisplayMode, type TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
+import { getSessionListStatusModeOptions, useSessionListStatusMode, type SessionListStatusMode } from '@/hooks/useSessionListStatusMode'
+import {
+    MAX_SESSION_PREVIEW_LIMIT,
+    MIN_SESSION_PREVIEW_LIMIT,
+    normalizeSessionPreviewLimit,
+    useSessionPreviewLimit,
+} from '@/hooks/useSessionPreviewLimit'
+import {
+    getChatSurfaceColorPickerValue,
+    getChatSurfaceColorPresetOptions,
+    toCustomChatSurfaceColorPreference,
+    toPresetChatSurfaceColorPreference,
+    useChatSurfaceColors,
+    type ChatSurfaceColorPreference,
+    type ChatSurfaceColorPreset,
+} from '@/hooks/useChatSurfaceColors'
 import { useAppearance, getAppearanceOptions, type AppearancePreference } from '@/hooks/useTheme'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
-import { useAppContext } from '@/lib/app-context'
-import { useMachines } from '@/hooks/queries/useMachines'
-import { queryKeys } from '@/lib/query-keys'
+import { VoiceRespondsControls, VoiceSoundsControls, VoicePersonaControls, VoiceDiagnosticsControls } from '@/components/settings/VoiceAdvancedControls'
 
 const locales: { value: Locale; nativeLabel: string }[] = [
     { value: 'en', nativeLabel: 'English' },
@@ -75,81 +102,328 @@ function ChevronDownIcon(props: { className?: string }) {
     )
 }
 
+function PlayIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            className={props.className}
+        >
+            <polygon points="5 3 19 12 5 21 5 3" />
+        </svg>
+    )
+}
+
+function StopIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+            className={props.className}
+        >
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+        </svg>
+    )
+}
+
+function MinusIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+    )
+}
+
+function PlusIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+        </svg>
+    )
+}
+
+function SessionPreviewLimitControl(props: {
+    label: string
+    value: number
+    onChange: (value: number) => void
+    decreaseLabel: string
+    increaseLabel: string
+}) {
+    const [draft, setDraft] = useState(String(props.value))
+
+    useEffect(() => {
+        setDraft(String(props.value))
+    }, [props.value])
+
+    const commitDraft = () => {
+        const parsed = draft.trim() === '' ? props.value : Number(draft)
+        const next = normalizeSessionPreviewLimit(parsed)
+        props.onChange(next)
+        setDraft(String(next))
+    }
+
+    const step = (delta: number) => {
+        const next = normalizeSessionPreviewLimit(props.value + delta)
+        props.onChange(next)
+        setDraft(String(next))
+    }
+
+    return (
+        <div className="flex w-full items-center justify-between gap-3 px-3 py-3">
+            <label htmlFor="session-preview-limit" className="text-[var(--app-fg)]">
+                {props.label}
+            </label>
+            <div className="flex h-9 shrink-0 items-center rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-sm">
+                <button
+                    type="button"
+                    onClick={() => step(-1)}
+                    disabled={props.value <= MIN_SESSION_PREVIEW_LIMIT}
+                    aria-label={props.decreaseLabel}
+                    title={props.decreaseLabel}
+                    className="flex h-8 w-8 items-center justify-center rounded-l-lg text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                    <MinusIcon className="h-3.5 w-3.5" />
+                </button>
+                <input
+                    id="session-preview-limit"
+                    type="number"
+                    inputMode="numeric"
+                    min={MIN_SESSION_PREVIEW_LIMIT}
+                    max={MAX_SESSION_PREVIEW_LIMIT}
+                    value={draft}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onBlur={commitDraft}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault()
+                            commitDraft()
+                            event.currentTarget.blur()
+                        }
+                        if (event.key === 'Escape') {
+                            event.preventDefault()
+                            setDraft(String(props.value))
+                            event.currentTarget.blur()
+                        }
+                    }}
+                    className="h-8 w-14 border-x border-[var(--app-border)] bg-transparent text-center text-sm font-medium tabular-nums text-[var(--app-fg)] outline-none focus:bg-[var(--app-subtle-bg)]"
+                />
+                <button
+                    type="button"
+                    onClick={() => step(1)}
+                    disabled={props.value >= MAX_SESSION_PREVIEW_LIMIT}
+                    aria-label={props.increaseLabel}
+                    title={props.increaseLabel}
+                    className="flex h-8 w-8 items-center justify-center rounded-r-lg text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                    <PlusIcon className="h-3.5 w-3.5" />
+                </button>
+            </div>
+        </div>
+    )
+}
+
+function ChatSurfaceColorControl(props: {
+    label: string
+    preference: ChatSurfaceColorPreference
+    onPresetChange: (preset: ChatSurfaceColorPreset) => void
+    onCustomChange: (value: string) => void
+    t: (key: string) => string
+}) {
+    const presetOptions = getChatSurfaceColorPresetOptions()
+    const pickerValue = getChatSurfaceColorPickerValue(props.preference)
+    const isCustomSelected = props.preference.startsWith('custom:')
+
+    return (
+        <div className="border-t border-[var(--app-divider)] px-3 py-3">
+            <div className="mb-2 text-[var(--app-fg)]">{props.label}</div>
+            <div className="flex flex-wrap gap-2">
+                {presetOptions.map((option) => {
+                    const selected = props.preference === toPresetChatSurfaceColorPreference(option.value)
+                    const swatchColor = getChatSurfaceColorPickerValue(toPresetChatSurfaceColorPreference(option.value))
+                    return (
+                        <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => props.onPresetChange(option.value)}
+                            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-sm transition-colors ${
+                                selected
+                                    ? 'border-[var(--app-link)] bg-[var(--app-subtle-bg)] text-[var(--app-link)]'
+                                    : 'border-[var(--app-border)] bg-[var(--app-bg)] text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
+                            }`}
+                        >
+                            <span className="h-2.5 w-2.5 rounded-full opacity-80" style={{ backgroundColor: swatchColor }} />
+                            <span>{props.t(option.labelKey)}</span>
+                        </button>
+                    )
+                })}
+            </div>
+            <div className="mt-3 flex items-center justify-between gap-3">
+                <span className="text-sm text-[var(--app-hint)]">{props.t('settings.chat.surfaceColor.custom')}</span>
+                <label
+                    className={`inline-flex items-center rounded-xl border px-2 py-1 transition-colors ${
+                        isCustomSelected
+                            ? 'border-[var(--app-link)] bg-[var(--app-subtle-bg)]'
+                            : 'border-[var(--app-border)] bg-[var(--app-bg)]'
+                    }`}
+                >
+                    <input
+                        aria-label={props.t('settings.chat.surfaceColor.custom')}
+                        type="color"
+                        value={pickerValue}
+                        onChange={(event) => props.onCustomChange(event.target.value)}
+                        className="h-8 w-11 cursor-pointer appearance-none border-0 bg-transparent p-0"
+                    />
+                </label>
+            </div>
+        </div>
+    )
+}
+
 export default function SettingsPage() {
     const { t, locale, setLocale } = useTranslation()
-    const { user, onLogout, api } = useAppContext()
-    const queryClient = useQueryClient()
+    const { api } = useAppContext()
     const goBack = useAppGoBack()
     const [isOpen, setIsOpen] = useState(false)
     const [isAppearanceOpen, setIsAppearanceOpen] = useState(false)
     const [isFontOpen, setIsFontOpen] = useState(false)
     const [isTerminalFontOpen, setIsTerminalFontOpen] = useState(false)
+    const [isChatOpen, setIsChatOpen] = useState(false)
+    const [isTerminalToolDisplayOpen, setIsTerminalToolDisplayOpen] = useState(false)
+    const [isSessionListStatusOpen, setIsSessionListStatusOpen] = useState(false)
     const [isVoiceOpen, setIsVoiceOpen] = useState(false)
+    const [isVoiceBackendOpen, setIsVoiceBackendOpen] = useState(false)
+    const [isVoicePickerOpen, setIsVoicePickerOpen] = useState(false)
     const containerRef = useRef<HTMLDivElement>(null)
     const appearanceContainerRef = useRef<HTMLDivElement>(null)
     const fontContainerRef = useRef<HTMLDivElement>(null)
     const terminalFontContainerRef = useRef<HTMLDivElement>(null)
+    const chatContainerRef = useRef<HTMLDivElement>(null)
+    const terminalToolDisplayContainerRef = useRef<HTMLDivElement>(null)
+    const sessionListStatusContainerRef = useRef<HTMLDivElement>(null)
     const voiceContainerRef = useRef<HTMLDivElement>(null)
+    const voiceBackendPickerRef = useRef<HTMLDivElement>(null)
+    const voicePickerContainerRef = useRef<HTMLDivElement>(null)
     const { fontScale, setFontScale } = useFontScale()
     const { terminalFontSize, setTerminalFontSize } = useTerminalFontSize()
+    const { sessionPreviewLimit, setSessionPreviewLimit } = useSessionPreviewLimit()
+    const { composerEnterBehavior, setComposerEnterBehavior } = useComposerEnterBehavior()
+    const { terminalToolDisplayMode, setTerminalToolDisplayMode } = useTerminalToolDisplayMode()
+    const { sessionListStatusMode, setSessionListStatusMode } = useSessionListStatusMode()
+    const {
+        toolGroupBackground,
+        userMessageBackground,
+        setToolGroupBackground,
+        setUserMessageBackground,
+    } = useChatSurfaceColors()
     const { appearance, setAppearance } = useAppearance()
-    const { machines } = useMachines(api, true)
-    const [machineNameDrafts, setMachineNameDrafts] = useState<Record<string, string>>({})
-    const [cleanupDaysInput, setCleanupDaysInput] = useState('')
 
     // Voice language state - read from localStorage
     const [voiceLanguage, setVoiceLanguage] = useState<string | null>(() => {
         return localStorage.getItem('hapi-voice-lang')
     })
 
+    const [configuredVoiceBackends, setConfiguredVoiceBackends] = useState<VoiceBackendType[]>([])
+    const [voiceBackend, setVoiceBackend] = useState<VoiceBackendType | null>(null)
+
+    // Per-backend voice selection (localStorage keys differ by backend)
+    const [voiceId, setVoiceId] = useState<string | null>(null)
+
+    // Dynamic voice list fetched from hub (ElevenLabs only)
+    const [dynamicVoices, setDynamicVoices] = useState<VoiceInfo[] | null>(null)
+    const [playingVoiceId, setPlayingVoiceId] = useState<string | null>(null)
+    const currentAudioRef = useRef<HTMLAudioElement | null>(null)
+
+    // Voice opening mode — "brief" = proactive summary on connect, "greet" = greeting + wait
+    const [voiceOpening, setVoiceOpening] = useState<'greet' | 'brief'>(() => {
+        return localStorage.getItem('hapi-voice-proactive') === 'true' ? 'brief' : 'greet'
+    })
+
+    const handleVoiceOpeningChange = (value: 'greet' | 'brief') => {
+        setVoiceOpening(value)
+        if (value === 'brief') {
+            localStorage.setItem('hapi-voice-proactive', 'true')
+        } else {
+            localStorage.removeItem('hapi-voice-proactive')
+        }
+    }
+
     const fontScaleOptions = getFontScaleOptions()
     const terminalFontSizeOptions = getTerminalFontSizeOptions()
+    const composerEnterBehaviorOptions = getComposerEnterBehaviorOptions()
+    const terminalToolDisplayModeOptions = getTerminalToolDisplayModeOptions()
+    const sessionListStatusModeOptions = getSessionListStatusModeOptions()
     const appearanceOptions = getAppearanceOptions()
     const currentLocale = locales.find((loc) => loc.value === locale)
     const currentAppearanceLabel = appearanceOptions.find((opt) => opt.value === appearance)?.labelKey ?? 'settings.display.appearance.system'
     const currentFontScaleLabel = fontScaleOptions.find((opt) => opt.value === fontScale)?.label ?? '100%'
     const currentTerminalFontSizeLabel = terminalFontSizeOptions.find((opt) => opt.value === terminalFontSize)?.label ?? '13px'
+    const currentComposerEnterBehaviorLabel = composerEnterBehaviorOptions.find((opt) => opt.value === composerEnterBehavior)?.labelKey ?? 'settings.chat.enterBehavior.send'
+    const currentTerminalToolDisplayModeLabel = terminalToolDisplayModeOptions.find((opt) => opt.value === terminalToolDisplayMode)?.labelKey ?? 'settings.chat.terminalToolDisplay.compact'
+    const currentSessionListStatusModeLabel = sessionListStatusModeOptions.find((opt) => opt.value === sessionListStatusMode)?.labelKey ?? 'settings.display.sessionListStatus.standard'
     const currentVoiceLanguage = voiceLanguages.find((lang) => lang.code === voiceLanguage)
 
-    const cleanupQuery = useQuery({
-        queryKey: ['cleanup-preferences'],
-        queryFn: () => api.getCleanupPreferences(),
-    })
+    const staticVoiceOptions = voiceBackend ? getStaticVoiceOptions(voiceBackend) : []
 
-    const cleanupMutation = useMutation({
-        mutationFn: (payload: { autoCleanupEnabled: boolean; sessionRetentionDays: number | null }) =>
-            api.setCleanupPreferences(payload),
-        onSuccess: (data) => {
-            queryClient.setQueryData(['cleanup-preferences'], data)
-        },
-    })
+    // Voice list: ElevenLabs dynamic + fallback, or static catalog for Gemini/Qwen
+    const fallbackVoices = getFallbackVoices(locale)
+    const voiceOptions: VoiceInfo[] = voiceBackend === 'elevenlabs'
+        ? (dynamicVoices && dynamicVoices.length > 0
+            ? dynamicVoices
+            : fallbackVoices.map(v => ({ id: v.id, name: v.name, previewUrl: '', category: 'premade' })))
+        : voiceBackend === 'gemini-live' || voiceBackend === 'qwen-realtime'
+        ? staticVoiceOptions.map(v => ({
+            id: v.id,
+            name: v.label,
+            description: v.description,
+            previewUrl: '',
+            category: 'premade'
+        }))
+        : fallbackVoices.map(v => ({ id: v.id, name: v.name, previewUrl: '', category: 'premade' }))
 
-    const machineNameMutation = useMutation({
-        mutationFn: (payload: { machineId: string; displayName: string | null }) =>
-            api.setMachineDisplayName(payload.machineId, payload.displayName),
-        onSuccess: async () => {
-            await queryClient.invalidateQueries({ queryKey: queryKeys.machines })
-        },
-    })
+    const currentVoiceName = voiceId
+        ? (voiceOptions.find(v => v.id === voiceId)?.name
+            ?? staticVoiceOptions.find(v => v.id === voiceId)?.label
+            ?? fallbackVoices.find(v => v.id === voiceId)?.name
+            ?? voiceId)
+        : null
+    const currentVoiceDescription = voiceId
+        ? (voiceOptions.find(v => v.id === voiceId)?.description
+            ?? staticVoiceOptions.find(v => v.id === voiceId)?.description)
+        : undefined
+    const staticVoiceCatalog = voiceBackend === 'gemini-live' || voiceBackend === 'qwen-realtime'
 
-    useEffect(() => {
-        setMachineNameDrafts(prev => {
-            const next = { ...prev }
-            let changed = false
-            for (const machine of machines) {
-                if (next[machine.id] === undefined) {
-                    next[machine.id] = machine.metadata?.displayName ?? ''
-                    changed = true
-                }
-            }
-            return changed ? next : prev
-        })
-    }, [machines])
-
-    useEffect(() => {
-        const value = cleanupQuery.data?.sessionRetentionDays
-        setCleanupDaysInput(value == null ? '' : String(value))
-    }, [cleanupQuery.data?.sessionRetentionDays])
+    const voicePreviewEnabled = voiceBackend === 'elevenlabs'
+    const showVoiceBackendChooser = configuredVoiceBackends.length > 1
+    const currentVoiceBackendLabel = voiceBackend ? VOICE_BACKEND_LABELS[voiceBackend] : null
 
     const handleLocaleChange = (newLocale: Locale) => {
         setLocale(newLocale)
@@ -171,6 +445,21 @@ export default function SettingsPage() {
         setIsTerminalFontOpen(false)
     }
 
+    const handleComposerEnterBehaviorChange = (newBehavior: ComposerEnterBehavior) => {
+        setComposerEnterBehavior(newBehavior)
+        setIsChatOpen(false)
+    }
+
+    const handleTerminalToolDisplayModeChange = (newMode: TerminalToolDisplayMode) => {
+        setTerminalToolDisplayMode(newMode)
+        setIsTerminalToolDisplayOpen(false)
+    }
+
+    const handleSessionListStatusModeChange = (newMode: SessionListStatusMode) => {
+        setSessionListStatusMode(newMode)
+        setIsSessionListStatusOpen(false)
+    }
+
     const handleVoiceLanguageChange = (language: Language) => {
         setVoiceLanguage(language.code)
         if (language.code === null) {
@@ -181,44 +470,83 @@ export default function SettingsPage() {
         setIsVoiceOpen(false)
     }
 
-    const saveCleanupPreferences = (next?: Partial<{ autoCleanupEnabled: boolean; sessionRetentionDays: number | null }>) => {
-        const current = cleanupQuery.data
-        const rawDays = cleanupDaysInput.trim()
-        const parsed = rawDays ? Number(rawDays) : null
-        const sessionRetentionDays = parsed === null || !Number.isFinite(parsed)
-            ? null
-            : Math.max(1, Math.min(365, Math.floor(parsed)))
-        cleanupMutation.mutate({
-            autoCleanupEnabled: next?.autoCleanupEnabled ?? current?.autoCleanupEnabled ?? true,
-            sessionRetentionDays: next?.sessionRetentionDays ?? sessionRetentionDays
+    const handleVoiceChange = (id: string | null) => {
+        setVoiceId(id)
+        writeStoredVoiceSelection(voiceBackend ?? 'elevenlabs', id)
+        setIsVoicePickerOpen(false)
+    }
+
+    const handleVoiceBackendChange = (backend: VoiceBackendType) => {
+        writeStoredVoiceBackendPreference(backend)
+        setVoiceBackend(backend)
+        setVoiceId(readStoredVoiceSelection(backend))
+        setIsVoiceBackendOpen(false)
+    }
+
+    // Resolve configured backends, user preference, and voice selection for that backend
+    useEffect(() => {
+        let cancelled = false
+        fetchVoiceBackend(api).then((resp) => {
+            if (cancelled) return
+            setConfiguredVoiceBackends(resp.backends)
+            const selected = resolveSelectedVoiceBackend(resp.backends, resp.backend)
+            setVoiceBackend(selected)
+            setVoiceId(readStoredVoiceSelection(selected))
+        }).catch(() => {
+            if (cancelled) return
+            setConfiguredVoiceBackends(['elevenlabs'])
+            setVoiceBackend('elevenlabs')
+            setVoiceId(readStoredVoiceSelection('elevenlabs'))
+        })
+        return () => { cancelled = true }
+    }, [api])
+
+    // Fetch ElevenLabs voices only after hub reports elevenlabs backend
+    useEffect(() => {
+        if (voiceBackend !== 'elevenlabs') {
+            setDynamicVoices(null)
+            return
+        }
+        let cancelled = false
+        fetchVoices(api).then(voices => {
+            if (!cancelled && voices.length > 0) setDynamicVoices(voices)
+        })
+        return () => { cancelled = true }
+    }, [api, voiceBackend])
+
+    const handleVoicePreview = (previewUrl: string, voiceId: string, event: React.MouseEvent) => {
+        event.stopPropagation()
+        if (!previewUrl) return
+
+        if (playingVoiceId === voiceId) {
+            currentAudioRef.current?.pause()
+            currentAudioRef.current = null
+            setPlayingVoiceId(null)
+            return
+        }
+
+        currentAudioRef.current?.pause()
+        const audio = new Audio(previewUrl)
+        currentAudioRef.current = audio
+        setPlayingVoiceId(voiceId)
+        audio.play().catch(() => setPlayingVoiceId(null))
+        audio.addEventListener('ended', () => {
+            setPlayingVoiceId(null)
+            currentAudioRef.current = null
         })
     }
 
-    const saveMachineDisplayName = (machineId: string) => {
-        const value = machineNameDrafts[machineId]?.trim() ?? ''
-        machineNameMutation.mutate({
-            machineId,
-            displayName: value.length > 0 ? value : null
-        })
-    }
-
-    const userLabel = (() => {
-        if (!user) return t('settings.account.unknownUser')
-        if (user.username) return `@${user.username}`
-        if (user.firstName) return user.firstName
-        return String(user.id)
-    })()
-
-    const handleLogout = useCallback(() => {
-        if (!onLogout) return
-        const confirmed = confirm(t('settings.account.logoutConfirm'))
-        if (!confirmed) return
-        onLogout()
-    }, [onLogout, t])
+    useEffect(() => {
+        return () => {
+            currentAudioRef.current?.pause()
+            currentAudioRef.current = null
+            setPlayingVoiceId(null)
+        }
+    }, [])
 
     // Close dropdown when clicking outside
     useEffect(() => {
-        if (!isOpen && !isAppearanceOpen && !isFontOpen && !isTerminalFontOpen && !isVoiceOpen) return
+        if (!isOpen && !isAppearanceOpen && !isFontOpen && !isTerminalFontOpen && !isChatOpen && !isTerminalToolDisplayOpen && !isSessionListStatusOpen && !isVoiceOpen && !isVoiceBackendOpen && !isVoicePickerOpen) return
 
         const handleClickOutside = (event: MouseEvent) => {
             if (isOpen && containerRef.current && !containerRef.current.contains(event.target as Node)) {
@@ -233,18 +561,33 @@ export default function SettingsPage() {
             if (isTerminalFontOpen && terminalFontContainerRef.current && !terminalFontContainerRef.current.contains(event.target as Node)) {
                 setIsTerminalFontOpen(false)
             }
+            if (isChatOpen && chatContainerRef.current && !chatContainerRef.current.contains(event.target as Node)) {
+                setIsChatOpen(false)
+            }
+            if (isTerminalToolDisplayOpen && terminalToolDisplayContainerRef.current && !terminalToolDisplayContainerRef.current.contains(event.target as Node)) {
+                setIsTerminalToolDisplayOpen(false)
+            }
+            if (isSessionListStatusOpen && sessionListStatusContainerRef.current && !sessionListStatusContainerRef.current.contains(event.target as Node)) {
+                setIsSessionListStatusOpen(false)
+            }
             if (isVoiceOpen && voiceContainerRef.current && !voiceContainerRef.current.contains(event.target as Node)) {
                 setIsVoiceOpen(false)
+            }
+            if (isVoiceBackendOpen && voiceBackendPickerRef.current && !voiceBackendPickerRef.current.contains(event.target as Node)) {
+                setIsVoiceBackendOpen(false)
+            }
+            if (isVoicePickerOpen && voicePickerContainerRef.current && !voicePickerContainerRef.current.contains(event.target as Node)) {
+                setIsVoicePickerOpen(false)
             }
         }
 
         document.addEventListener('mousedown', handleClickOutside)
         return () => document.removeEventListener('mousedown', handleClickOutside)
-    }, [isOpen, isAppearanceOpen, isFontOpen, isTerminalFontOpen, isVoiceOpen])
+    }, [isOpen, isAppearanceOpen, isFontOpen, isTerminalFontOpen, isChatOpen, isTerminalToolDisplayOpen, isSessionListStatusOpen, isVoiceOpen, isVoiceBackendOpen, isVoicePickerOpen])
 
     // Close on escape key
     useEffect(() => {
-        if (!isOpen && !isAppearanceOpen && !isFontOpen && !isTerminalFontOpen && !isVoiceOpen) return
+        if (!isOpen && !isAppearanceOpen && !isFontOpen && !isTerminalFontOpen && !isChatOpen && !isTerminalToolDisplayOpen && !isSessionListStatusOpen && !isVoiceOpen && !isVoiceBackendOpen && !isVoicePickerOpen) return
 
         const handleEscape = (event: KeyboardEvent) => {
             if (event.key === 'Escape') {
@@ -252,13 +595,18 @@ export default function SettingsPage() {
                 setIsAppearanceOpen(false)
                 setIsFontOpen(false)
                 setIsTerminalFontOpen(false)
+                setIsChatOpen(false)
+                setIsTerminalToolDisplayOpen(false)
+                setIsSessionListStatusOpen(false)
                 setIsVoiceOpen(false)
+                setIsVoiceBackendOpen(false)
+                setIsVoicePickerOpen(false)
             }
         }
 
         document.addEventListener('keydown', handleEscape)
         return () => document.removeEventListener('keydown', handleEscape)
-    }, [isOpen, isAppearanceOpen, isFontOpen, isTerminalFontOpen, isVoiceOpen])
+    }, [isOpen, isAppearanceOpen, isFontOpen, isTerminalFontOpen, isChatOpen, isTerminalToolDisplayOpen, isSessionListStatusOpen, isVoiceOpen, isVoiceBackendOpen, isVoicePickerOpen])
 
     return (
         <div className="flex h-full min-h-0 flex-col">
@@ -277,28 +625,6 @@ export default function SettingsPage() {
 
             <div className="app-scroll-y flex-1 min-h-0">
                 <div className="mx-auto w-full max-w-content">
-                    {/* Account section */}
-                    <div className="border-b border-[var(--app-divider)]">
-                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
-                            {t('settings.account.title')}
-                        </div>
-
-                        <div className="flex w-full items-center justify-between px-3 py-3">
-                            <span className="text-[var(--app-fg)]">{t('settings.account.currentUser')}</span>
-                            <span className="text-[var(--app-hint)]">{userLabel}</span>
-                        </div>
-
-                        {onLogout ? (
-                            <button
-                                type="button"
-                                onClick={handleLogout}
-                                className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
-                            >
-                                <span className="text-red-600">{t('settings.account.logout')}</span>
-                            </button>
-                        ) : null}
-                    </div>
-
                     {/* Language section */}
                     <div className="border-b border-[var(--app-divider)]">
                         <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
@@ -503,59 +829,50 @@ export default function SettingsPage() {
                                 </div>
                             )}
                         </div>
-                    </div>
-
-                    {/* Voice Assistant section */}
-                    <div className="border-b border-[var(--app-divider)]">
-                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
-                            {t('settings.voice.title')}
-                        </div>
-                        <div ref={voiceContainerRef} className="relative">
+                        <SessionPreviewLimitControl
+                            label={t('settings.display.sessionPreviewLimit')}
+                            value={sessionPreviewLimit}
+                            onChange={setSessionPreviewLimit}
+                            decreaseLabel={t('settings.display.sessionPreviewLimit.decrease')}
+                            increaseLabel={t('settings.display.sessionPreviewLimit.increase')}
+                        />
+                        <div ref={sessionListStatusContainerRef} className="relative">
                             <button
                                 type="button"
-                                onClick={() => setIsVoiceOpen(!isVoiceOpen)}
+                                onClick={() => setIsSessionListStatusOpen(!isSessionListStatusOpen)}
                                 className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
-                                aria-expanded={isVoiceOpen}
+                                aria-expanded={isSessionListStatusOpen}
                                 aria-haspopup="listbox"
                             >
-                                <span className="text-[var(--app-fg)]">{t('settings.voice.language')}</span>
+                                <span className="text-[var(--app-fg)]">{t('settings.display.sessionListStatus')}</span>
                                 <span className="flex items-center gap-1 text-[var(--app-hint)]">
-                                    <span>
-                                        {currentVoiceLanguage
-                                            ? currentVoiceLanguage.code === null
-                                                ? t('settings.voice.autoDetect')
-                                                : getLanguageDisplayName(currentVoiceLanguage)
-                                            : t('settings.voice.autoDetect')}
-                                    </span>
-                                    <ChevronDownIcon className={`transition-transform ${isVoiceOpen ? 'rotate-180' : ''}`} />
+                                    <span>{t(currentSessionListStatusModeLabel)}</span>
+                                    <ChevronDownIcon className={`transition-transform ${isSessionListStatusOpen ? 'rotate-180' : ''}`} />
                                 </span>
                             </button>
 
-                            {isVoiceOpen && (
+                            {isSessionListStatusOpen && (
                                 <div
-                                    className="absolute right-3 top-full mt-1 min-w-[200px] max-h-[300px] overflow-y-auto rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg z-50"
+                                    className="absolute right-3 top-full mt-1 min-w-[220px] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg overflow-hidden z-50"
                                     role="listbox"
-                                    aria-label={t('settings.voice.title')}
+                                    aria-label={t('settings.display.sessionListStatus')}
                                 >
-                                    {voiceLanguages.map((lang) => {
-                                        const isSelected = voiceLanguage === lang.code
-                                        const displayName = lang.code === null
-                                            ? t('settings.voice.autoDetect')
-                                            : getLanguageDisplayName(lang)
+                                    {sessionListStatusModeOptions.map((opt) => {
+                                        const isSelected = sessionListStatusMode === opt.value
                                         return (
                                             <button
-                                                key={lang.code ?? 'auto'}
+                                                key={opt.value}
                                                 type="button"
                                                 role="option"
                                                 aria-selected={isSelected}
-                                                onClick={() => handleVoiceLanguageChange(lang)}
+                                                onClick={() => handleSessionListStatusModeChange(opt.value)}
                                                 className={`flex items-center justify-between w-full px-3 py-2 text-base text-left transition-colors ${
                                                     isSelected
                                                         ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]'
                                                         : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
                                                 }`}
                                             >
-                                                <span>{displayName}</span>
+                                                <span>{t(opt.labelKey)}</span>
                                                 {isSelected && (
                                                     <span className="ml-2 text-[var(--app-link)]">
                                                         <CheckIcon />
@@ -567,100 +884,296 @@ export default function SettingsPage() {
                                 </div>
                             )}
                         </div>
+                        {sessionListStatusMode === 'detailed' ? (
+                            <div className="px-3 pb-3 text-xs text-[var(--app-hint)]">
+                                {t('settings.display.sessionListStatus.detailedDescription')}
+                            </div>
+                        ) : null}
                     </div>
 
-                    {/* Machines section */}
+                    {/* Chat section */}
                     <div className="border-b border-[var(--app-divider)]">
                         <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
-                            {t('settings.machines.title')}
+                            {t('settings.chat.title')}
                         </div>
-                        {machines.length === 0 ? (
-                            <div className="px-3 py-3 text-sm text-[var(--app-hint)]">
-                                {t('settings.machines.noOnline')}
-                            </div>
-                        ) : machines.map((machine) => (
-                            <div key={machine.id} className="px-3 py-3">
-                                <div className="mb-1.5 min-w-0">
-                                    <div className="truncate text-sm font-medium text-[var(--app-fg)]">
-                                        {machine.metadata?.host ?? machine.id.slice(0, 8)}
-                                    </div>
-                                    <div className="truncate text-xs text-[var(--app-hint)]">
-                                        {machine.metadata?.platform ?? t('machine.unknown')}
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <input
-                                        value={machineNameDrafts[machine.id] ?? ''}
-                                        onChange={(event) => setMachineNameDrafts(prev => ({
-                                            ...prev,
-                                            [machine.id]: event.target.value
-                                        }))}
-                                        placeholder={t('settings.machines.hostnamePlaceholder')}
-                                        className="min-w-0 flex-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--app-link)]"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => saveMachineDisplayName(machine.id)}
-                                        disabled={machineNameMutation.isPending}
-                                        className="rounded-md bg-[var(--app-button)] px-3 py-2 text-sm text-[var(--app-button-text)] disabled:opacity-50"
-                                    >
-                                        {t('button.save')}
-                                    </button>
-                                </div>
-                                <div className="mt-1.5 text-xs text-[var(--app-hint)]">
-                                    {t('settings.machines.hostnameHint')}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+                        <div ref={chatContainerRef} className="relative">
+                            <button
+                                type="button"
+                                onClick={() => setIsChatOpen(!isChatOpen)}
+                                className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                aria-expanded={isChatOpen}
+                                aria-haspopup="listbox"
+                            >
+                                <span className="text-[var(--app-fg)]">{t('settings.chat.enterBehavior')}</span>
+                                <span className="flex items-center gap-1 text-[var(--app-hint)]">
+                                    <span>{t(currentComposerEnterBehaviorLabel)}</span>
+                                    <ChevronDownIcon className={`transition-transform ${isChatOpen ? 'rotate-180' : ''}`} />
+                                </span>
+                            </button>
 
-                    {/* Cleanup section */}
-                    <div className="border-b border-[var(--app-divider)]">
-                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
-                            {t('settings.cleanup.title')}
-                        </div>
-                        <label className="flex w-full items-center justify-between gap-3 px-3 py-3">
-                            <span className="text-[var(--app-fg)]">{t('settings.cleanup.enabled')}</span>
-                            <input
-                                type="checkbox"
-                                checked={cleanupQuery.data?.autoCleanupEnabled ?? true}
-                                onChange={(event) => saveCleanupPreferences({ autoCleanupEnabled: event.target.checked })}
-                                disabled={cleanupMutation.isPending || cleanupQuery.isLoading}
-                                className="h-5 w-5"
-                            />
-                        </label>
-                        <div className="px-3 pb-3">
-                            <label className="mb-1 block text-sm text-[var(--app-fg)]">
-                                {t('settings.cleanup.retention')}
-                            </label>
-                            <div className="flex items-center gap-2">
-                                <input
-                                    type="number"
-                                    min={1}
-                                    max={365}
-                                    value={cleanupDaysInput}
-                                    onChange={(event) => setCleanupDaysInput(event.target.value)}
-                                    onBlur={() => saveCleanupPreferences()}
-                                    disabled={cleanupMutation.isPending || cleanupQuery.isLoading}
-                                    className="min-w-0 flex-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--app-link)]"
-                                />
-                                <button
-                                    type="button"
-                                    onClick={() => saveCleanupPreferences()}
-                                    disabled={cleanupMutation.isPending || cleanupQuery.isLoading}
-                                    className="rounded-md bg-[var(--app-button)] px-3 py-2 text-sm text-[var(--app-button-text)] disabled:opacity-50"
+                            {isChatOpen && (
+                                <div
+                                    className="absolute right-3 top-full mt-1 min-w-[170px] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg overflow-hidden z-50"
+                                    role="listbox"
+                                    aria-label={t('settings.chat.enterBehavior')}
                                 >
-                                    {cleanupMutation.isPending ? t('settings.cleanup.saving') : t('button.save')}
-                                </button>
-                            </div>
-                            <div className="mt-1.5 text-xs text-[var(--app-hint)]">
-                                {t('settings.cleanup.defaultHint', { n: cleanupQuery.data?.defaultSessionRetentionDays ?? 30 })}
-                            </div>
-                            {cleanupMutation.error ? (
-                                <div className="mt-1.5 text-xs text-red-500">
-                                    {t('settings.cleanup.error')}
+                                    {composerEnterBehaviorOptions.map((opt) => {
+                                        const isSelected = composerEnterBehavior === opt.value
+                                        return (
+                                            <button
+                                                key={opt.value}
+                                                type="button"
+                                                role="option"
+                                                aria-selected={isSelected}
+                                                onClick={() => handleComposerEnterBehaviorChange(opt.value)}
+                                                className={`flex items-center justify-between w-full px-3 py-2 text-base text-left transition-colors ${
+                                                    isSelected
+                                                        ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]'
+                                                        : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
+                                                }`}
+                                            >
+                                                <span>{t(opt.labelKey)}</span>
+                                                {isSelected && (
+                                                    <span className="ml-2 text-[var(--app-link)]">
+                                                        <CheckIcon />
+                                                    </span>
+                                                )}
+                                            </button>
+                                        )
+                                    })}
                                 </div>
-                            ) : null}
+                            )}
+                        </div>
+                        <div ref={terminalToolDisplayContainerRef} className="relative">
+                            <button
+                                type="button"
+                                onClick={() => setIsTerminalToolDisplayOpen(!isTerminalToolDisplayOpen)}
+                                className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                aria-expanded={isTerminalToolDisplayOpen}
+                                aria-haspopup="listbox"
+                            >
+                                <span className="text-[var(--app-fg)]">{t('settings.chat.terminalToolDisplay')}</span>
+                                <span className="flex items-center gap-1 text-[var(--app-hint)]">
+                                    <span>{t(currentTerminalToolDisplayModeLabel)}</span>
+                                    <ChevronDownIcon className={`transition-transform ${isTerminalToolDisplayOpen ? 'rotate-180' : ''}`} />
+                                </span>
+                            </button>
+
+                            {isTerminalToolDisplayOpen && (
+                                <div
+                                    className="absolute right-3 top-full mt-1 min-w-[230px] rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg overflow-hidden z-50"
+                                    role="listbox"
+                                    aria-label={t('settings.chat.terminalToolDisplay')}
+                                >
+                                    {terminalToolDisplayModeOptions.map((opt) => {
+                                        const isSelected = terminalToolDisplayMode === opt.value
+                                        return (
+                                            <button
+                                                key={opt.value}
+                                                type="button"
+                                                role="option"
+                                                aria-selected={isSelected}
+                                                onClick={() => handleTerminalToolDisplayModeChange(opt.value)}
+                                                className={`flex items-center justify-between w-full px-3 py-2 text-base text-left transition-colors ${
+                                                    isSelected
+                                                        ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]'
+                                                        : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'
+                                                }`}
+                                            >
+                                                <span>{t(opt.labelKey)}</span>
+                                                {isSelected && (
+                                                    <span className="ml-2 text-[var(--app-link)]">
+                                                        <CheckIcon />
+                                                    </span>
+                                                )}
+                                            </button>
+                                        )
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                        <ChatSurfaceColorControl
+                            label={t('settings.chat.groupedToolBackground')}
+                            preference={toolGroupBackground}
+                            onPresetChange={(preset) => setToolGroupBackground(toPresetChatSurfaceColorPreference(preset))}
+                            onCustomChange={(value) => setToolGroupBackground(toCustomChatSurfaceColorPreference(value))}
+                            t={t}
+                        />
+                        <ChatSurfaceColorControl
+                            label={t('settings.chat.userMessageBackground')}
+                            preference={userMessageBackground}
+                            onPresetChange={(preset) => setUserMessageBackground(toPresetChatSurfaceColorPreference(preset))}
+                            onCustomChange={(value) => setUserMessageBackground(toCustomChatSurfaceColorPreference(value))}
+                            t={t}
+                        />
+                    </div>
+
+                    {/* Voice Assistant section */}
+                    <div className="border-b border-[var(--app-divider)]">
+                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
+                            {t('settings.voice.title')}
+                        </div>
+
+                        {/* ── Connection & provider ── */}
+                        <div>
+                            <div className="px-3 pb-1 pt-2 text-xs font-medium text-[var(--app-fg)]">
+                                {t('settings.voice.connection.title')}
+                            </div>
+                            {showVoiceBackendChooser && (
+                                <div ref={voiceBackendPickerRef} className="relative">
+                                    <button type="button" onClick={() => setIsVoiceBackendOpen(!isVoiceBackendOpen)}
+                                        className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                        aria-expanded={isVoiceBackendOpen} aria-haspopup="listbox">
+                                        <span className="text-[var(--app-fg)]">{t('settings.voice.backend')}</span>
+                                        <span className="flex items-center gap-1 text-[var(--app-hint)]">
+                                            <span>{currentVoiceBackendLabel ?? t('settings.voice.voiceDefault')}</span>
+                                            <ChevronDownIcon className={`transition-transform ${isVoiceBackendOpen ? 'rotate-180' : ''}`} />
+                                        </span>
+                                    </button>
+                                    {isVoiceBackendOpen && (
+                                        <div className="absolute right-3 top-full mt-1 min-w-[220px] max-h-[300px] overflow-y-auto rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg z-50"
+                                            role="listbox" aria-label={t('settings.voice.backend')}>
+                                            {configuredVoiceBackends.map((backend) => {
+                                                const isSelected = voiceBackend === backend
+                                                return (
+                                                    <button key={backend} type="button" role="option" aria-selected={isSelected}
+                                                        onClick={() => handleVoiceBackendChange(backend)}
+                                                        className={`flex items-center justify-between w-full px-3 py-2 text-base text-left transition-colors ${isSelected ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]' : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}>
+                                                        <span>{VOICE_BACKEND_LABELS[backend]}</span>
+                                                        {isSelected && <span className="ml-2 text-[var(--app-link)]"><CheckIcon /></span>}
+                                                    </button>
+                                                )
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                            <div ref={voiceContainerRef} className="relative">
+                                <button type="button" onClick={() => setIsVoiceOpen(!isVoiceOpen)}
+                                    className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                    aria-expanded={isVoiceOpen} aria-haspopup="listbox">
+                                    <span className="text-[var(--app-fg)]">{t('settings.voice.language')}</span>
+                                    <span className="flex items-center gap-1 text-[var(--app-hint)]">
+                                        <span>{currentVoiceLanguage ? currentVoiceLanguage.code === null ? t('settings.voice.autoDetect') : getLanguageDisplayName(currentVoiceLanguage) : t('settings.voice.autoDetect')}</span>
+                                        <ChevronDownIcon className={`transition-transform ${isVoiceOpen ? 'rotate-180' : ''}`} />
+                                    </span>
+                                </button>
+                                {isVoiceOpen && (
+                                    <div className="absolute right-3 top-full mt-1 min-w-[200px] max-h-[300px] overflow-y-auto rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg z-50"
+                                        role="listbox" aria-label={t('settings.voice.title')}>
+                                        {voiceLanguages.map((lang) => {
+                                            const isSelected = voiceLanguage === lang.code
+                                            const displayName = lang.code === null ? t('settings.voice.autoDetect') : getLanguageDisplayName(lang)
+                                            return (
+                                                <button key={lang.code ?? 'auto'} type="button" role="option" aria-selected={isSelected}
+                                                    onClick={() => handleVoiceLanguageChange(lang)}
+                                                    className={`flex items-center justify-between w-full px-3 py-2 text-base text-left transition-colors ${isSelected ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]' : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}>
+                                                    <span>{displayName}</span>
+                                                    {isSelected && <span className="ml-2 text-[var(--app-link)]"><CheckIcon /></span>}
+                                                </button>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                            <div ref={voicePickerContainerRef} className="relative">
+                                <button type="button" onClick={() => setIsVoicePickerOpen(!isVoicePickerOpen)}
+                                    className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                    aria-expanded={isVoicePickerOpen} aria-haspopup="listbox">
+                                    <span className="text-[var(--app-fg)]">{t('settings.voice.voice')}</span>
+                                    <span className="flex min-w-0 items-center gap-1 text-[var(--app-hint)]">
+                                        <span className="min-w-0 text-right">
+                                            <span className="block truncate">{currentVoiceName ?? t('settings.voice.voiceDefault')}</span>
+                                            {currentVoiceDescription && <span className="block text-xs leading-snug text-[var(--app-hint)]">{currentVoiceDescription}</span>}
+                                        </span>
+                                        <ChevronDownIcon className={`shrink-0 transition-transform ${isVoicePickerOpen ? 'rotate-180' : ''}`} />
+                                    </span>
+                                </button>
+                                {staticVoiceCatalog && <p className="px-3 pb-2 text-xs text-[var(--app-hint)]">{t('settings.voice.staticCatalogHint')}</p>}
+                                {isVoicePickerOpen && (
+                                    <div className="absolute right-3 top-full z-50 mt-1 max-h-[300px] min-w-[260px] overflow-y-auto rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] shadow-lg"
+                                        role="listbox" aria-label={t('settings.voice.voice')}>
+                                        <div role="option" aria-selected={voiceId === null}
+                                            className={`flex items-center w-full text-base transition-colors ${voiceId === null ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]' : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}>
+                                            <button type="button" onClick={() => handleVoiceChange(null)} className="flex flex-1 items-center justify-between px-3 py-2 text-left">
+                                                <span>{t('settings.voice.voiceDefault')}</span>
+                                                {voiceId === null && <span className="ml-2"><CheckIcon /></span>}
+                                            </button>
+                                        </div>
+                                        {voiceOptions.map((voice) => {
+                                            const isSelected = voiceId === voice.id
+                                            const isPlaying = playingVoiceId === voice.id
+                                            return (
+                                                <div key={voice.id} role="option" aria-selected={isSelected}
+                                                    className={`flex w-full items-start text-base transition-colors ${isSelected ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]' : 'text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}>
+                                                    <button type="button" onClick={() => handleVoiceChange(voice.id)} className="flex min-w-0 flex-1 items-start justify-between px-3 py-2.5 text-left">
+                                                        <span className="min-w-0 pr-2">
+                                                            <span className="block font-medium leading-snug">
+                                                                {voice.name}
+                                                                {voice.category === 'cloned' && <span className="ml-2 text-xs font-normal text-[var(--app-hint)]">clone</span>}
+                                                            </span>
+                                                            {voice.description && <span className="mt-0.5 block text-xs leading-snug text-[var(--app-hint)]">{voice.description}</span>}
+                                                        </span>
+                                                        {isSelected && <span className="ml-2 shrink-0"><CheckIcon /></span>}
+                                                    </button>
+                                                    <button type="button" onClick={(e) => handleVoicePreview(voice.previewUrl, voice.id, e)}
+                                                        aria-label={isPlaying ? 'Stop preview' : 'Preview voice'}
+                                                        title={voicePreviewEnabled && voice.previewUrl ? (isPlaying ? 'Stop preview' : 'Preview voice') : voicePreviewEnabled ? t('settings.voice.preview.unavailable') : t('settings.voice.preview.elevenlabsOnly')}
+                                                        disabled={!voicePreviewEnabled || !voice.previewUrl}
+                                                        className={`flex shrink-0 items-center self-center px-3 py-2 ${voicePreviewEnabled && voice.previewUrl ? 'text-[var(--app-hint)] hover:text-[var(--app-fg)]' : 'text-[var(--app-divider)] cursor-not-allowed'}`}>
+                                                        {isPlaying ? <StopIcon /> : <PlayIcon />}
+                                                    </button>
+                                                </div>
+                                            )
+                                        })}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* ── How It Sounds ── */}
+                        <div className="border-t border-[var(--app-divider)]">
+                            <div className="px-3 pb-1 pt-2 text-xs font-medium text-[var(--app-fg)]">
+                                {t('settings.voice.sounds.title')}
+                            </div>
+                            <VoiceSoundsControls t={t} voiceBackend={voiceBackend} />
+                        </div>
+
+                        {/* ── How it behaves ── */}
+                        <div className="border-t border-[var(--app-divider)]">
+                            <div className="px-3 pb-1 pt-2 text-xs font-medium text-[var(--app-fg)]">
+                                {t('settings.voice.behaves.title')}
+                            </div>
+                            {/* Opening */}
+                            <div className="px-3 py-3">
+                                <p className="mb-2 text-[var(--app-fg)]">{t('settings.voice.opening.label')}</p>
+                                <div className="flex gap-2">
+                                    {(['greet', 'brief'] as const).map((opt) => (
+                                        <button key={opt} type="button" onClick={() => handleVoiceOpeningChange(opt)}
+                                            className={`flex-1 rounded-md border px-3 py-2 text-sm text-left transition-colors ${voiceOpening === opt ? 'border-[var(--app-link)] bg-[var(--app-link)]/10 text-[var(--app-link)]' : 'border-[var(--app-border)] text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)]'}`}>
+                                            <span className="block font-medium">{t(`settings.voice.opening.${opt}`)}</span>
+                                            <span className="block text-xs text-[var(--app-hint)] mt-0.5">{t(`settings.voice.opening.${opt}.hint`)}</span>
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+                            <VoiceRespondsControls t={t} voiceBackend={voiceBackend} />
+                        </div>
+
+                        {/* ── Persona & instructions ── */}
+                        <div className="border-t border-[var(--app-divider)]">
+                            <div className="px-3 pb-1 pt-2 text-xs font-medium text-[var(--app-fg)]">
+                                {t('settings.voice.persona.title')}
+                            </div>
+                            <VoicePersonaControls t={t} voiceBackend={voiceBackend} />
+                        </div>
+
+                        {/* ── Advanced ── */}
+                        <div className="border-t border-[var(--app-divider)]">
+                            <div className="px-3 pb-1 pt-2 text-xs font-medium text-[var(--app-fg)]">
+                                {t('settings.voice.advanced.section.title')}
+                            </div>
+                            <VoiceDiagnosticsControls t={t} voiceBackend={voiceBackend} />
                         </div>
                     </div>
 

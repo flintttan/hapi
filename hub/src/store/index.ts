@@ -61,7 +61,8 @@ function validateUserId(userId: string): void {
 
 export class Store {
     private db: Database
-    private readonly dbPath: string
+    private readonly _dbPath: string
+    private closed: boolean = false
 
     readonly sessions: SessionStore
     readonly machines: MachineStore
@@ -70,8 +71,17 @@ export class Store {
     readonly push: PushStore
     readonly userPreferences: UserPreferenceStore
 
+    /**
+     * Filesystem path of the underlying SQLite database, or ':memory:' for
+     * in-memory stores. Used by the legacy → ACP migrator (#824) to take a
+     * backup before a bulk run; treat as read-only.
+     */
+    get dbPath(): string {
+        return this._dbPath
+    }
+
     constructor(dbPath: string) {
-        this.dbPath = dbPath
+        this._dbPath = dbPath
         if (dbPath !== ':memory:' && !dbPath.startsWith('file::memory:')) {
             const dir = dirname(dbPath)
             mkdirSync(dir, { recursive: true, mode: 0o700 })
@@ -784,9 +794,9 @@ export class Store {
     }
 
     private buildSchemaMismatchError(currentVersion: number): Error {
-        const location = (this.dbPath === ':memory:' || this.dbPath.startsWith('file::memory:'))
+        const location = (this._dbPath === ':memory:' || this._dbPath.startsWith('file::memory:'))
             ? 'in-memory database'
-            : this.dbPath
+            : this._dbPath
         return new Error(
             `SQLite schema version mismatch for ${location}. ` +
             `Expected ${SCHEMA_VERSION}, found ${currentVersion}. ` +
@@ -953,5 +963,11 @@ export class Store {
             'SELECT id, name, created_at, last_used_at FROM cli_tokens WHERE user_id = ? ORDER BY created_at DESC'
         ).all(userId) as Array<{ id: string; name: string | null; created_at: number; last_used_at: number | null }>
         return rows
+    }
+
+    close(): void {
+        if (this.closed) return
+        this.db.close()
+        this.closed = true
     }
 }

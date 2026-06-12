@@ -1,321 +1,229 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { HappyThread } from '@/components/AssistantChat/HappyThread'
+import { describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen } from '@testing-library/react'
+import type { ComponentProps } from 'react'
+import { I18nProvider } from '@/lib/i18n-context'
+import {
+    ConversationOutlinePanel,
+    captureScrollAnchor,
+    getScrollIntent,
+    locateOutlineTargetMessage,
+    restoreScrollAnchor,
+    shouldCancelInitialScrollSettling,
+} from '@/components/AssistantChat/HappyThread'
+import type { ConversationOutlineItem } from '@/chat/outline'
 
-const mocks = vi.hoisted(() => ({
-  addToast: vi.fn(),
-  resizeObservers: [] as Array<{ callback: ResizeObserverCallback }>,
-  intersectionObservers: [] as Array<{ callback: IntersectionObserverCallback }>,
-}))
-
-class MockResizeObserver {
-  callback: ResizeObserverCallback
-
-  constructor(callback: ResizeObserverCallback) {
-    this.callback = callback
-    mocks.resizeObservers.push({ callback })
-  }
-
-  observe() {}
-  disconnect() {}
-  unobserve() {}
-}
-
-vi.stubGlobal('ResizeObserver', MockResizeObserver as unknown as typeof ResizeObserver)
-
-class MockIntersectionObserver {
-  callback: IntersectionObserverCallback
-
-  constructor(callback: IntersectionObserverCallback) {
-    this.callback = callback
-    mocks.intersectionObservers.push({ callback })
-  }
-
-  observe() {}
-  disconnect() {}
-  unobserve() {}
-  takeRecords() { return [] }
-  root = null
-  rootMargin = ''
-  thresholds = []
-}
-
-vi.stubGlobal('IntersectionObserver', MockIntersectionObserver as unknown as typeof IntersectionObserver)
-
-vi.mock('@assistant-ui/react', () => ({
-  ThreadPrimitive: {
-    Root: ({ children, className }: { children: React.ReactNode; className?: string }) => <div className={className}>{children}</div>,
-    Messages: () => <div data-testid="thread-messages" />,
-  },
-}))
-
-vi.mock('@/components/AssistantChat/context', () => ({
-  HappyChatProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-}))
-
-vi.mock('@/components/AssistantChat/messages/AssistantMessage', () => ({ HappyAssistantMessage: () => null }))
-vi.mock('@/components/AssistantChat/messages/UserMessage', () => ({ HappyUserMessage: () => null }))
-vi.mock('@/components/AssistantChat/messages/SystemMessage', () => ({ HappySystemMessage: () => null }))
-vi.mock('@/components/ui/button', () => ({
-  Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => <button {...props}>{children}</button>,
-}))
-vi.mock('@/components/Spinner', () => ({ Spinner: () => <div data-testid="spinner" /> }))
-vi.mock('@/components/AssistantChat/messageSearchContext', () => ({
-  MessageSearchContext: { Provider: ({ children }: { children: React.ReactNode }) => <>{children}</> },
-}))
-vi.mock('@/lib/toast-context', () => ({
-  useToast: () => ({
-    addToast: mocks.addToast,
-  }),
-}))
-vi.mock('@/lib/use-translation', () => ({
-  useTranslation: () => ({
-    t: (key: string) => {
-      if (key === 'session.outline.title') return '会话目录'
-      if (key === 'session.outline.kind.user') return '用户'
-      if (key === 'session.outline.empty') return '暂无可定位的用户消息'
-      if (key === 'button.close') return '关闭'
-      if (key === 'misc.loadOlderMessages') return '加载更早消息'
-      if (key === 'misc.loading') return '加载中'
-      return key
-    },
-  }),
-}))
-
-function makeProps(overrides: Partial<React.ComponentProps<typeof HappyThread>> = {}): React.ComponentProps<typeof HappyThread> {
-  return {
-    api: {} as never,
-    sessionId: 'session-1',
-    metadata: null,
-    disabled: false,
-    onRefresh: vi.fn(),
-    onRetryMessage: vi.fn(),
-    onFlushPending: vi.fn(),
-    onAtBottomChange: vi.fn(),
-    isLoadingMessages: false,
-    messagesWarning: null,
-    hasMoreMessages: false,
-    isLoadingMoreMessages: false,
-    onLoadMore: vi.fn(async () => {}),
-    pendingCount: 0,
-    rawMessagesCount: 1,
-    normalizedMessagesCount: 1,
-    messagesVersion: 1,
-    forceScrollToken: 0,
-    outlineOpen: true,
-    outlineTitle: 'Test Session',
-    outlineItems: [
-      {
-        id: 'outline:user-text:msg-1',
-        targetMessageId: 'user-text:msg-1',
+const outlineItems: ConversationOutlineItem[] = [
+    {
+        id: 'outline:user-text:m1',
+        targetMessageId: 'user-text:m1',
         kind: 'user',
-        label: 'first message',
-        createdAt: 1,
-      },
-    ],
-    onOutlineOpenChange: vi.fn(),
-    onOutlineItemClick: vi.fn(),
-    onLocateMessage: vi.fn(async () => false),
-    ...overrides,
-  }
+        label: 'Implement the panel',
+        createdAt: 1000
+    },
+    {
+        id: 'outline:user-text:m2',
+        targetMessageId: 'user-text:m2',
+        kind: 'user',
+        label: 'Second user prompt',
+        createdAt: 2000
+    }
+]
+
+function rect(values: Pick<DOMRect, 'top' | 'bottom'> & Partial<DOMRect>): DOMRect {
+    return {
+        left: 0,
+        right: 300,
+        width: 300,
+        height: values.bottom - values.top,
+        x: 0,
+        y: values.top,
+        toJSON: () => ({}),
+        ...values
+    } as DOMRect
 }
 
-describe('HappyThread outline navigation', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.resizeObservers.length = 0
-    mocks.intersectionObservers.length = 0
-  })
-
-  it('scrolls to bottom when session id changes', async () => {
-    const { rerender, container } = render(
-      <HappyThread {...makeProps({ sessionId: 'session-1', outlineOpen: false })} />,
+function renderPanel(props: Partial<ComponentProps<typeof ConversationOutlinePanel>> = {}) {
+    return render(
+        <I18nProvider>
+            <ConversationOutlinePanel
+                title="project"
+                items={outlineItems}
+                hasMoreMessages={false}
+                isLoadingMoreMessages={false}
+                onLoadMore={vi.fn()}
+                onSelect={vi.fn()}
+                onClose={vi.fn()}
+                {...props}
+            />
+        </I18nProvider>
     )
+}
 
-    const viewport = container.querySelector('.app-scroll-y') as HTMLDivElement | null
-    expect(viewport).toBeTruthy()
-    if (!viewport) return
+describe('ConversationOutlinePanel', () => {
+    it('renders outline items and selects an item', () => {
+        const onSelect = vi.fn()
+        renderPanel({ onSelect })
 
-    Object.defineProperty(viewport, 'scrollHeight', {
-      configurable: true,
-      get: () => 999,
-    })
-    viewport.scrollTop = 0
+        fireEvent.click(screen.getByText('Implement the panel'))
 
-    rerender(
-      <HappyThread {...makeProps({ sessionId: 'session-2', outlineOpen: false })} />,
-    )
-
-    await waitFor(() => {
-      expect(viewport.scrollTop).toBe(999)
-    })
-  })
-
-  it('keeps session entry pinned to bottom until initial messages finish rendering', async () => {
-    const { rerender, container } = render(
-      <HappyThread {...makeProps({ sessionId: 'session-1', outlineOpen: false, isLoadingMessages: true, rawMessagesCount: 0, normalizedMessagesCount: 0, messagesVersion: 1 })} />,
-    )
-
-    const viewport = container.querySelector('.app-scroll-y') as HTMLDivElement | null
-    expect(viewport).toBeTruthy()
-    if (!viewport) return
-
-    let scrollHeight = 120
-    Object.defineProperty(viewport, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeight,
-    })
-    viewport.scrollTop = 0
-
-    rerender(
-      <HappyThread {...makeProps({ sessionId: 'session-2', outlineOpen: false, isLoadingMessages: true, rawMessagesCount: 0, normalizedMessagesCount: 0, messagesVersion: 2 })} />,
-    )
-
-    await waitFor(() => {
-      expect(viewport.scrollTop).toBe(120)
+        expect(onSelect).toHaveBeenCalledWith(outlineItems[0])
     })
 
-    scrollHeight = 640
-    rerender(
-      <HappyThread {...makeProps({ sessionId: 'session-2', outlineOpen: false, isLoadingMessages: false, rawMessagesCount: 6, normalizedMessagesCount: 6, messagesVersion: 3 })} />,
-    )
+    it('shows load earlier when older messages exist', () => {
+        const onLoadMore = vi.fn()
+        renderPanel({ hasMoreMessages: true, onLoadMore })
 
-    await waitFor(() => {
-      expect(viewport.scrollTop).toBe(640)
-    })
-  })
+        fireEvent.click(screen.getByRole('button', { name: /Load earlier/ }))
 
-  it('keeps bottom alignment when layout chrome changes while already at bottom', async () => {
-    const { rerender, container } = render(
-      <HappyThread {...makeProps({ sessionId: 'session-1', outlineOpen: false, viewportLayoutKey: 'search:0|outline:0|team:0|inactive:0' })} />,
-    )
-
-    const viewport = container.querySelector('.app-scroll-y') as HTMLDivElement | null
-    expect(viewport).toBeTruthy()
-    if (!viewport) return
-
-    let scrollHeight = 320
-    Object.defineProperty(viewport, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeight,
+        expect(onLoadMore).toHaveBeenCalledTimes(1)
     })
 
-    viewport.scrollTop = 320
+    it('renders an empty state', () => {
+        renderPanel({ items: [] })
 
-    scrollHeight = 540
-    rerender(
-      <HappyThread {...makeProps({ sessionId: 'session-1', outlineOpen: false, viewportLayoutKey: 'search:1|outline:0|team:0|inactive:0' })} />,
-    )
-
-    await waitFor(() => {
-      expect(viewport.scrollTop).toBe(540)
+        expect(screen.getByText('No outline items in loaded messages')).toBeInTheDocument()
     })
-  })
+})
 
-  it('keeps initial entry pinned when content height grows after render without prop changes', async () => {
-    const { container } = render(
-      <HappyThread {...makeProps({ sessionId: 'session-1', outlineOpen: false, isLoadingMessages: false, rawMessagesCount: 3, normalizedMessagesCount: 3, messagesVersion: 1 })} />,
-    )
+describe('scroll anchor helpers', () => {
+    it('captures the first visible message relative to the viewport', () => {
+        const viewport = document.createElement('div')
+        const first = document.createElement('div')
+        const second = document.createElement('div')
+        first.id = 'first-message'
+        second.id = 'second-message'
+        viewport.className = 'viewport'
+        const messages = document.createElement('div')
+        messages.className = 'happy-thread-messages'
+        messages.append(first, second)
+        viewport.append(messages)
+        document.body.append(viewport)
 
-    const viewport = container.querySelector('.app-scroll-y') as HTMLDivElement | null
-    expect(viewport).toBeTruthy()
-    if (!viewport) return
+        vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(rect({ top: 100, bottom: 500 }))
+        vi.spyOn(first, 'getBoundingClientRect').mockReturnValue(rect({ top: 60, bottom: 90 }))
+        vi.spyOn(second, 'getBoundingClientRect').mockReturnValue(rect({ top: 120, bottom: 180 }))
 
-    let scrollHeight = 180
-    Object.defineProperty(viewport, 'scrollHeight', {
-      configurable: true,
-      get: () => scrollHeight,
+        expect(captureScrollAnchor(viewport)).toEqual({
+            id: 'second-message',
+            topOffset: 20
+        })
+
+        viewport.remove()
     })
 
-    viewport.scrollTop = 180
-    scrollHeight = 620
-
-    for (const observer of mocks.resizeObservers) {
-      observer.callback([], {} as ResizeObserver)
-    }
-
-    await waitFor(() => {
-      expect(viewport.scrollTop).toBe(620)
+    it('treats upward motion near the bottom as manual scroll intent', () => {
+        expect(getScrollIntent({
+            scrollTop: 690,
+            previousScrollTop: 702,
+            scrollHeight: 1232,
+            clientHeight: 530
+        })).toMatchObject({
+            distanceFromBottom: 12,
+            isNearBottom: true,
+            isScrollingUp: true
+        })
     })
-  })
 
-  it('does not auto-load older messages during initial entry settle window', async () => {
-    vi.useFakeTimers()
-    const onLoadMore = vi.fn(async () => {})
-
-    render(
-      <HappyThread
-        {...makeProps({
-          sessionId: 'session-1',
-          outlineOpen: false,
-          hasMoreMessages: true,
-          isLoadingMessages: false,
-          onLoadMore,
-        })}
-      />,
-    )
-
-    expect(mocks.intersectionObservers.length).toBeGreaterThan(0)
-    for (const observer of mocks.intersectionObservers) {
-      observer.callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
-    }
-
-    expect(onLoadMore).not.toHaveBeenCalled()
-
-    await vi.advanceTimersByTimeAsync(300)
-
-    for (const observer of mocks.intersectionObservers) {
-      observer.callback([{ isIntersecting: true } as IntersectionObserverEntry], {} as IntersectionObserver)
-    }
-
-    expect(onLoadMore).toHaveBeenCalledTimes(1)
-    vi.useRealTimers()
-  })
-
-  it('closes outline after successful locate', async () => {
-    const onOutlineOpenChange = vi.fn()
-    const onLocateMessage = vi.fn(async () => true)
-
-    const { container } = render(
-      <HappyThread
-        {...makeProps({
-          onOutlineOpenChange,
-          onLocateMessage,
-        })}
-      />,
-    )
-
-    const target = document.createElement('div')
-    target.id = 'hapi-message-user-text:msg-1'
-    target.scrollIntoView = vi.fn()
-    container.querySelector('.happy-thread-messages')?.appendChild(target)
-
-    fireEvent.click(screen.getByRole('button', { name: /first message/i }))
-
-    await waitFor(() => {
-      expect(onOutlineOpenChange).toHaveBeenCalledWith(false)
+    it('does not classify downward movement as upward manual scroll intent', () => {
+        expect(getScrollIntent({
+            scrollTop: 702,
+            previousScrollTop: 690,
+            scrollHeight: 1232,
+            clientHeight: 530
+        })).toMatchObject({
+            distanceFromBottom: 0,
+            isNearBottom: true,
+            isScrollingUp: false
+        })
     })
-    expect(mocks.addToast).not.toHaveBeenCalled()
-  })
 
-  it('does not close outline and shows toast when locate fails', async () => {
-    const onOutlineOpenChange = vi.fn()
-    const onLocateMessage = vi.fn(async () => false)
+    it('cancels initial scroll settling when the user scrolls up away from the bottom', () => {
+        const intent = getScrollIntent({
+            scrollTop: 520,
+            previousScrollTop: 700,
+            scrollHeight: 1232,
+            clientHeight: 530
+        })
 
-    render(
-      <HappyThread
-        {...makeProps({
-          onOutlineOpenChange,
-          onLocateMessage,
-        })}
-      />,
-    )
-
-    fireEvent.click(screen.getByRole('button', { name: /first message/i }))
-
-    await waitFor(() => {
-      expect(mocks.addToast).toHaveBeenCalled()
+        expect(intent).toMatchObject({
+            distanceFromBottom: 182,
+            isScrollingUp: true
+        })
+        expect(shouldCancelInitialScrollSettling(intent)).toBe(true)
     })
-    expect(onOutlineOpenChange).not.toHaveBeenCalledWith(false)
-  })
+
+    it('keeps initial scroll settling for negligible movement at the bottom', () => {
+        const intent = getScrollIntent({
+            scrollTop: 702,
+            previousScrollTop: 702,
+            scrollHeight: 1232,
+            clientHeight: 530
+        })
+
+        expect(intent).toMatchObject({
+            distanceFromBottom: 0,
+            isScrollingUp: false
+        })
+        expect(shouldCancelInitialScrollSettling(intent)).toBe(false)
+    })
+
+    it('restores the captured message to the same viewport offset', () => {
+        const viewport = document.createElement('div')
+        const message = document.createElement('div')
+        message.id = 'anchored-message'
+        viewport.append(message)
+        document.body.append(viewport)
+        viewport.scrollTop = 200
+
+        vi.spyOn(viewport, 'getBoundingClientRect').mockReturnValue(rect({ top: 100, bottom: 500 }))
+        vi.spyOn(message, 'getBoundingClientRect').mockReturnValue(rect({ top: 180, bottom: 260 }))
+
+        expect(restoreScrollAnchor(viewport, { id: 'anchored-message', topOffset: 30 })).toBe(true)
+        expect(viewport.scrollTop).toBe(250)
+
+        viewport.remove()
+    })
+})
+
+describe('outline target loading', () => {
+    it('loads older messages through the scroll-preserving wrapper until the target appears', async () => {
+        const loadOlderPreservingScroll = vi.fn<() => Promise<boolean>>()
+        let loadCount = 0
+        loadOlderPreservingScroll.mockImplementation(async () => {
+            loadCount += 1
+            return true
+        })
+
+        const findTarget = vi.fn((anchorId: string) => {
+            if (anchorId !== 'hapi-message-user-text:target') {
+                return null
+            }
+            return loadCount >= 2 ? document.createElement('div') : null
+        })
+
+        const target = await locateOutlineTargetMessage({
+            targetMessageId: 'user-text:target',
+            findTarget,
+            hasMoreMessages: () => loadCount < 2,
+            loadOlderPreservingScroll
+        })
+
+        expect(target).toBeInstanceOf(HTMLElement)
+        expect(loadOlderPreservingScroll).toHaveBeenCalledTimes(2)
+        expect(findTarget).toHaveBeenCalledWith('hapi-message-user-text:target')
+    })
+
+    it('stops when history is exhausted before the target is loaded', async () => {
+        const loadOlderPreservingScroll = vi.fn(async () => false)
+
+        const target = await locateOutlineTargetMessage({
+            targetMessageId: 'user-text:missing',
+            findTarget: () => null,
+            hasMoreMessages: () => true,
+            loadOlderPreservingScroll
+        })
+
+        expect(target).toBeNull()
+        expect(loadOlderPreservingScroll).toHaveBeenCalledTimes(1)
+    })
 })

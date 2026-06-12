@@ -3,15 +3,14 @@ import type {
     AuthResponse,
     CliTokenCreateResponse,
     CliTokensResponse,
-    CancelMessageResponse,
+    CodexLocalSessionsResponse,
+    CodexDuplicateSessionsResponse,
+    CodexMergeDuplicateSessionsResponse,
+    CodexDesktopScriptResponse,
+    CodexDesktopSyncRequest,
+    CodexDesktopStatusResponse,
     CodexCollaborationMode,
-    DeleteUploadResponse,
-    ListDirectoryResponse,
-    FileReadResponse,
     FileSearchResponse,
-    GitCommandResponse,
-    MachinePathsExistsResponse,
-    MachineResponse,
     MachinesResponse,
     MessagesResponse,
     PermissionMode,
@@ -21,14 +20,29 @@ import type {
     SlashCommandsResponse,
     SkillsResponse,
     SpawnResponse,
-    UploadFileResponse,
     VisibilityPayload,
-    BulkArchiveSessionsResponse,
-    BulkDeleteSessionsResponse,
-    CleanupPreferencesResponse,
+    HapiSessionExport,
     SessionResponse,
     SessionsResponse
 } from '@/types/api'
+import type {
+    CodexModelsResponse,
+    CursorMigrateOutcome,
+    CursorMigrateToAcpRequest,
+    CursorModelsResponse,
+    DeleteUploadResponse,
+    FileReadResponse,
+    GitCommandResponse,
+    ListDirectoryResponse,
+    MachineListDirectoryResponse,
+    MachinePathsExistsResponse,
+    OpencodeModelsResponse,
+    OpencodeReasoningEffortResponse,
+    ReopenSessionResponse,
+    UploadFileResponse
+} from '@hapi/protocol/apiTypes'
+import type { AgentFlavor } from '@hapi/protocol'
+import type { CancelMessageResponse } from '@hapi/protocol/schemas'
 
 type ApiClientOptions = {
     baseUrl?: string
@@ -38,12 +52,15 @@ type ApiClientOptions = {
 
 type ErrorPayload = {
     error?: unknown
+    code?: unknown
 }
 
 function parseErrorCode(bodyText: string): string | undefined {
     try {
         const parsed = JSON.parse(bodyText) as ErrorPayload
-        return typeof parsed.error === 'string' ? parsed.error : undefined
+        if (typeof parsed.code === 'string') return parsed.code
+        if (typeof parsed.error === 'string') return parsed.error
+        return undefined
     } catch {
         return undefined
     }
@@ -123,23 +140,16 @@ export class ApiClient {
 
         if (!res.ok) {
             const body = await res.text().catch(() => '')
-            throw new Error(`HTTP ${res.status} ${res.statusText}: ${body}`)
+            const code = parseErrorCode(body)
+            throw new ApiError(
+                `HTTP ${res.status} ${res.statusText}: ${body}`,
+                res.status,
+                code,
+                body || undefined
+            )
         }
 
-        if (res.status === 204) {
-            return undefined as T
-        }
-
-        const text = await res.text().catch(() => '')
-        if (!text) {
-            return undefined as T
-        }
-
-        try {
-            return JSON.parse(text) as T
-        } catch {
-            throw new Error('Invalid JSON response from server.')
-        }
+        return await res.json() as T
     }
 
     async authenticate(auth: { initData: string } | { accessToken: string } | { refreshToken: string } | { username: string; password: string }): Promise<AuthResponse> {
@@ -187,12 +197,7 @@ export class ApiClient {
             const body = await res.text().catch(() => '')
             const code = parseErrorCode(body)
             const detail = body ? `: ${body}` : ''
-            throw new ApiError(
-                `Registration failed: HTTP ${res.status} ${res.statusText}${detail}`,
-                res.status,
-                code,
-                body || undefined
-            )
+            throw new ApiError(`Registration failed: HTTP ${res.status} ${res.statusText}${detail}`, res.status, code, body || undefined)
         }
 
         return await res.json() as AuthResponse
@@ -210,6 +215,44 @@ export class ApiClient {
         await this.request('/api/push/subscribe', {
             method: 'POST',
             body: JSON.stringify(payload)
+        })
+    }
+
+    async syncCodexSession(payload?: CodexDesktopSyncRequest): Promise<CodexDesktopScriptResponse> {
+        // 中文注释：当前按钮语义已改为“从 Codex 导入到 Hapi”；这里提交的是本地 transcript 对应的 Codex thread ID 列表。
+        return await this.request<CodexDesktopScriptResponse>('/api/codex/sync-session', {
+            method: 'POST',
+            ...(payload ? { body: JSON.stringify(payload) } : {})
+        })
+    }
+
+    async getCodexSessions(): Promise<CodexLocalSessionsResponse> {
+        return await this.request<CodexLocalSessionsResponse>('/api/codex/sessions')
+    }
+
+    async getCodexDesktopStatus(): Promise<CodexDesktopStatusResponse> {
+        return await this.request<CodexDesktopStatusResponse>('/api/codex/status')
+    }
+
+    async getCodexDuplicateSessions(payload: CodexDesktopSyncRequest): Promise<CodexDuplicateSessionsResponse> {
+        // 中文注释：重复会话检测只传本次用户勾选导入的 codexSessionId，避免把未选中的历史会话也纳入提示。
+        return await this.request<CodexDuplicateSessionsResponse>('/api/codex/duplicate-sessions', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        })
+    }
+
+    async mergeCodexDuplicateSessions(payload: CodexDesktopSyncRequest): Promise<CodexMergeDuplicateSessionsResponse> {
+        // 中文注释：真正执行合并时沿用同一批选中 codexSessionId，保证检测范围与执行范围一致。
+        return await this.request<CodexMergeDuplicateSessionsResponse>('/api/codex/merge-duplicate-sessions', {
+            method: 'POST',
+            body: JSON.stringify(payload)
+        })
+    }
+
+    async restartCodexDesktop(): Promise<CodexDesktopScriptResponse> {
+        return await this.request<CodexDesktopScriptResponse>('/api/codex/restart-desktop', {
+            method: 'POST'
         })
     }
 
@@ -231,31 +274,21 @@ export class ApiClient {
         return await this.request<SessionResponse>(`/api/sessions/${encodeURIComponent(sessionId)}`)
     }
 
-    async deleteSession(sessionId: string, options?: { force?: boolean }): Promise<void> {
-        const params = new URLSearchParams()
-        if (options?.force) {
-            params.set('force', 'true')
+    async getSessionExport(sessionId: string, options?: { signal?: AbortSignal }): Promise<HapiSessionExport> {
+        return await this.request<HapiSessionExport>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/export`,
+            { signal: options?.signal }
+        )
+    }
+
+    async getMessages(
+        sessionId: string,
+        options: {
+            beforeSeq?: number | null
+            beforeAt?: number | null
+            limit?: number
         }
-        const qs = params.toString()
-        const url = `/api/sessions/${encodeURIComponent(sessionId)}${qs ? `?${qs}` : ''}`
-        await this.request(url, { method: 'DELETE' })
-    }
-
-    async bulkDeleteSessions(sessionIds: string[]): Promise<BulkDeleteSessionsResponse> {
-        return await this.request<BulkDeleteSessionsResponse>('/api/sessions/bulk-delete', {
-            method: 'POST',
-            body: JSON.stringify({ sessionIds })
-        })
-    }
-
-    async bulkArchiveSessions(sessionIds: string[]): Promise<BulkArchiveSessionsResponse> {
-        return await this.request<BulkArchiveSessionsResponse>('/api/sessions/bulk-archive', {
-            method: 'POST',
-            body: JSON.stringify({ sessionIds })
-        })
-    }
-
-    async getMessages(sessionId: string, options: { beforeSeq?: number | null; beforeAt?: number | null; limit?: number }): Promise<MessagesResponse> {
+    ): Promise<MessagesResponse> {
         const params = new URLSearchParams()
         if (options.beforeAt !== undefined && options.beforeAt !== null) {
             params.set('beforeAt', `${options.beforeAt}`)
@@ -375,10 +408,15 @@ export class ApiClient {
         })
     }
 
-    async resumeSession(sessionId: string): Promise<string> {
+    async resumeSession(sessionId: string, opts?: { permissionMode?: string }): Promise<string> {
         const response = await this.request<{ sessionId: string }>(
             `/api/sessions/${encodeURIComponent(sessionId)}/resume`,
-            { method: 'POST' }
+            {
+                method: 'POST',
+                ...(opts?.permissionMode !== undefined && {
+                    body: JSON.stringify({ permissionMode: opts.permissionMode })
+                })
+            }
         )
         return response.sessionId
     }
@@ -396,10 +434,11 @@ export class ApiClient {
     }
 
     async cancelMessage(sessionId: string, messageId: string): Promise<CancelMessageResponse> {
-        return await this.request<CancelMessageResponse>(
+        const response = await this.request(
             `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}`,
             { method: 'DELETE' }
         )
+        return response as CancelMessageResponse
     }
 
     async abortSession(sessionId: string): Promise<void> {
@@ -414,6 +453,61 @@ export class ApiClient {
             method: 'POST',
             body: JSON.stringify({})
         })
+    }
+
+    async reopenSession(sessionId: string): Promise<ReopenSessionResponse> {
+        return await this.request<ReopenSessionResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/reopen`,
+            { method: 'POST', body: JSON.stringify({}) }
+        )
+    }
+
+    /**
+     * Migrate a legacy stream-json Cursor session to ACP. See tiann/hapi#824.
+     *
+     * Refusals (e.g. running session, missing on-disk store, target collision)
+     * are returned as structured `{ok: false, reason, message}` outcomes
+     * rather than thrown - the UI surfaces the reason to the operator and the
+     * underlying state on disk is unchanged.
+     *
+     * 401s trigger the same onUnauthorized refresh path as the shared
+     * `request()` helper so an expired JWT silently re-auths instead of
+     * hard-failing the migration dialog (Codex review #34 P2).
+     */
+    async migrateCursorSessionToAcp(sessionId: string, body: CursorMigrateToAcpRequest = {}): Promise<CursorMigrateOutcome> {
+        const path = `/api/sessions/${encodeURIComponent(sessionId)}/migrate-to-acp`
+        const tryOnce = async (overrideToken: string | null): Promise<Response> => {
+            const headers = new Headers({ 'content-type': 'application/json' })
+            const liveToken = this.getToken ? this.getToken() : null
+            const authToken = overrideToken ?? liveToken ?? this.token
+            if (authToken) {
+                headers.set('authorization', `Bearer ${authToken}`)
+            }
+            return fetch(this.buildUrl(path), { method: 'POST', headers, body: JSON.stringify(body) })
+        }
+
+        let res = await tryOnce(null)
+        if (res.status === 401 && this.onUnauthorized) {
+            const refreshed = await this.onUnauthorized()
+            if (refreshed) {
+                this.token = refreshed
+                res = await tryOnce(refreshed)
+            }
+        }
+        if (res.status === 401) {
+            throw new Error('Session expired. Please sign in again.')
+        }
+        const text = await res.text()
+        let parsed: CursorMigrateOutcome | null = null
+        try {
+            parsed = text ? JSON.parse(text) as CursorMigrateOutcome : null
+        } catch {
+            parsed = null
+        }
+        if (parsed && typeof parsed === 'object' && 'ok' in parsed) {
+            return parsed
+        }
+        throw new Error(`HTTP ${res.status} ${res.statusText}: ${text}`)
     }
 
     async switchSession(sessionId: string): Promise<void> {
@@ -461,8 +555,8 @@ export class ApiClient {
     async approvePermission(
         sessionId: string,
         requestId: string,
-        modeOrOptions?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan' | {
-            mode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
+        modeOrOptions?: 'default' | 'acceptEdits' | 'auto' | 'bypassPermissions' | 'plan' | {
+            mode?: 'default' | 'acceptEdits' | 'auto' | 'bypassPermissions' | 'plan'
             allowTools?: string[]
             decision?: 'approved' | 'approved_for_session' | 'denied' | 'abort'
             answers?: Record<string, string[]> | Record<string, { answers: string[] }>
@@ -494,25 +588,17 @@ export class ApiClient {
         return await this.request<MachinesResponse>('/api/machines')
     }
 
-    async setMachineDisplayName(machineId: string, displayName: string | null): Promise<MachineResponse> {
-        return await this.request<MachineResponse>(`/api/machines/${encodeURIComponent(machineId)}/display-name`, {
-            method: 'PATCH',
-            body: JSON.stringify({ displayName })
-        })
-    }
-
-    async getCleanupPreferences(): Promise<CleanupPreferencesResponse> {
-        return await this.request<CleanupPreferencesResponse>('/api/preferences/cleanup')
-    }
-
-    async setCleanupPreferences(payload: {
-        autoCleanupEnabled: boolean
-        sessionRetentionDays: number | null
-    }): Promise<CleanupPreferencesResponse> {
-        return await this.request<CleanupPreferencesResponse>('/api/preferences/cleanup', {
-            method: 'PUT',
-            body: JSON.stringify(payload)
-        })
+    async listMachineDirectory(
+        machineId: string,
+        path: string
+    ): Promise<MachineListDirectoryResponse> {
+        return await this.request<MachineListDirectoryResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/list-directory`,
+            {
+                method: 'POST',
+                body: JSON.stringify({ path })
+            }
+        )
     }
 
     async checkMachinePathsExists(
@@ -531,29 +617,60 @@ export class ApiClient {
     async spawnSession(
         machineId: string,
         directory: string,
-        agent?: 'claude' | 'codex' | 'cursor' | 'gemini' | 'opencode',
+        agent?: AgentFlavor,
         model?: string,
         modelReasoningEffort?: string,
         yolo?: boolean,
         sessionType?: 'simple' | 'worktree',
         worktreeName?: string,
-        approvedNewDirectoryCreation?: boolean,
         effort?: string
     ): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>(`/api/machines/${encodeURIComponent(machineId)}/spawn`, {
             method: 'POST',
-            body: JSON.stringify({
-                directory,
-                agent,
-                model,
-                modelReasoningEffort,
-                yolo,
-                sessionType,
-                worktreeName,
-                approvedNewDirectoryCreation,
-                effort
-            })
+            body: JSON.stringify({ directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName, effort })
         })
+    }
+
+    async getMachineCodexModels(machineId: string): Promise<CodexModelsResponse> {
+        return await this.request<CodexModelsResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/codex-models`
+        )
+    }
+
+    async getSessionCodexModels(sessionId: string): Promise<CodexModelsResponse> {
+        return await this.request<CodexModelsResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/codex-models`
+        )
+    }
+
+    async getSessionOpencodeModels(sessionId: string): Promise<OpencodeModelsResponse> {
+        return await this.request<OpencodeModelsResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/opencode-models`
+        )
+    }
+
+    async getSessionOpencodeReasoningEffortOptions(sessionId: string): Promise<OpencodeReasoningEffortResponse> {
+        return await this.request<OpencodeReasoningEffortResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/opencode-reasoning-effort-options`
+        )
+    }
+
+    async getSessionCursorModels(sessionId: string): Promise<CursorModelsResponse> {
+        return await this.request<CursorModelsResponse>(
+            `/api/sessions/${encodeURIComponent(sessionId)}/cursor-models`
+        )
+    }
+
+    async getMachineCursorModels(machineId: string): Promise<CursorModelsResponse> {
+        return await this.request<CursorModelsResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/cursor-models`
+        )
+    }
+
+    async getMachineOpencodeModelsForCwd(machineId: string, cwd: string): Promise<OpencodeModelsResponse> {
+        return await this.request<OpencodeModelsResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/opencode-models?cwd=${encodeURIComponent(cwd)}`
+        )
     }
 
     async getSlashCommands(sessionId: string): Promise<SlashCommandsResponse> {
@@ -575,7 +692,13 @@ export class ApiClient {
         })
     }
 
-    async fetchVoiceToken(options?: { customAgentId?: string; customApiKey?: string }): Promise<{
+    async deleteSession(sessionId: string): Promise<void> {
+        await this.request(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+            method: 'DELETE'
+        })
+    }
+
+    async fetchVoiceToken(options?: { customAgentId?: string; customApiKey?: string; voiceId?: string }): Promise<{
         allowed: boolean
         token?: string
         agentId?: string
@@ -584,6 +707,57 @@ export class ApiClient {
         return await this.request('/api/voice/token', {
             method: 'POST',
             body: JSON.stringify(options || {})
+        })
+    }
+
+    async fetchVoices(): Promise<{ voices: Array<{ id: string; name: string; previewUrl: string; category: string }> }> {
+        return await this.request('/api/voice/voices')
+    }
+
+    async sendVoiceTelemetry(event: {
+        stage: string
+        message: string
+        sessionId?: string
+        voiceId?: string
+        language?: string
+        details?: Record<string, unknown>
+    }): Promise<void> {
+        await this.request('/api/voice/telemetry', {
+            method: 'POST',
+            body: JSON.stringify(event)
+        })
+    }
+
+    /** Return the current auth token (for WebSocket query-param auth). */
+    getAuthToken(): string | null {
+        return this.getToken ? this.getToken() : this.token
+    }
+
+    async fetchVoiceBackend(): Promise<{ backend: string; backends: string[] }> {
+        return await this.request('/api/voice/backend')
+    }
+
+    async fetchQwenToken(): Promise<{
+        allowed: boolean
+        wsUrl?: string
+        error?: string
+    }> {
+        return await this.request('/api/voice/qwen-token', {
+            method: 'POST',
+            body: JSON.stringify({})
+        })
+    }
+
+    async fetchGeminiToken(): Promise<{
+        allowed: boolean
+        apiKey?: string
+        wsUrl?: string
+        baseUrl?: string
+        error?: string
+    }> {
+        return await this.request('/api/voice/gemini-token', {
+            method: 'POST',
+            body: JSON.stringify({})
         })
     }
 }

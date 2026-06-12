@@ -11,9 +11,42 @@ describe('getModelOptionsForFlavor', () => {
 
     it('returns Claude model options for claude flavor', () => {
         const options = getModelOptionsForFlavor('claude')
-        expect(options[0]).toEqual({ value: null, label: 'Auto' })
+        expect(options[0]).toEqual({ value: null, label: 'Default' })
         expect(options.some((o) => o.value === 'sonnet')).toBe(true)
         expect(options.some((o) => o.value === 'opus')).toBe(true)
+    })
+
+    it('keeps Claude presets when explicit options only include Sonnet models', () => {
+        const options = getModelOptionsForFlavor('claude', null, [
+            { value: null, label: 'Default' },
+            { value: 'sonnet', label: 'Sonnet' },
+            { value: 'sonnet[1m]', label: 'Sonnet 1M' }
+        ])
+        expect(options).toEqual([
+            { value: null, label: 'Default' },
+            { value: 'sonnet', label: 'Sonnet' },
+            { value: 'sonnet[1m]', label: 'Sonnet 1M' },
+            { value: 'opus', label: 'Opus' },
+            { value: 'opus[1m]', label: 'Opus 1M' },
+            { value: 'fable', label: 'Fable' },
+            { value: 'fable[1m]', label: 'Fable 1M' }
+        ])
+    })
+
+    it('adds non-preset Claude options without hiding Opus presets', () => {
+        const options = getModelOptionsForFlavor('claude', null, [
+            { value: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1' }
+        ])
+        expect(options).toEqual([
+            { value: null, label: 'Default' },
+            { value: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1' },
+            { value: 'sonnet', label: 'Sonnet' },
+            { value: 'sonnet[1m]', label: 'Sonnet 1M' },
+            { value: 'opus', label: 'Opus' },
+            { value: 'opus[1m]', label: 'Opus 1M' },
+            { value: 'fable', label: 'Fable' },
+            { value: 'fable[1m]', label: 'Fable 1M' }
+        ])
     })
 
     it('includes custom Gemini model from env/config in options', () => {
@@ -26,6 +59,88 @@ describe('getModelOptionsForFlavor', () => {
         const flashCount = options.filter((o) => o.value === 'gemini-2.5-flash').length
         expect(flashCount).toBe(1)
     })
+
+    it('includes the current custom model when it is missing from explicit options', () => {
+        const options = getModelOptionsForFlavor('codex', 'gpt-legacy', [
+            { value: 'gpt-5.5', label: 'GPT-5.5' }
+        ])
+        expect(options).toEqual([
+            { value: 'gpt-legacy', label: 'gpt-legacy' },
+            { value: 'gpt-5.5', label: 'GPT-5.5' }
+        ])
+    })
+
+    it('returns only the supplied custom options for opencode flavor (no claude fallback)', () => {
+        const options = getModelOptionsForFlavor('opencode', null, [
+            { value: 'ollama/exaone:4.5-33b-q8', label: 'Ollama (SER8)/EXAONE 4.5 33B Q8' },
+            { value: 'mlx/qwen3:0.6b', label: 'MLX/Qwen3 0.6B' }
+        ])
+        expect(options).toEqual([
+            { value: 'ollama/exaone:4.5-33b-q8', label: 'Ollama (SER8)/EXAONE 4.5 33B Q8' },
+            { value: 'mlx/qwen3:0.6b', label: 'MLX/Qwen3 0.6B' }
+        ])
+    })
+
+    it('returns an empty list for opencode flavor before models are discovered (no claude fallback)', () => {
+        const options = getModelOptionsForFlavor('opencode', null)
+        expect(options).toEqual([])
+    })
+
+    it('returns only default/current for cursor before models are discovered (no claude fallback)', () => {
+        const options = getModelOptionsForFlavor('cursor', 'composer-2.5')
+        expect(options).toEqual([
+            { value: null, label: 'Default' },
+            { value: 'composer-2.5', label: 'composer-2.5' }
+        ])
+    })
+
+    it('returns dynamic cursor options when supplied', () => {
+        const options = getModelOptionsForFlavor('cursor', null, [
+            { value: 'composer-2.5', label: 'Composer 2.5' },
+            { value: 'gpt-5.5-high-fast', label: 'GPT-5.5 High Fast' }
+        ])
+        expect(options).toEqual([
+            { value: 'composer-2.5', label: 'Composer 2.5' },
+            { value: 'gpt-5.5-high-fast', label: 'GPT-5.5 High Fast' }
+        ])
+    })
+
+    it('does not inject raw wire id when dual picker base is already listed', () => {
+        const wire = 'claude-opus-4-8[thinking=true,context=300k,effort=high,fast=false]'
+        const options = getModelOptionsForFlavor('cursor', wire, [
+            { value: null, label: 'Default' },
+            { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
+            { value: 'composer-2.5', label: 'Composer 2.5' },
+        ])
+        expect(options).toEqual([
+            { value: null, label: 'Default' },
+            { value: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
+            { value: 'composer-2.5', label: 'Composer 2.5' },
+        ])
+    })
+
+    it('injects unknown wire id only when catalog lacks base and wire', () => {
+        const wire = 'claude-opus-4-9[effort=high,fast=false]'
+        const options = getModelOptionsForFlavor('cursor', wire, [
+            { value: null, label: 'Default' },
+            { value: 'composer-2.5', label: 'Composer 2.5' },
+        ])
+        expect(options).toEqual([
+            { value: null, label: 'Default' },
+            { value: wire, label: wire },
+            { value: 'composer-2.5', label: 'Composer 2.5' },
+        ])
+    })
+
+    it('includes the current opencode model when it is missing from explicit options', () => {
+        const options = getModelOptionsForFlavor('opencode', 'ollama/legacy', [
+            { value: 'ollama/exaone:4.5-33b-q8', label: 'Ollama EXAONE' }
+        ])
+        expect(options).toEqual([
+            { value: 'ollama/legacy', label: 'ollama/legacy' },
+            { value: 'ollama/exaone:4.5-33b-q8', label: 'Ollama EXAONE' }
+        ])
+    })
 })
 
 describe('getNextModelForFlavor', () => {
@@ -37,5 +152,49 @@ describe('getNextModelForFlavor', () => {
     it('cycles Claude models', () => {
         const next = getNextModelForFlavor('claude', null)
         expect(next).not.toBeNull()
+    })
+
+    it('cycles through Claude presets when explicit options only include Sonnet models', () => {
+        const next = getNextModelForFlavor('claude', 'sonnet[1m]', [
+            { value: 'sonnet', label: 'Sonnet' },
+            { value: 'sonnet[1m]', label: 'Sonnet 1M' }
+        ])
+        expect(next).toBe('opus')
+    })
+
+    it('cycles explicit model options', () => {
+        const next = getNextModelForFlavor('codex', 'gpt-5.5', [
+            { value: 'gpt-5.5', label: 'GPT-5.5' },
+            { value: 'gpt-5.4', label: 'GPT-5.4' }
+        ])
+        expect(next).toBe('gpt-5.4')
+    })
+
+    it('does not choose auto when cycling explicit Codex model options from an unknown current model', () => {
+        const next = getNextModelForFlavor('codex', 'gpt-legacy', [
+            { value: 'gpt-5.5', label: 'GPT-5.5' },
+            { value: 'gpt-5.4', label: 'GPT-5.4' }
+        ])
+        expect(next).toBe('gpt-5.5')
+    })
+
+    it('keeps the current opencode model when the dynamic list has not loaded (undefined customOptions)', () => {
+        const next = getNextModelForFlavor('opencode', 'ollama/exaone:4.5-33b-q8')
+        expect(next).toBe('ollama/exaone:4.5-33b-q8')
+    })
+
+    it('keeps the current opencode model when the dynamic list is empty', () => {
+        const next = getNextModelForFlavor('opencode', 'ollama/exaone:4.5-33b-q8', [])
+        expect(next).toBe('ollama/exaone:4.5-33b-q8')
+    })
+
+    it('returns null for opencode without a current model and without dynamic options (no Claude fallback)', () => {
+        const next = getNextModelForFlavor('opencode', null, [])
+        expect(next).toBeNull()
+    })
+
+    it('keeps the current cursor model when the dynamic list has not loaded', () => {
+        const next = getNextModelForFlavor('cursor', 'composer-2.5')
+        expect(next).toBe('composer-2.5')
     })
 })

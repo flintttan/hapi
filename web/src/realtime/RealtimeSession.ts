@@ -5,11 +5,22 @@ let voiceSession: VoiceSession | null = null
 let voiceSessionStarted = false
 let currentSessionId: string | null = null
 
+export interface VoiceStartContext {
+    bootstrap: string
+    streamChunks?: string[]
+    notice?: string | null
+}
+
 export async function startRealtimeSession(
     sessionId: string,
-    initialContext?: string,
-    language?: ElevenLabsLanguage
+    context: VoiceStartContext | string,
+    language?: ElevenLabsLanguage,
+    voiceId?: string,
+    voiceName?: string
 ) {
+    const normalized: VoiceStartContext = typeof context === 'string'
+        ? { bootstrap: context }
+        : context
     if (!voiceSession) {
         console.warn('[Voice] No voice session registered')
         return
@@ -19,8 +30,12 @@ export async function startRealtimeSession(
         currentSessionId = sessionId
         await voiceSession.startSession({
             sessionId,
-            initialContext,
-            language
+            initialContext: normalized.bootstrap,
+            streamContextChunks: normalized.streamChunks,
+            contextNotice: normalized.notice,
+            language,
+            voiceId,
+            voiceName
         })
         voiceSessionStarted = true
     } catch (error) {

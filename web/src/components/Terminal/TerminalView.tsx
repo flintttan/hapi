@@ -32,10 +32,6 @@ export function TerminalView(props: {
         onResizeRef.current = props.onResize
     }, [props.onResize])
 
-    const containerClassName = ['terminal-xterm', 'h-full', 'w-full', props.className]
-        .filter(Boolean)
-        .join(' ')
-
     useEffect(() => {
         const container = containerRef.current
         if (!container) return
@@ -127,8 +123,7 @@ export function TerminalView(props: {
     return (
         <div
             ref={containerRef}
-            data-testid="terminal-view"
-            className={containerClassName}
+            className={`h-full w-full ${props.className ?? ''}`}
         />
     )
 }

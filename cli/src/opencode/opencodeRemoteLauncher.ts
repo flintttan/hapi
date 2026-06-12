@@ -11,6 +11,7 @@ import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
 import { createOpencodeBackend } from './utils/opencodeBackend';
 import { OpencodePermissionHandler } from './utils/permissionHandler';
 import { PLAN_MODE_INSTRUCTION, TITLE_INSTRUCTION } from './utils/systemPrompt';
+import { resolveThoughtLevelEffort } from './thoughtLevelEffort';
 
 type OpencodeRemoteLauncherOptions = {
     onReasoningEffortRollback?: (effort: string | null) => void;
@@ -25,6 +26,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
     private displayPermissionMode: PermissionMode | null = null;
     private instructionsSent = false;
     private currentBackendModel: string | null = null;
+    private defaultBackendModel: string | null = null;
     private currentBackendEffort: string | null = null;
     private defaultBackendEffort: string | null = null;
     private setModelSupported: boolean | undefined = undefined;
@@ -103,6 +105,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         // does not trigger a redundant setModel on the very first turn.
         const initialMetadata = backend.getSessionModelsMetadata?.(acpSessionId);
         this.currentBackendModel = initialMetadata?.currentModelId ?? null;
+        this.defaultBackendModel = this.currentBackendModel;
         const thoughtLevelOption = backend.getThoughtLevelConfigOption?.(acpSessionId);
         this.currentBackendEffort = thoughtLevelOption?.currentValue ?? null;
         this.defaultBackendEffort = this.currentBackendEffort;
@@ -118,6 +121,18 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                 success: true,
                 availableModels: metadata.availableModels,
                 currentModelId: metadata.currentModelId
+            };
+        });
+
+        session.client.rpcHandlerManager.registerHandler(RPC_METHODS.ListOpencodeReasoningEffortOptions, async () => {
+            const effortOption = backend.getThoughtLevelConfigOption?.(acpSessionId);
+            if (!effortOption) {
+                return { success: false, error: 'OpenCode reasoning effort options are not available' };
+            }
+            return {
+                success: true,
+                options: effortOption.options,
+                currentValue: effortOption.currentValue ?? null
             };
         });
 
@@ -153,19 +168,29 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             // RPC, we learn that from the first method-not-found response and stop
             // attempting it for the rest of this session.
             //
+            // `batch.mode.model` semantics: a string is a specific model id;
+            // `null` means "reset to whatever model the backend launched with"
+            // (emitted by `/model default`); `undefined` means "no change".
+            const requestedModel = batch.mode.model === null
+                ? this.defaultBackendModel
+                : batch.mode.model;
             // The very first batch seeds currentBackendModel — the OpenCode CLI was
             // launched with that model via --model and there is nothing to switch yet.
-            if (batch.mode.model && this.currentBackendModel === null) {
-                this.currentBackendModel = batch.mode.model;
-            } else if (batch.mode.model && batch.mode.model !== this.currentBackendModel) {
+            if (requestedModel && this.currentBackendModel === null) {
+                this.currentBackendModel = requestedModel;
+            } else if (requestedModel && requestedModel !== this.currentBackendModel) {
                 if (!backend.setModel || this.setModelSupported === false) {
                     batch.mode.model = this.currentBackendModel ?? undefined;
                 } else {
-                    logger.debug(`[opencode-remote] Switching model inline: ${this.currentBackendModel} -> ${batch.mode.model}`);
+                    logger.debug(`[opencode-remote] Switching model inline: ${this.currentBackendModel} -> ${requestedModel}`);
                     try {
-                        await backend.setModel(acpSessionId, batch.mode.model, { flavor: 'opencode' });
-                        this.currentBackendModel = batch.mode.model;
+                        await backend.setModel(acpSessionId, requestedModel, { flavor: 'opencode' });
+                        this.currentBackendModel = requestedModel;
                         this.setModelSupported = true;
+                        // Reflect the resolved model back into the batch so
+                        // downstream display logic sees the concrete id rather
+                        // than a `null` placeholder.
+                        batch.mode.model = requestedModel;
                     } catch (error) {
                         const message = error instanceof Error ? error.message : String(error);
                         const methodNotFound = /method not found/i.test(message);
@@ -180,7 +205,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                             logger.warn('[opencode-remote] Inline model switch failed', error);
                             session.sendSessionEvent({
                                 type: 'message',
-                                message: `Failed to switch model to ${batch.mode.model}. Continuing with ${this.currentBackendModel ?? '(default)'}.`
+                                message: `Failed to switch model to ${requestedModel}. Continuing with ${this.currentBackendModel ?? '(default)'}.`
                             });
                         }
                         batch.mode.model = this.currentBackendModel ?? undefined;
@@ -194,29 +219,46 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                 if (!backend.setConfigOption || !thoughtLevelOption || this.setEffortSupported === false) {
                     this.rollbackReasoningEffort(batch, this.currentBackendEffort);
                 } else {
-                    logger.debug(`[opencode-remote] Switching effort inline: ${this.currentBackendEffort ?? '(default)'} -> ${requestedEffort}`);
-                    try {
-                        await backend.setConfigOption(acpSessionId, thoughtLevelOption.id, requestedEffort);
-                        this.currentBackendEffort = requestedEffort;
-                        this.setEffortSupported = true;
-                    } catch (error) {
-                        const message = error instanceof Error ? error.message : String(error);
-                        const methodNotFound = /method not found/i.test(message);
-                        if (methodNotFound && this.setEffortSupported === undefined) {
-                            this.setEffortSupported = false;
-                            logger.warn('[opencode-remote] OpenCode build does not support session/set_config_option; inline effort switching disabled for this session');
-                            session.sendSessionEvent({
-                                type: 'message',
-                                message: 'This OpenCode build does not support inline reasoning effort switching.'
-                            });
-                        } else {
-                            logger.warn('[opencode-remote] Inline effort switch failed', error);
-                            session.sendSessionEvent({
-                                type: 'message',
-                                message: `Failed to switch reasoning effort to ${requestedEffort}. Continuing with ${this.currentBackendEffort ?? '(default)'}.`
-                            });
+                    const resolvedEffort = resolveThoughtLevelEffort(
+                        requestedEffort,
+                        thoughtLevelOption,
+                        this.currentBackendEffort ?? this.defaultBackendEffort
+                    );
+                    if (!resolvedEffort || resolvedEffort === this.currentBackendEffort) {
+                        if (requestedEffort !== resolvedEffort) {
+                            logger.warn(
+                                `[opencode-remote] Unsupported reasoning effort "${requestedEffort}"; continuing with ${resolvedEffort ?? this.currentBackendEffort ?? '(default)'}`
+                            );
+                            this.rollbackReasoningEffort(batch, resolvedEffort ?? this.currentBackendEffort);
                         }
-                        this.rollbackReasoningEffort(batch, this.currentBackendEffort);
+                    } else {
+                        logger.debug(`[opencode-remote] Switching effort inline: ${this.currentBackendEffort ?? '(default)'} -> ${resolvedEffort}`);
+                        try {
+                            await backend.setConfigOption(acpSessionId, thoughtLevelOption.id, resolvedEffort);
+                            this.currentBackendEffort = resolvedEffort;
+                            this.setEffortSupported = true;
+                            if (requestedEffort !== resolvedEffort) {
+                                this.rollbackReasoningEffort(batch, resolvedEffort);
+                            }
+                        } catch (error) {
+                            const message = error instanceof Error ? error.message : String(error);
+                            const methodNotFound = /method not found/i.test(message);
+                            if (methodNotFound && this.setEffortSupported === undefined) {
+                                this.setEffortSupported = false;
+                                logger.warn('[opencode-remote] OpenCode build does not support session/set_config_option; inline effort switching disabled for this session');
+                                session.sendSessionEvent({
+                                    type: 'message',
+                                    message: 'This OpenCode build does not support inline reasoning effort switching.'
+                                });
+                            } else {
+                                logger.warn('[opencode-remote] Inline effort switch failed', error);
+                                session.sendSessionEvent({
+                                    type: 'message',
+                                    message: `Failed to switch reasoning effort to ${resolvedEffort}. Continuing with ${this.currentBackendEffort ?? '(default)'}.`
+                                });
+                            }
+                            this.rollbackReasoningEffort(batch, this.currentBackendEffort);
+                        }
                     }
                 }
             }

@@ -3,6 +3,7 @@ export const queryKeys = {
     session: (sessionId: string) => ['session', sessionId] as const,
     messages: (sessionId: string) => ['messages', sessionId] as const,
     machines: ['machines'] as const,
+    machineCodexModels: (machineId: string) => ['machine-codex-models', machineId] as const,
     gitStatus: (sessionId: string) => ['git-status', sessionId] as const,
     sessionFiles: (sessionId: string, query: string) => ['session-files', sessionId, query] as const,
     sessionDirectory: (sessionId: string, path: string) => ['session-directory', sessionId, path] as const,
@@ -14,5 +15,11 @@ export const queryKeys = {
         staged ? 'staged' : 'unstaged'
     ] as const,
     slashCommands: (sessionId: string) => ['slash-commands', sessionId] as const,
+    sessionCodexModels: (sessionId: string) => ['session-codex-models', sessionId] as const,
+    sessionCursorModels: (sessionId: string) => ['session-cursor-models', sessionId] as const,
+    machineCursorModels: (machineId: string) => ['machine-cursor-models', machineId] as const,
+    sessionOpencodeModels: (sessionId: string) => ['session-opencode-models', sessionId] as const,
+    sessionOpencodeReasoningEffortOptions: (sessionId: string) => ['session-opencode-reasoning-effort-options', sessionId] as const,
+    machineOpencodeModelsForCwd: (machineId: string, cwd: string) => ['machine-opencode-models', machineId, cwd] as const,
     skills: (sessionId: string) => ['skills', sessionId] as const,
 }

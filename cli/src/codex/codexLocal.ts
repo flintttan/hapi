@@ -8,6 +8,8 @@ import {
 } from './utils/codexMcpConfig';
 import { codexSystemPrompt } from './utils/systemPrompt';
 import type { ReasoningEffort } from './appServerTypes';
+import { resolveCodexCommand } from './utils/codexExecutable';
+import type { McpServersConfig } from './utils/buildHapiMcpBridge';
 
 /**
  * Filter out 'resume' subcommand which is managed internally by hapi.
@@ -37,7 +39,7 @@ export async function codexLocal(opts: {
     sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
     onSessionFound: (id: string) => void;
     codexArgs?: string[];
-    mcpServers?: Record<string, { command: string; args: string[] }>;
+    mcpServers?: McpServersConfig;
     sessionHook?: {
         port: number;
         token: string;
@@ -86,9 +88,11 @@ export async function codexLocal(opts: {
         return;
     }
 
+    const codexCommand = resolveCodexCommand();
+
     await spawnWithTerminalGuard({
-        command: 'codex',
-        args,
+        command: codexCommand.command,
+        args: [...codexCommand.args, ...args],
         cwd: opts.path,
         env: process.env,
         signal: opts.abort,

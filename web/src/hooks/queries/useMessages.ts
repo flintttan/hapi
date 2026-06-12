@@ -2,7 +2,6 @@ import { useCallback, useEffect, useSyncExternalStore } from 'react'
 import type { ApiClient } from '@/api/client'
 import type { DecryptedMessage } from '@/types/api'
 import {
-    clearMessageWindow,
     fetchLatestMessages,
     fetchOlderMessages,
     flushPendingMessages,
@@ -18,7 +17,6 @@ export const EMPTY_STATE: MessageWindowState = {
     pending: [],
     pendingCount: 0,
     hasMore: false,
-    oldestAt: null,
     oldestSeq: null,
     newestSeq: null,
     isLoading: false,
@@ -64,15 +62,6 @@ export function useMessages(api: ApiClient | null, sessionId: string | null): {
         }
         void fetchLatestMessages(api, sessionId)
     }, [api, sessionId])
-
-    useEffect(() => {
-        if (!sessionId) {
-            return
-        }
-        return () => {
-            clearMessageWindow(sessionId)
-        }
-    }, [sessionId])
 
     const loadMore = useCallback(async () => {
         if (!api || !sessionId) return

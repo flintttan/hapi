@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getInstallDismissed, setInstallDismissed } from '@/lib/pwa'
 
 interface BeforeInstallPromptEvent extends Event {
     prompt: () => Promise<void>
@@ -7,6 +6,8 @@ interface BeforeInstallPromptEvent extends Event {
 }
 
 type InstallState = 'idle' | 'available' | 'installing' | 'installed'
+
+const INSTALL_DISMISSED_KEY = 'pwa_install_dismissed'
 
 function isIOSSafari(): boolean {
     if (typeof window === 'undefined') return false
@@ -17,6 +18,22 @@ function isIOSSafari(): boolean {
     const isFirefox = /FxiOS/.test(ua)
     // iOS Safari is WebKit-based but not Chrome or Firefox
     return isIOS && isWebkit && !isChrome && !isFirefox
+}
+
+function getInstallDismissed(): boolean {
+    try {
+        return localStorage.getItem(INSTALL_DISMISSED_KEY) === 'true'
+    } catch {
+        return false
+    }
+}
+
+function setInstallDismissed(): void {
+    try {
+        localStorage.setItem(INSTALL_DISMISSED_KEY, 'true')
+    } catch {
+        // Ignore storage errors
+    }
 }
 
 export function usePWAInstall(): {

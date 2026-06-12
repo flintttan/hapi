@@ -11,7 +11,7 @@ import { queryClient } from './lib/query-client'
 import { createAppRouter } from './router'
 import { I18nProvider } from './lib/i18n-context'
 import { restoreSpaRedirect } from './lib/spaRedirect'
-import { getBasePath } from './lib/pwa'
+import { installScrollRestorationGuard } from './lib/scrollStorageGuard'
 
 function getStartParam(): string | null {
     const query = new URLSearchParams(window.location.search)
@@ -31,10 +31,11 @@ function getDeepLinkedSessionId(): string | null {
 
 function getInitialPath(): string {
     const sessionId = getDeepLinkedSessionId()
-    return sessionId ? getBasePath(`sessions/${sessionId}`) : getBasePath('sessions')
+    return sessionId ? `/sessions/${sessionId}` : '/sessions'
 }
 
 async function bootstrap() {
+    installScrollRestorationGuard()
     initializeFontScale()
 
     // Only load Telegram SDK in Telegram environment (with 3s timeout)
@@ -53,13 +54,9 @@ async function bootstrap() {
 
     const updateSW = registerSW({
         onNeedRefresh() {
-            window.dispatchEvent(new CustomEvent('hapi:pwa-update-available', {
-                detail: {
-                    update: () => {
-                        void updateSW(true)
-                    }
-                }
-            }))
+            if (confirm('New version available! Reload to update?')) {
+                updateSW(true)
+            }
         },
         onOfflineReady() {
             console.log('App ready for offline use')

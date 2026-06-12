@@ -1,192 +1,344 @@
-import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import { useAssistantApi } from '@assistant-ui/react'
+import { useCallback, useMemo, useSyncExternalStore } from 'react'
 import type { ApiClient } from '@/api/client'
+import { getMessageWindowState, subscribeMessageWindow } from '@/lib/message-window-store'
+import { isQueuedForInvocation } from '@/lib/messages'
 import { EMPTY_STATE } from '@/hooks/queries/useMessages'
-import { subscribeMessageWindow, getMessageWindowState, removeOptimisticMessage } from '@/lib/message-window-store'
 import { normalizeDecryptedMessage } from '@/chat/normalize'
-import { useCancelQueuedMessage } from '@/hooks/mutations/useCancelQueuedMessage'
 import type { DecryptedMessage } from '@/types/api'
-import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
+import { useCancelQueuedMessage } from '@/hooks/mutations/useCancelQueuedMessage'
 import { useTranslation } from '@/lib/use-translation'
+import { useToast } from '@/lib/toast-context'
+import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 
 function ClockIcon() {
     return (
-        <svg className="h-[14px] w-[14px] shrink-0" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+        <svg
+            className="h-[14px] w-[14px] shrink-0"
+            viewBox="0 0 16 16"
+            fill="none"
+            aria-hidden="true"
+        >
             <circle cx="8" cy="8" r="6" stroke="currentColor" strokeWidth="1.5" />
-            <path d="M8 5v3.5l2.5 1.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            <path
+                d="M8 5v3.5l2.5 1.5"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
         </svg>
     )
 }
 
-function isQueuedForInvocation(message: DecryptedMessage): boolean {
-    const isUser = normalizeDecryptedMessage(message)?.role === 'user'
-    if (!isUser || message.invokedAt !== null || message.status === 'failed') {
-        return false
-    }
-
-    const isScheduledForFuture = message.scheduledAt != null && message.scheduledAt > Date.now()
-
-    // Optimistic client-side bubbles share the same localId/id while the
-    // request is still in flight. Only treat them as queued when the send
-    // mutation explicitly marked them as queued (e.g. session still thinking)
-    // or when the message is explicitly scheduled for the future.
-    if (message.localId && message.id === message.localId) {
-        return message.status === 'queued' || isScheduledForFuture
-    }
-
-    // A server-echoed row may still carry optimistic status copied over by
-    // mergeMessages() before the CLI sends messages-consumed. Preserve that
-    // semantic so the first in-flight message stays in-thread instead of
-    // flashing in the queued bar.
-    if (message.status === 'sending') {
-        return false
-    }
-
-    // Stored rows do not carry a client-only status. With a server id and
-    // invokedAt=null they are the authoritative queued/scheduled messages.
-    return true
-}
-
+/**
+ * Orders queued messages so the floating bar reads top-down as a single timeline:
+ *   1. Immediate-queued messages first, in the order they were submitted.
+ *   2. Scheduled messages after, ordered by their fire time (soonest first).
+ *
+ * Without this the bar follows insertion order, which mixes immediate and
+ * scheduled rows arbitrarily and makes the "what fires next" question
+ * harder to answer at a glance.
+ *
+ * @internal Exported for unit testing.
+ */
 export function sortQueuedMessages(msgs: DecryptedMessage[]): DecryptedMessage[] {
     return [...msgs].sort((a, b) => {
         const aSched = a.scheduledAt != null
         const bSched = b.scheduledAt != null
         if (aSched !== bSched) return aSched ? 1 : -1
-        if (aSched && bSched) return (a.scheduledAt ?? 0) - (b.scheduledAt ?? 0)
+        // Both scheduledAt values are non-null here (aSched && bSched is true above).
+        if (aSched && bSched) return a.scheduledAt! - b.scheduledAt!
         return (a.createdAt ?? 0) - (b.createdAt ?? 0)
     })
 }
 
-export function computeEditPendingSchedule(scheduledAt: number | null | undefined, now: number): PendingSchedule | null {
-    if (scheduledAt == null || scheduledAt <= now) return null
-    return { type: 'absolute', ms: scheduledAt }
-}
-
-export function computeCanCancel({ id, localId, isPending }: { id: string; localId: string | null | undefined; isPending: boolean }): boolean {
-    return Boolean(id) && !isPending
-}
-
-function formatScheduledTime(scheduledAt: number): string {
-    const date = new Date(scheduledAt)
-    const now = new Date()
-    const opts: Intl.DateTimeFormatOptions = { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }
-    if (date.getFullYear() !== now.getFullYear()) {
-        opts.year = 'numeric'
-    }
-    return date.toLocaleString(undefined, opts)
-}
-
-function getTextFromMessage(msg: DecryptedMessage): string {
-    const normalized = normalizeDecryptedMessage(msg)
-    if (!normalized || normalized.role !== 'user') {
-        return ''
-    }
-    const text = (normalized.content.text ?? '').trim()
-    if (text) return text
-    const attachments = normalized.content.attachments ?? []
-    return attachments.map((a) => a.filename ?? 'attachment').join(', ')
-}
-
+/**
+ * Returns user messages that haven't been invoked yet (invokedAt == null and not sent/failed).
+ * Covers both optimistic (status='queued') and server-loaded (status=undefined, invokedAt=null) cases.
+ */
 function useQueuedMessages(sessionId: string): DecryptedMessage[] {
     const state = useSyncExternalStore(
         useCallback((listener) => subscribeMessageWindow(sessionId, listener), [sessionId]),
         useCallback(() => getMessageWindowState(sessionId), [sessionId]),
         () => EMPTY_STATE
     )
-    return useMemo(() => sortQueuedMessages([...state.messages, ...state.pending].filter(isQueuedForInvocation)), [state])
+
+    // `invokedAt` is the source of truth for invocation; see isQueuedForInvocation
+    // (lib/messages) for the shared predicate used by the thread filter and the
+    // window store trim helpers.
+    // useSyncExternalStore guarantees a stable reference when the snapshot is
+    // unchanged, so [state] as the dependency avoids unnecessary re-sorts.
+    return useMemo(() => {
+        const allMessages = [...state.messages, ...state.pending]
+        return sortQueuedMessages(allMessages.filter(isQueuedForInvocation))
+    }, [state])
 }
 
-export function QueuedMessagesBar(props: {
+/** @internal Exported for unit testing. */
+export function getQueuedMessagePreview(msg: DecryptedMessage): { text: string; attachmentNames: string[] } {
+    const normalized = normalizeDecryptedMessage(msg)
+    if (!normalized || normalized.role !== 'user') {
+        return { text: '', attachmentNames: [] }
+    }
+    const text = (normalized.content.text ?? '').trim()
+    const attachments = normalized.content.attachments ?? []
+    return {
+        text,
+        attachmentNames: attachments.map((a) => a.filename ?? 'attachment'),
+    }
+}
+
+/** @internal Exported for unit testing. */
+export function getQueuedMessageEditText(preview: { text: string; attachmentNames: string[] }): string {
+    return preview.text || preview.attachmentNames.join(', ')
+}
+
+/**
+ * Computes the PendingSchedule to restore when editing a queued message.
+ *
+ * - If the message has a future scheduledAt, return { type: 'absolute', ms } so the
+ *   user can re-send with the same specific time (or adjust it).
+ * - If scheduledAt is null, undefined, or in the past (message already matured),
+ *   return null so the re-sent message goes out immediately.
+ *
+ * @internal Exported for unit testing.
+ */
+export function computeEditPendingSchedule(
+    scheduledAt: number | null | undefined,
+    now: number
+): PendingSchedule | null {
+    if (scheduledAt == null || scheduledAt <= now) return null
+    return { type: 'absolute', ms: scheduledAt }
+}
+
+/**
+ * Determines whether the user can cancel or edit a queued message.
+ *
+ * Two conditions must both be true:
+ * 1. hasServerEcho: the hub has persisted the row.
+ *    useSendMessage.onMutate creates { id: localId, localId } before POST /messages
+ *    completes. Only after the server echo (message-received SSE) does the store
+ *    replace the row with a server-assigned UUID id, making id !== localId.
+ *    Sending DELETE before that echo would find no row in the hub and return
+ *    cancelled/localId:null; the original POST could then still insert and broadcast
+ *    the message, letting a canceled message reappear and be invoked.
+ * 2. !isPending: no cancel mutation is already in-flight.
+ *
+ * @internal Exported for unit testing.
+ */
+export function computeCanCancel({
+    id,
+    localId,
+    isPending,
+}: {
+    id: string
+    localId: string | null | undefined
+    isPending: boolean
+}): boolean {
+    const hasServerEcho = localId ? id !== localId : true
+    return hasServerEcho && !isPending
+}
+
+/**
+ * Floating bar above the composer showing queued (pending invocation) messages.
+ * Each item has an edit button (✎) and a cancel button (✕).
+ *
+ * Edit = client-side cancel + prefill composer with message text (Codex dialect).
+ * Cancel = DELETE /sessions/:id/messages/:messageId with optimistic removal.
+ */
+/** @internal Exported for unit testing. */
+export function formatScheduledTime(scheduledAt: number): string {
+    const date = new Date(scheduledAt)
+    const now = new Date()
+    const opts: Intl.DateTimeFormatOptions = {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+    }
+    if (date.getFullYear() !== now.getFullYear()) {
+        opts.year = 'numeric'
+    }
+    return date.toLocaleString(undefined, opts)
+}
+
+export function QueuedMessagesBar({
+    sessionId,
+    api,
+    onEdit,
+}: {
     sessionId: string
     api: ApiClient | null
+    /**
+     * Called when the user clicks Edit on a queued message.
+     * The parent should restore `text` into the composer and `pendingSchedule` into the schedule state.
+     * Edit is always cancel + prefill, regardless of whether the message is scheduled or immediate.
+     */
     onEdit?: (params: { text: string; pendingSchedule: PendingSchedule | null }) => void
 }) {
-    const queued = useQueuedMessages(props.sessionId)
+    const queued = useQueuedMessages(sessionId)
     const assistantApi = useAssistantApi()
-    const cancelMutation = useCancelQueuedMessage(props.api)
+    const cancelMutation = useCancelQueuedMessage(api)
     const { t } = useTranslation()
+    const { addToast } = useToast()
 
-    const handleLocalEdit = useCallback((msg: DecryptedMessage, text: string) => {
-        removeOptimisticMessage(props.sessionId, msg.id)
-        if (text) {
-            assistantApi.composer().setText(text)
-        }
-        props.onEdit?.({ text, pendingSchedule: computeEditPendingSchedule(msg.scheduledAt, Date.now()) })
-    }, [props.sessionId, assistantApi, props.onEdit])
-
-    const handleLocalCancel = useCallback((msg: DecryptedMessage) => {
-        removeOptimisticMessage(props.sessionId, msg.id)
-    }, [props.sessionId])
-
-    if (queued.length === 0) return null
+    if (queued.length === 0) {
+        return null
+    }
 
     return (
-        <div role="status" className="mx-auto mb-1 w-full max-w-content">
+        <div
+            role="status"
+            aria-label={`${queued.length} queued message${queued.length === 1 ? '' : 's'} pending invocation`}
+            className="mx-auto w-full max-w-content mb-1"
+        >
             <div className="px-3 py-2 text-sm text-[var(--app-fg-muted)]">
-                <div className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-[var(--app-hint)]">
+                <div className="flex items-center gap-1.5 mb-1.5 text-xs font-medium text-[var(--app-hint)]">
                     <ClockIcon />
-                    <span>{t('queuedMessages.title')}</span>
+                    <span>Queued</span>
                 </div>
-                <ul className="flex max-h-32 flex-col gap-1.5 overflow-y-auto sm:max-h-48" aria-label="Queued messages">
+                <ul
+                    className="flex flex-col gap-1.5 max-h-32 sm:max-h-48 overflow-y-auto"
+                    aria-label="Queued messages"
+                >
                     {queued.map((msg) => {
-                        const text = getTextFromMessage(msg)
+                        const preview = getQueuedMessagePreview(msg)
+                        const { text, attachmentNames } = preview
+                        const editText = getQueuedMessageEditText(preview)
+                        const hasAttachments = attachmentNames.length > 0
                         const localId = msg.localId ?? msg.id
                         const isPending = cancelMutation.isPending && cancelMutation.variables?.localId === localId
                         const canCancel = computeCanCancel({ id: msg.id, localId: msg.localId, isPending })
-                        const hasServerEcho = msg.localId ? msg.id !== msg.localId : true
+
+                        const handleCancel = () => {
+                            if (!canCancel) return
+                            cancelMutation.mutate({
+                                sessionId,
+                                messageId: msg.id,
+                                localId,
+                                snapshot: msg,
+                            })
+                        }
+
+                        const handleEdit = () => {
+                            if (!canCancel) return
+                            // Edit = cancel + restore composer (text + schedule).
+                            // Works the same for immediate-queued and future-scheduled messages.
+                            const restoredPendingSchedule = computeEditPendingSchedule(msg.scheduledAt, Date.now())
+
+                            cancelMutation.mutate(
+                                {
+                                    sessionId,
+                                    messageId: msg.id,
+                                    localId,
+                                    snapshot: msg,
+                                },
+                                {
+                                    onSuccess: (result) => {
+                                        // Race guard: if the agent already consumed this message, skip prefill
+                                        // and inform the user so they aren't confused by the row disappearing.
+                                        if (result.status === 'invoked') {
+                                            addToast({
+                                                title: t('queuedMessages.editAlreadyInvoked'),
+                                                body: '',
+                                                sessionId,
+                                                url: window.location.href,
+                                            })
+                                            return
+                                        }
+                                        // Restore text into composer
+                                        if (editText) {
+                                            assistantApi.composer().setText(editText)
+                                        }
+                                        // Restore schedule via parent callback (if provided)
+                                        onEdit?.({ text: editText, pendingSchedule: restoredPendingSchedule })
+                                    },
+                                }
+                            )
+                        }
+
+                        const canEdit = canCancel
+
                         return (
-                            <li key={msg.localId ?? msg.id} className="flex min-w-0 items-start gap-2 rounded-lg bg-[var(--app-secondary-bg)] px-3 py-2 shadow-sm">
-                                <div className="min-w-0 flex-1">
-                                    <span className="line-clamp-3 whitespace-pre-wrap break-words text-[var(--app-fg)]">{text}</span>
-                                    {msg.scheduledAt != null && msg.scheduledAt > Date.now() ? (
-                                        <div className="mt-1 flex items-center gap-1 text-xs text-[var(--app-hint)]">
-                                            <ClockIcon />
-                                            <span>{t('queuedMessages.scheduledFor', { time: formatScheduledTime(msg.scheduledAt) })}</span>
+                            <li
+                                key={msg.localId ?? msg.id}
+                                className="flex items-start gap-2 min-w-0 rounded-lg bg-[var(--app-secondary-bg)] px-3 py-2 shadow-sm"
+                            >
+                                <div className="flex-1 min-w-0">
+                                    {text ? (
+                                        <span className="line-clamp-3 whitespace-pre-wrap break-words text-[var(--app-fg)]">
+                                            {text}
+                                        </span>
+                                    ) : null}
+                                    {hasAttachments ? (
+                                        <div className={text ? 'mt-1 flex flex-wrap gap-1' : 'flex flex-wrap gap-1'}>
+                                            {attachmentNames.map((name, index) => (
+                                                <span
+                                                    key={`${name}-${index}`}
+                                                    className="inline-flex max-w-full items-center gap-1 rounded-md bg-[var(--app-bg)] px-2 py-0.5 text-xs text-[var(--app-hint)]"
+                                                    title={name}
+                                                >
+                                                    <span aria-hidden="true">📎</span>
+                                                    <span className="truncate">{name}</span>
+                                                </span>
+                                            ))}
                                         </div>
                                     ) : null}
+                                    {msg.scheduledAt != null && msg.scheduledAt > Date.now() && (
+                                        <div className="mt-1 flex items-center gap-1 text-xs text-[var(--app-hint)]">
+                                            <ClockIcon />
+                                            <span>
+                                                {t('queuedMessages.scheduledFor', { time: formatScheduledTime(msg.scheduledAt) })}
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="flex shrink-0 items-center gap-1">
                                     <button
                                         type="button"
-                                        aria-label={t('queuedMessages.edit')}
-                                        disabled={!canCancel}
-                                        onClick={() => {
-                                            if (!canCancel) return
-                                            if (!hasServerEcho) {
-                                                handleLocalEdit(msg, text)
-                                                return
-                                            }
-                                            cancelMutation.mutate({ sessionId: props.sessionId, messageId: msg.id, localId, snapshot: msg }, {
-                                                onSuccess: (result) => {
-                                                    if (result.status === 'invoked') return
-                                                    if (text) {
-                                                        assistantApi.composer().setText(text)
-                                                    }
-                                                    props.onEdit?.({ text, pendingSchedule: computeEditPendingSchedule(msg.scheduledAt, Date.now()) })
-                                                }
-                                            })
-                                        }}
+                                        aria-label="Edit queued message"
+                                        disabled={!canEdit}
+                                        onClick={handleEdit}
                                         onMouseDown={(e) => e.preventDefault()}
                                         className="flex h-6 w-6 items-center justify-center rounded text-[var(--app-hint)] transition-colors hover:bg-[var(--app-border)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-40"
                                     >
-                                        ✎
+                                        <svg
+                                            viewBox="0 0 16 16"
+                                            fill="none"
+                                            className="h-3.5 w-3.5"
+                                            aria-hidden="true"
+                                        >
+                                            <path
+                                                d="M11.5 2.5a1.414 1.414 0 0 1 2 2L5 13H3v-2L11.5 2.5Z"
+                                                stroke="currentColor"
+                                                strokeWidth="1.4"
+                                                strokeLinecap="round"
+                                                strokeLinejoin="round"
+                                            />
+                                        </svg>
                                     </button>
                                     <button
                                         type="button"
-                                        aria-label={t('queuedMessages.cancel')}
+                                        aria-label="Cancel queued message"
                                         disabled={!canCancel}
-                                        onClick={() => {
-                                            if (!canCancel) return
-                                            if (!hasServerEcho) {
-                                                handleLocalCancel(msg)
-                                                return
-                                            }
-                                            cancelMutation.mutate({ sessionId: props.sessionId, messageId: msg.id, localId, snapshot: msg })
-                                        }}
+                                        onClick={handleCancel}
                                         onMouseDown={(e) => e.preventDefault()}
                                         className="flex h-6 w-6 items-center justify-center rounded text-[var(--app-hint)] transition-colors hover:bg-[var(--app-border)] hover:text-[var(--app-fg)] disabled:cursor-not-allowed disabled:opacity-40"
                                     >
-                                        ✕
+                                        <svg
+                                            viewBox="0 0 16 16"
+                                            fill="none"
+                                            className="h-3.5 w-3.5"
+                                            aria-hidden="true"
+                                        >
+                                            <path
+                                                d="M4 4l8 8M12 4l-8 8"
+                                                stroke="currentColor"
+                                                strokeWidth="1.5"
+                                                strokeLinecap="round"
+                                            />
+                                        </svg>
                                     </button>
                                 </div>
                             </li>

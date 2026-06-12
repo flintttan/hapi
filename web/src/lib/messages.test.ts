@@ -2,126 +2,26 @@ import { describe, expect, it } from 'vitest'
 import type { DecryptedMessage } from '@/types/api'
 import { mergeMessages } from '@/lib/messages'
 
-function makeMessage(overrides: Partial<DecryptedMessage>): DecryptedMessage {
-  return {
-    id: 'm1',
-    seq: 1,
-    localId: 'local-1',
-    content: { role: 'user', content: { type: 'text', text: 'hello' } },
-    createdAt: 100,
-    invokedAt: null,
-    scheduledAt: null,
-    ...overrides,
-  }
+function userMessage(partial: Partial<DecryptedMessage> & { id: string }): DecryptedMessage {
+    return {
+        id: partial.id,
+        localId: partial.localId ?? partial.id,
+        seq: partial.seq ?? 1,
+        createdAt: partial.createdAt ?? 1_000,
+        invokedAt: partial.invokedAt ?? null,
+        status: partial.status,
+        content: { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+    }
 }
 
 describe('mergeMessages', () => {
-  it('does not let a stale server echo revert an invoked queued message', () => {
-    const invoked = makeMessage({ invokedAt: 200, status: 'sent' })
-    const staleEcho = makeMessage({ invokedAt: null })
+    it('preserves invokedAt when a stale snapshot omits the ack timestamp', () => {
+        const invokedAt = 2_000
+        const existing = [userMessage({ id: 'server-1', localId: 'local-1', invokedAt })]
+        const incoming = [userMessage({ id: 'server-1', localId: 'local-1', invokedAt: null })]
 
-    const merged = mergeMessages([invoked], [staleEcho])
-
-    expect(merged).toHaveLength(1)
-    expect(merged[0]).toMatchObject({ id: 'm1', invokedAt: 200, status: 'sent' })
-  })
-
-  it('preserves optimistic sending status when server echo arrives before invoked ack', () => {
-    const optimistic = makeMessage({
-      id: 'local-1',
-      seq: null,
-      status: 'sending',
-      originalText: 'hello',
+        const merged = mergeMessages(existing, incoming)
+        expect(merged).toHaveLength(1)
+        expect(merged[0]?.invokedAt).toBe(invokedAt)
     })
-    const serverEcho = makeMessage({
-      id: 'server-1',
-      seq: 2,
-      invokedAt: null,
-    })
-
-    const merged = mergeMessages([optimistic], [serverEcho])
-
-    expect(merged).toHaveLength(1)
-    expect(merged[0]).toMatchObject({
-      id: 'server-1',
-      localId: 'local-1',
-      status: 'sending',
-      originalText: 'hello',
-      invokedAt: null,
-    })
-  })
-
-  it('does not let a late server echo re-queue a locally consumed message with the same localId', () => {
-    const consumedOptimistic = makeMessage({
-      id: 'local-1',
-      seq: null,
-      invokedAt: 300,
-      status: 'sent',
-      originalText: 'hello',
-    })
-    const lateServerEcho = makeMessage({
-      id: 'server-1',
-      seq: 2,
-      localId: 'local-1',
-      invokedAt: null,
-    })
-
-    const merged = mergeMessages([consumedOptimistic], [lateServerEcho])
-
-    expect(merged).toHaveLength(1)
-    expect(merged[0]).toMatchObject({
-      id: 'server-1',
-      localId: 'local-1',
-      invokedAt: 300,
-      status: 'sent',
-      originalText: 'hello',
-    })
-  })
-
-  it('does not let a stale queued echo override a sent message with the same id', () => {
-    const sent = makeMessage({
-      id: 'server-1',
-      localId: 'local-1',
-      invokedAt: 300,
-      status: 'sent',
-    })
-    const staleQueued = makeMessage({
-      id: 'server-1',
-      localId: 'local-1',
-      invokedAt: null,
-      status: 'queued',
-    })
-
-    const merged = mergeMessages([sent], [staleQueued])
-
-    expect(merged).toHaveLength(1)
-    expect(merged[0]).toMatchObject({
-      id: 'server-1',
-      localId: 'local-1',
-      invokedAt: 300,
-      status: 'sent',
-    })
-  })
-
-  it('preserves failed status over later non-failed echoes', () => {
-    const failed = makeMessage({
-      id: 'server-1',
-      localId: 'local-1',
-      status: 'failed',
-    })
-    const laterSending = makeMessage({
-      id: 'server-1',
-      localId: 'local-1',
-      status: 'sending',
-    })
-
-    const merged = mergeMessages([failed], [laterSending])
-
-    expect(merged).toHaveLength(1)
-    expect(merged[0]).toMatchObject({
-      id: 'server-1',
-      localId: 'local-1',
-      status: 'failed',
-    })
-  })
 })

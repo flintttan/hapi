@@ -12,7 +12,6 @@ export function normalizeDecryptedMessage(message: DecryptedMessage): Normalized
             id: message.id,
             localId: message.localId,
             createdAt: message.createdAt,
-            invokedAt: message.invokedAt ?? null,
             role: 'agent',
             isSidechain: false,
             content: [{ type: 'text', text: safeStringify(message.content), uuid: message.id, parentUUID: null }],
@@ -24,18 +23,18 @@ export function normalizeDecryptedMessage(message: DecryptedMessage): Normalized
     if (record.role === 'user') {
         const normalized = normalizeUserRecord(message.id, message.localId, message.createdAt, record.content, record.meta)
         return normalized
-            ? { ...normalized, invokedAt: message.invokedAt ?? null, status: message.status, originalText: message.originalText }
+            ? { ...normalized, status: message.status, originalText: message.originalText, invokedAt: message.invokedAt }
             : {
                 id: message.id,
                 localId: message.localId,
                 createdAt: message.createdAt,
-                invokedAt: message.invokedAt ?? null,
                 role: 'user',
                 isSidechain: false,
                 content: { type: 'text', text: safeStringify(record.content) },
                 meta: record.meta,
                 status: message.status,
-                originalText: message.originalText
+                originalText: message.originalText,
+                invokedAt: message.invokedAt
             }
     }
     if (record.role === 'agent') {
@@ -47,18 +46,18 @@ export function normalizeDecryptedMessage(message: DecryptedMessage): Normalized
             return null
         }
         return normalized
-            ? { ...normalized, invokedAt: message.invokedAt ?? null, status: message.status, originalText: message.originalText }
+            ? { ...normalized, status: message.status, originalText: message.originalText, invokedAt: message.invokedAt }
             : {
                 id: message.id,
                 localId: message.localId,
                 createdAt: message.createdAt,
-                invokedAt: message.invokedAt ?? null,
                 role: 'agent',
                 isSidechain: false,
                 content: [{ type: 'text', text: safeStringify(record.content), uuid: message.id, parentUUID: null }],
                 meta: record.meta,
                 status: message.status,
-                originalText: message.originalText
+                originalText: message.originalText,
+                invokedAt: message.invokedAt
             }
     }
 
@@ -66,12 +65,12 @@ export function normalizeDecryptedMessage(message: DecryptedMessage): Normalized
         id: message.id,
         localId: message.localId,
         createdAt: message.createdAt,
-        invokedAt: message.invokedAt ?? null,
         role: 'agent',
         isSidechain: false,
         content: [{ type: 'text', text: safeStringify(record.content), uuid: message.id, parentUUID: null }],
         meta: record.meta,
         status: message.status,
-        originalText: message.originalText
+        originalText: message.originalText,
+        invokedAt: message.invokedAt
     }
 }

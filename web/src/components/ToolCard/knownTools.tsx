@@ -6,6 +6,15 @@ import type { ChecklistItem } from '@/components/ToolCard/checklist'
 import { extractTodoChecklist, extractUpdatePlanChecklist } from '@/components/ToolCard/checklist'
 import { basename, resolveDisplayPath } from '@/utils/path'
 import { getInputStringAny, truncate } from '@/lib/toolInputUtils'
+import {
+    getCodexAgentActivity,
+    getCodexAgentPrompt,
+    getCodexAgentReasoningEffortLabel,
+    getCodexAgentSummary,
+    getCodexAgentTargets,
+    getCodexAgentType,
+    summarizeCodexAgentResult
+} from '@/components/ToolCard/codexAgents'
 
 const DEFAULT_ICON_CLASS = 'h-3.5 w-3.5'
 // Tool presentation registry for `hapi/web` (aligned with `hapi-app`).
@@ -135,9 +144,8 @@ export const knownTools: Record<string, {
     CodexBash: {
         icon: (opts) => {
             if (isObject(opts.input) && Array.isArray(opts.input.parsed_cmd) && opts.input.parsed_cmd.length > 0) {
-                const first = opts.input.parsed_cmd[0] ?? null
-                if (!first || !isObject(first)) return <TerminalIcon className={DEFAULT_ICON_CLASS} />
-                const type = first.type
+                const first = opts.input.parsed_cmd[0]
+                const type = isObject(first) ? first.type : null
                 if (type === 'read') return <EyeIcon className={DEFAULT_ICON_CLASS} />
                 if (type === 'write') return <FileDiffIcon className={DEFAULT_ICON_CLASS} />
             }
@@ -145,9 +153,8 @@ export const knownTools: Record<string, {
         },
         title: (opts) => {
             if (isObject(opts.input) && Array.isArray(opts.input.parsed_cmd) && opts.input.parsed_cmd.length === 1) {
-                const parsed = opts.input.parsed_cmd[0] ?? null
-                if (!parsed || !isObject(parsed)) return opts.description ?? 'Terminal'
-                if (parsed.type === 'read' && typeof parsed.name === 'string') {
+                const parsed = opts.input.parsed_cmd[0]
+                if (isObject(parsed) && parsed.type === 'read' && typeof parsed.name === 'string') {
                     return resolveDisplayPath(parsed.name, opts.metadata)
                 }
             }
@@ -161,7 +168,12 @@ export const knownTools: Record<string, {
             }
             return null
         },
-        minimal: true
+        minimal: (opts) => {
+            const result = isObject(opts.result) ? opts.result : null
+            const stdout = result && typeof result.stdout === 'string' ? result.stdout.trim() : ''
+            const stderr = result && typeof result.stderr === 'string' ? result.stderr.trim() : ''
+            return stdout.length === 0 && stderr.length === 0
+        }
     },
     CodexPermission: {
         icon: () => <QuestionIcon className={DEFAULT_ICON_CLASS} />,
@@ -170,6 +182,24 @@ export const knownTools: Record<string, {
             return tool ? `Permission: ${tool}` : 'Permission request'
         },
         subtitle: (opts) => getInputStringAny(opts.input, ['message', 'command']) ?? null,
+        minimal: true
+    },
+    CodexAgent: {
+        icon: () => <RocketIcon className={DEFAULT_ICON_CLASS} />,
+        title: (opts) => {
+            const summary = getCodexAgentSummary(opts.input)
+            if (summary) return `Agent: ${summary}`
+            return 'Agent'
+        },
+        subtitle: (opts) => {
+            const activity = getCodexAgentActivity(opts.input)
+            const result = summarizeCodexAgentResult('wait_agent', opts.result)
+            const prompt = getCodexAgentPrompt(opts.input)
+            const status = activity ?? result ?? (prompt ? truncate(prompt, 120) : null)
+            const effort = getCodexAgentReasoningEffortLabel(opts.input)
+            if (effort && status) return `${effort} · ${status}`
+            return effort ?? status
+        },
         minimal: true
     },
     shell_command: {
@@ -291,11 +321,71 @@ export const knownTools: Record<string, {
         icon: () => <RocketIcon className={DEFAULT_ICON_CLASS} />,
         title: (opts) => {
             const description = getInputStringAny(opts.input, ['description'])
-            return description ?? 'Agent'
+            return description ?? 'Launch Agent'
         },
         subtitle: (opts) => {
+            // Subagent invocation: show prompt preview (same as Task)
+            const prompt = getInputStringAny(opts.input, ['prompt'])
+            if (prompt) return truncate(prompt, 120)
             const model = getInputStringAny(opts.input, ['subagent_type'])
             return model ?? null
+        },
+        minimal: (opts) => opts.childrenCount === 0
+    },
+    spawn_agent: {
+        icon: () => <RocketIcon className={DEFAULT_ICON_CLASS} />,
+        title: (opts) => {
+            const agentType = getCodexAgentType(opts.input)
+            return agentType ? `Spawn ${agentType} agent` : 'Spawn agent'
+        },
+        subtitle: (opts) => {
+            const summary = summarizeCodexAgentResult(opts.toolName, opts.result)
+            if (summary) return summary
+            const agentType = getCodexAgentType(opts.input)
+            return agentType ? `${agentType} agent` : 'Background agent'
+        },
+        minimal: true
+    },
+    send_input: {
+        icon: () => <MessageSquareIcon className={DEFAULT_ICON_CLASS} />,
+        title: () => 'Message agent',
+        subtitle: (opts) => {
+            const targets = getCodexAgentTargets(opts.input)
+            return targets.length > 0 ? targets.join(', ') : 'Background message'
+        },
+        minimal: true
+    },
+    resume_agent: {
+        icon: () => <RocketIcon className={DEFAULT_ICON_CLASS} />,
+        title: () => 'Resume agent',
+        subtitle: (opts) => {
+            const targets = getCodexAgentTargets(opts.input)
+            return targets.length > 0 ? targets.join(', ') : null
+        },
+        minimal: true
+    },
+    wait_agent: {
+        icon: () => <RocketIcon className={DEFAULT_ICON_CLASS} />,
+        title: (opts) => {
+            const targets = getCodexAgentTargets(opts.input)
+            return targets.length > 1 ? `Wait for ${targets.length} agents` : 'Wait for agent'
+        },
+        subtitle: (opts) => {
+            const summary = summarizeCodexAgentResult(opts.toolName, opts.result)
+            if (summary) return summary
+            const targets = getCodexAgentTargets(opts.input)
+            return targets.length > 0 ? targets.join(', ') : null
+        },
+        minimal: true
+    },
+    close_agent: {
+        icon: () => <RocketIcon className={DEFAULT_ICON_CLASS} />,
+        title: () => 'Close agent',
+        subtitle: (opts) => {
+            const summary = summarizeCodexAgentResult(opts.toolName, opts.result)
+            if (summary) return summary
+            const targets = getCodexAgentTargets(opts.input)
+            return targets.length > 0 ? targets.join(', ') : null
         },
         minimal: true
     },
@@ -443,7 +533,12 @@ export const knownTools: Record<string, {
     }
 }
 
-export function getToolPresentation(opts: Omit<ToolOpts, 'metadata'> & { metadata: SessionMetadataSummary | null }): ToolPresentation {
+type Translator = (key: string, params?: Record<string, string | number>) => string
+
+export function getToolPresentation(
+    opts: Omit<ToolOpts, 'metadata'> & { metadata: SessionMetadataSummary | null },
+    t?: Translator
+): ToolPresentation {
     if (opts.toolName.startsWith('mcp__')) {
         return {
             icon: <PuzzleIcon className={DEFAULT_ICON_CLASS} />,
@@ -469,13 +564,29 @@ export function getToolPresentation(opts: Omit<ToolOpts, 'metadata'> & { metadat
     const pattern = getInputStringAny(opts.input, ['pattern'])
     const url = getInputStringAny(opts.input, ['url'])
     const query = getInputStringAny(opts.input, ['query'])
+    const name = getInputStringAny(opts.input, ['name'])
 
-    const subtitle = filePath ?? command ?? pattern ?? url ?? query
+    const subtitle = filePath ?? command ?? pattern ?? url ?? query ?? name
+
+    // Some ACP agents emit `tool_call.title` as a verbatim argument (the shell
+    // command or the file path itself). When it equals the input field,
+    // promote a semantic label to the title slot and let the verbatim arg
+    // become the subtitle, so the card reads like a sentence instead of
+    // showing the same string twice. Labels are translated when a Translator
+    // is supplied; tests and call sites without i18n fall back to English.
+    let title = opts.toolName
+    if (subtitle && subtitle === title) {
+        if (filePath) title = t ? t('tool.semanticTitle.readFile') : 'Read file'
+        else if (command) title = t ? t('tool.semanticTitle.runShell') : 'Run shell'
+        else if (pattern) title = t ? t('tool.semanticTitle.search') : 'Search'
+        else if (url) title = t ? t('tool.semanticTitle.openUrl') : 'Open URL'
+        else if (query) title = t ? t('tool.semanticTitle.query') : 'Query'
+    }
 
     return {
         icon: <WrenchIcon className={DEFAULT_ICON_CLASS} />,
-        title: opts.toolName,
-        subtitle: subtitle ? truncate(subtitle, 80) : null,
+        title,
+        subtitle: subtitle && subtitle !== title ? truncate(subtitle, 80) : null,
         minimal: true
     }
 }

@@ -1,4 +1,5 @@
 import type { ChatBlock, ToolCallBlock } from '@/chat/types'
+import { isSubagentToolName } from '@/chat/subagentTool'
 import { isAskUserQuestionToolName } from '@/components/ToolCard/askUserQuestion'
 import { isRequestUserInputToolName } from '@/components/ToolCard/requestUserInput'
 import { getInputStringAny } from '@/lib/toolInputUtils'
@@ -196,7 +197,7 @@ function isInteractiveToolBlock(block: ToolCallBlock): boolean {
 }
 
 export function isEligibleForToolGrouping(block: ToolCallBlock): boolean {
-    if (MILESTONE_TOOL_NAMES.has(block.tool.name)) return false
+    if (isSubagentToolName(block.tool.name)) return false
     if (PLAN_TOOL_NAMES.has(block.tool.name)) return false
     if (MILESTONE_TOOL_NAMES.has(block.tool.name)) return false
     if (isInteractiveToolBlock(block)) return false
@@ -261,6 +262,7 @@ export function buildVisibleChatBlocks(
             kind: 'tool-group',
             id: createToolGroupId(tools, needsOlderHistory, previousGroups),
             createdAt: tools[0].createdAt,
+            invokedAt: tools[0].invokedAt,
             firstToolId: tools[0].id,
             lastToolId: tools[tools.length - 1].id,
             tools,

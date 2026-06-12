@@ -109,6 +109,14 @@ bun run build:single-exe # All-in-one binary
 - `messages.ts` - Message parsing utilities
 - `modes.ts` - Permission/model mode definitions
 
+## Pre-push self-review (agents)
+
+Before commit/push/PR: use the **`pre-push-review`** skill (`~/.cursor/skills/pre-push-review/`).
+
+1. **Mechanical:** `bun typecheck && bun run test` (matches `.github/workflows/test.yml`)
+2. **Logic:** skim `git diff origin/main...HEAD`; apply `.github/prompts/codex-pr-review.md` as a local Major checklist (no Codex required)
+3. **Style:** optional
+
 ## Testing
 
 - Test framework: Vitest (via `bun run test`)
@@ -137,8 +145,45 @@ bun run build:single-exe # All-in-one binary
 - **RPC**: CLI registers handlers (`rpc-register`), hub routes requests via `rpcGateway.ts`
 - **Versioned updates**: CLI sends `update-metadata`/`update-state` with version; hub rejects stale
 - **Session modes**: `local` (terminal) vs `remote` (web-controlled); switchable mid-session
-- **Permission modes**: `default`, `acceptEdits`, `bypassPermissions`, `plan`
+- **Permission modes**: `default`, `acceptEdits`, `auto`, `bypassPermissions`, `plan`
 - **Namespaces**: Multi-user isolation via `CLI_API_TOKEN:<namespace>` suffix
+
+## Adding new web features — consider an FUE
+
+When you ship a non-essential feature (the 20% of sessions, not the 80%), consider wrapping its affordance in the generic First-User-Experience primitive so existing users discover it without a giant always-visible UI block.
+
+- **Hook**: `web/src/lib/use-fue.ts` — `useFue(featureId)` returns `{ status, engage, dismiss }`. Storage namespace `hapi.fue.v1.<featureId>` (one localStorage key per feature, isolated from any upstream onboarding flow).
+- **Components**: `web/src/components/Fue.tsx` — `<FueDot>` (small pulsing badge for the affordance) and `<FueCallout>` (portal-rendered popover with title/body + "Got it" affirmative-action dismiss).
+
+Pattern (~10 lines around the affordance):
+
+```tsx
+const fue = useFue('my-feature')
+const buttonRef = useRef<HTMLButtonElement>(null)
+return (
+    <>
+        <button ref={buttonRef} onClick={() => { fue.engage(); doThing() }}>
+            <Icon />
+            {fue.status !== 'acknowledged' ? <FueDot pulsing={fue.status === 'unseen'} /> : null}
+        </button>
+        {fue.status === 'engaging' ? (
+            <FueCallout
+                title={t('myFeature.fueTitle')}
+                body={t('myFeature.fueBody')}
+                onDismiss={fue.dismiss}
+                anchorRef={buttonRef}
+            />
+        ) : null}
+    </>
+)
+```
+
+Rules:
+- Affirmative action only: there is no auto-timeout — user dismisses by clicking "Got it" (reading speed varies).
+- The FUE dot and any feature-specific badge (e.g. an entry counter) should be **mutually exclusive**: onboarding signal beats inventory signal until acknowledged.
+- Storage is opt-in per-feature; if upstream ships its own onboarding for a feature, just don't wrap that affordance.
+
+Canonical example: scratchlist toggle in `web/src/components/AssistantChat/ComposerButtons.tsx` (`ScratchlistToggleButton`).
 
 ## Critical Thinking
 

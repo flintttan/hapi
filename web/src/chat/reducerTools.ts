@@ -1,5 +1,5 @@
 import type { AgentState } from '@/types/api'
-import type { ChatBlock, ChatToolCall, NormalizedMessage, ToolCallBlock, ToolPermission } from '@/chat/types'
+import type { ChatBlock, ChatToolCall, NormalizedMessage, ToolCallBlock, ToolPermission, UsageData } from '@/chat/types'
 
 export type PermissionEntry = {
     toolName: string
@@ -56,6 +56,10 @@ export function ensureToolBlock(
     id: string,
     seed: {
         createdAt: number
+        invokedAt?: number | null
+        durationMs?: number
+        usage?: UsageData
+        model?: string | null
         localId: string | null
         meta?: unknown
         name: string
@@ -74,22 +78,41 @@ export function ensureToolBlock(
         // Preserve earliest createdAt for stable ordering.
         if (seed.createdAt < existing.createdAt) {
             existing.createdAt = seed.createdAt
-            existing.tool.createdAt = seed.createdAt
+            existing.tool = { ...existing.tool, createdAt: seed.createdAt }
         }
         if (seed.permission) {
-            existing.tool.permission = { ...existing.tool.permission, ...seed.permission }
+            const nextPermission = { ...existing.tool.permission, ...seed.permission }
+            let nextState = existing.tool.state
             if (existing.tool.state === 'running' && seed.permission.status === 'pending') {
-                existing.tool.state = 'pending'
+                nextState = 'pending'
             }
+            existing.tool = { ...existing.tool, permission: nextPermission, state: nextState }
         }
         if (seed.name && (!isPlaceholderToolName(seed.name) || isPlaceholderToolName(existing.tool.name))) {
-            existing.tool.name = seed.name
+            existing.tool = { ...existing.tool, name: seed.name }
         }
         if (seed.input !== null && seed.input !== undefined) {
-            existing.tool.input = seed.input
+            existing.tool = { ...existing.tool, input: seed.input }
         }
         if (seed.description !== null) {
-            existing.tool.description = seed.description
+            existing.tool = { ...existing.tool, description: seed.description }
+        }
+        // The first call (tool_use) records when the tool was invoked. The
+        // second call (tool_result) carries the result message's invokedAt,
+        // which is when the result was processed — not when the tool was
+        // invoked. Preserve the original timestamp so the metadata footer
+        // still answers "when was this tool invoked?" correctly.
+        if (seed.invokedAt !== undefined && existing.invokedAt == null) {
+            existing.invokedAt = seed.invokedAt
+        }
+        if (seed.durationMs !== undefined) {
+            existing.durationMs = seed.durationMs
+        }
+        if (seed.usage !== undefined) {
+            existing.usage = seed.usage
+        }
+        if (seed.model !== undefined) {
+            existing.model = seed.model
         }
         return existing
     }
@@ -117,6 +140,10 @@ export function ensureToolBlock(
         id,
         localId: seed.localId,
         createdAt: seed.createdAt,
+        invokedAt: seed.invokedAt,
+        durationMs: seed.durationMs,
+        usage: seed.usage,
+        model: seed.model,
         tool,
         children: [],
         meta: seed.meta

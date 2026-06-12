@@ -4,7 +4,7 @@ import type { SessionMetadataSummary } from '@/types/api'
 import type { ChatToolCall, ToolPermission } from '@/chat/types'
 import { usePlatform } from '@/hooks/usePlatform'
 import { Spinner } from '@/components/Spinner'
-import { isCodexFamilyFlavor } from '@/lib/agentFlavorUtils'
+import { isCodexFamilyFlavor } from '@hapi/protocol'
 import { getInputStringAny } from '@/lib/toolInputUtils'
 import { useTranslation } from '@/lib/use-translation'
 
@@ -24,9 +24,15 @@ function isToolAllowedForSession(toolName: string, toolInput: unknown, allowedTo
 
 function isCodexSession(metadata: SessionMetadataSummary | null, toolName: string): boolean {
     return isCodexFamilyFlavor(metadata?.flavor)
+        || metadata?.flavor === 'cursor'
         || toolName.startsWith('Codex')
         || toolName.startsWith('Gemini')
         || toolName.startsWith('OpenCode')
+        || toolName.startsWith('Cursor')
+}
+
+function isClaudeSession(metadata: SessionMetadataSummary | null): boolean {
+    return metadata?.flavor === 'claude'
 }
 
 function formatPermissionSummary(permission: ToolPermission, toolName: string, toolInput: unknown, codex: boolean, t: (key: string) => string): string {
@@ -43,7 +49,7 @@ function formatPermissionSummary(permission: ToolPermission, toolName: string, t
 
     if (permission.status === 'approved') {
         if (permission.mode === 'acceptEdits') return t('tool.approvedAllowAllEdits')
-        if (isToolAllowedForSession(toolName, toolInput, permission.allowedTools)) return t('tool.approvedForSession')
+        if (permission.decision === 'approved_for_session' || isToolAllowedForSession(toolName, toolInput, permission.allowedTools)) return t('tool.approvedForSession')
         return t('tool.approved')
     }
 
@@ -56,29 +62,32 @@ function formatPermissionSummary(permission: ToolPermission, toolName: string, t
 
 function PermissionRowButton(props: {
     label: string
-    tone: 'allow' | 'deny' | 'neutral'
+    tone: 'allow' | 'deny' | 'neutral' | 'muted'
     loading?: boolean
     disabled: boolean
     onClick: () => void
 }) {
-    const base = 'flex w-full items-center justify-between rounded-md px-2 py-2 text-sm text-left transition-colors disabled:pointer-events-none disabled:opacity-50 hover:bg-[var(--app-subtle-bg)]'
-    const tone = props.tone === 'allow'
-        ? 'text-emerald-600'
-        : props.tone === 'deny'
-            ? 'text-red-600'
-            : 'text-[var(--app-link)]'
-
     return (
         <button
             type="button"
-            className={`${base} ${tone}`}
+            className={`flex w-full items-center justify-between gap-3 rounded-[20px] bg-[var(--app-tool-card-bg)] px-3 py-2 text-left transition-colors hover:bg-[var(--app-tool-card-hover-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-link)] disabled:pointer-events-none disabled:opacity-50 ${
+                props.tone === 'allow'
+                    ? 'text-[var(--app-badge-success-text)]'
+                    : props.tone === 'deny'
+                        ? 'text-[var(--app-badge-error-text)]'
+                        : props.tone === 'muted'
+                            ? 'text-[var(--app-tool-card-muted-action-fg)]'
+                            : 'text-[var(--app-fg)]'
+            }`}
             disabled={props.disabled}
             aria-busy={props.loading === true}
             onClick={props.onClick}
         >
-            <span className="flex-1">{props.label}</span>
+            <span className="tracking-tight min-w-0 flex-1 text-sm font-medium leading-tight break-words">
+                {props.label}
+            </span>
             {props.loading ? (
-                <span className="ml-2 shrink-0">
+                <span className="shrink-0">
                     <Spinner size="sm" label={null} className="text-current" />
                 </span>
             ) : null}
@@ -103,6 +112,7 @@ export function PermissionFooter(props: {
     const [error, setError] = useState<string | null>(null)
 
     const codex = useMemo(() => isCodexSession(props.metadata, props.tool.name), [props.metadata, props.tool.name])
+    const claude = useMemo(() => isClaudeSession(props.metadata), [props.metadata])
 
     if (!permission) return null
 
@@ -133,9 +143,10 @@ export function PermissionFooter(props: {
         || toolName === 'NotebookEdit'
         || toolName === 'exit_plan_mode'
         || toolName === 'ExitPlanMode'
+        || toolName === 'CursorCreatePlan'
 
     const canAllowForSession = !codex && isPending && !hideAllowForSession
-    const canAllowAllEdits = !codex && isPending && isEditTool
+    const canAllowAllEdits = claude && isPending && isEditTool
 
     const approve = async () => {
         if (!isPending || loading || loadingAllEdits || loadingForSession) return
@@ -154,9 +165,13 @@ export function PermissionFooter(props: {
     const approveForSession = async () => {
         if (!canAllowForSession || loading || loadingAllEdits || loadingForSession) return
         setLoadingForSession(true)
-        const command = toolName === 'Bash' ? getInputStringAny(props.tool.input, ['command', 'cmd']) : null
-        const toolIdentifier = toolName === 'Bash' && command ? `Bash(${command})` : toolName
-        await run(() => props.api.approvePermission(props.sessionId, permission.id, { allowTools: [toolIdentifier] }), 'success')
+        if (claude) {
+            const command = toolName === 'Bash' ? getInputStringAny(props.tool.input, ['command', 'cmd']) : null
+            const toolIdentifier = toolName === 'Bash' && command ? `Bash(${command})` : toolName
+            await run(() => props.api.approvePermission(props.sessionId, permission.id, { allowTools: [toolIdentifier] }), 'success')
+        } else {
+            await run(() => props.api.approvePermission(props.sessionId, permission.id, { decision: 'approved_for_session' }), 'success')
+        }
         setLoadingForSession(false)
     }
 
@@ -194,23 +209,23 @@ export function PermissionFooter(props: {
         if (!permission.reason) return null
 
         return (
-            <div className="mt-2 text-xs text-red-600">
+            <div className="mt-2 rounded-xl border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] px-3 py-2 text-xs text-[var(--app-badge-error-text)]">
                 {permission.reason}
             </div>
         )
     }
 
     return (
-        <div className="mt-2">
-            <div className="text-xs text-[var(--app-hint)]">{summary}</div>
+        <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3">
+            <div className="text-xs font-medium text-[var(--app-hint)]">{summary}</div>
 
             {error ? (
-                <div className="mt-2 text-xs text-red-600">
+                <div className="mt-2 rounded-xl border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] px-3 py-2 text-xs text-[var(--app-badge-error-text)]">
                     {error}
                 </div>
             ) : null}
 
-            <div className="mt-2 flex flex-col gap-1">
+            <div className="mt-3 flex flex-col gap-1.5">
                 {codex ? (
                     <>
                         <PermissionRowButton
@@ -222,7 +237,7 @@ export function PermissionFooter(props: {
                         />
                         <PermissionRowButton
                             label={t('tool.yesForSession')}
-                            tone="neutral"
+                            tone="muted"
                             loading={loadingForSession}
                             disabled={props.disabled || loading !== null || loadingForSession}
                             onClick={() => codexApprove('approved_for_session')}
@@ -247,7 +262,7 @@ export function PermissionFooter(props: {
                         {canAllowForSession ? (
                             <PermissionRowButton
                                 label={t('tool.allowForSession')}
-                                tone="neutral"
+                                tone="muted"
                                 loading={loadingForSession}
                                 disabled={props.disabled || loading !== null || loadingAllEdits || loadingForSession}
                                 onClick={approveForSession}
@@ -256,7 +271,7 @@ export function PermissionFooter(props: {
                         {canAllowAllEdits ? (
                             <PermissionRowButton
                                 label={t('tool.allowAll')}
-                                tone="neutral"
+                                tone="muted"
                                 loading={loadingAllEdits}
                                 disabled={props.disabled || loading !== null || loadingAllEdits || loadingForSession}
                                 onClick={approveAllEdits}
