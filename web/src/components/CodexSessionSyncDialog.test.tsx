@@ -147,4 +147,5 @@ describe('CodexSessionSyncDialog', () => {
 
         expect(onConfirm).toHaveBeenCalledWith(['codex-session-2'])
     })
+
 })

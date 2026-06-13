@@ -220,6 +220,7 @@ export type CodexDesktopStatusResponse = {
     success: true
     codexDesktopRunning: boolean
     codexClientAvailable: boolean
+    codexTranscriptImportAvailable: boolean
 }
 
 export type CodexDuplicateSessionGroup = {

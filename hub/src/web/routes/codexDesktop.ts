@@ -50,6 +50,7 @@ type CodexDesktopStatusResponse = {
     success: true
     codexDesktopRunning: boolean
     codexClientAvailable: boolean
+    codexTranscriptImportAvailable: boolean
 }
 
 type CodexLocalSessionSummary = {
@@ -141,7 +142,6 @@ type DuplicateSessionGroupCandidate = {
 const CODEX_DESKTOP_NOT_FOUND_ERROR = '尝试重启codex客户端失败，未安装/找不到codex客户端'
 const SCRIPT_TIMEOUT_ERROR = '执行超时'
 const NO_SYNC_SESSION_SELECTED_ERROR = '未选择需要导入的 Codex 会话'
-const CODEX_TRANSCRIPT_IMPORT_NAMESPACE_ERROR = 'Codex transcript import is not available outside the default namespace'
 const DEFAULT_SCRIPT_TIMEOUT_MS = 60_000
 const DEFAULT_CODEX_SESSION_SCAN_LIMIT = 500
 
@@ -1604,22 +1604,13 @@ export function createCodexDesktopRoutes(options: {
 }): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
-    app.use('/codex/*', async (c, next) => {
-        if (c.get('namespace') !== 'default') {
-            return c.json({
-                success: false,
-                error: CODEX_TRANSCRIPT_IMPORT_NAMESPACE_ERROR
-            }, 403)
-        }
-        return next()
-    })
-
     app.get('/codex/status', (c) => {
         const codexStatus = getCodexDesktopStatus()
         return c.json({
             success: true,
             codexDesktopRunning: codexStatus.running,
-            codexClientAvailable: codexStatus.clientAvailable
+            codexClientAvailable: codexStatus.clientAvailable,
+            codexTranscriptImportAvailable: true
         } satisfies CodexDesktopStatusResponse)
     })
 

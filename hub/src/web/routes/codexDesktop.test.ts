@@ -118,15 +118,35 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
-    it('rejects Codex transcript endpoints outside the default namespace', async () => {
+    it('exposes namespace availability in codex status', async () => {
         const app = createRoutesApp('team-a')
-        const response = await app.request('/api/codex/sessions')
+        const response = await app.request('/api/codex/status')
 
-        expect(response.status).toBe(403)
+        expect(response.status).toBe(200)
         expect(await response.json()).toEqual({
-            success: false,
-            error: 'Codex transcript import is not available outside the default namespace'
+            success: true,
+            codexDesktopRunning: false,
+            codexClientAvailable: true,
+            codexTranscriptImportAvailable: true
         })
+    })
+
+    it('allows Codex transcript endpoints for non-default namespaces', async () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-route-test-'))
+        process.env.CODEX_HOME = codexHome
+
+        try {
+            const app = createRoutesApp('team-a')
+            const response = await app.request('/api/codex/sessions')
+
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({
+                success: true,
+                sessions: []
+            })
+        } finally {
+            rmSync(codexHome, { recursive: true, force: true })
+        }
     })
 
     it('allows Codex transcript endpoints in the default namespace', async () => {

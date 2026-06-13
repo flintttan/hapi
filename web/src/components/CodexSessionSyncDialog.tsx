@@ -280,23 +280,23 @@ export function CodexSessionSyncDialog(props: {
                 </div>
 
                 <div className="mt-4 flex justify-end gap-2">
-                    <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={onClose}
-                        disabled={isPending || isRestartingCodexDesktop}
-                    >
-                        {t('button.cancel')}
-                    </Button>
-                    <Button
-                        type="button"
-                        variant="secondary"
-                        onClick={() => void handleConfirm()}
-                        disabled={isPending || isLoading || selectedSessionIds.length === 0}
-                    >
-                        {isPending ? t('codexSync.confirm.confirming') : t('codexSync.confirm.confirm')}
-                    </Button>
-                </div>
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={onClose}
+                                disabled={isPending || isRestartingCodexDesktop}
+                            >
+                                {t('button.cancel')}
+                            </Button>
+                            <Button
+                                type="button"
+                                variant="secondary"
+                                onClick={() => void handleConfirm()}
+                                disabled={isPending || isLoading || selectedSessionIds.length === 0}
+                            >
+                                {isPending ? t('codexSync.confirm.confirming') : t('codexSync.confirm.confirm')}
+                            </Button>
+                        </div>
             </DialogContent>
         </Dialog>
     )
