@@ -193,18 +193,76 @@ function getDirectImportWorkspace(): string {
 }
 
 function expandHomePath(pathValue: string): string {
-    return pathValue.replace(/^~(?=$|[\\/])/, homedir())
+    return pathValue.replace(/^~(?=$|[\\/])/, getUserHomeDir())
+}
+
+function getUserHomeDir(): string {
+    const configured = process.env.HOME?.trim()
+    if (!configured) {
+        return homedir()
+    }
+
+    return configured.replace(/^~(?=$|[\\/])/, homedir())
 }
 
 function getCodexHome(): string {
     const configured = process.env.CODEX_HOME?.trim()
-    return configured ? resolveLocalPath(expandHomePath(configured)) : join(homedir(), '.codex')
+    return configured ? resolveLocalPath(expandHomePath(configured)) : join(getUserHomeDir(), '.codex')
+}
+
+function getCodexHomeCandidates(): string[] {
+    const candidates = [
+        getCodexHome(),
+        join(getUserHomeDir(), '.codex')
+    ].filter((value): value is string => Boolean(value))
+
+    return Array.from(new Set(candidates))
+}
+
+function hasAnyJsonlFile(root: string): boolean {
+    if (!existsSync(root)) return false
+    let entries
+    try {
+        entries = readdirSync(root, { withFileTypes: true })
+    } catch {
+        return false
+    }
+
+    for (const entry of entries) {
+        const fullPath = join(root, entry.name)
+        if (entry.isDirectory()) {
+            if (hasAnyJsonlFile(fullPath)) {
+                return true
+            }
+            continue
+        }
+        if (entry.isFile() && fullPath.toLowerCase().endsWith('.jsonl')) {
+            return true
+        }
+    }
+
+    return false
 }
 
 function getCodexSessionRoots(): string[] {
-    const codexHome = getCodexHome()
-    // 中文注释：当前 direct import 只从 sessions 目录解析 transcript，避免把 archived_sessions 中暂不参与导入的会话展示给用户。
-    return [join(codexHome, 'sessions')]
+    const candidateHomes = getCodexHomeCandidates()
+    const primaryHome = candidateHomes[0]
+    const fallbackHome = candidateHomes[1]
+    const primaryRoot = primaryHome ? join(primaryHome, 'sessions') : null
+    const fallbackRoot = fallbackHome ? join(fallbackHome, 'sessions') : null
+
+    if (!primaryRoot || !fallbackRoot || primaryRoot === fallbackRoot) {
+        return primaryRoot ? [primaryRoot] : []
+    }
+
+    if (hasAnyJsonlFile(primaryRoot)) {
+        return [primaryRoot]
+    }
+
+    // 中文注释：runner 远程拉起 Codex 时会把 CODEX_HOME 指到只含 auth.json 的临时目录；
+    // 仅当该目录本身像“临时鉴权目录”（有 auth.json 但没有 transcript）时，才回退到真实
+    // 用户 home 下的 ~/.codex/sessions，避免误改用户显式自定义 CODEX_HOME 的语义。
+    return existsSync(join(primaryHome, 'auth.json')) ? [fallbackRoot] : [primaryRoot]
 }
 
 function collectJsonlFiles(root: string, files: string[]): void {

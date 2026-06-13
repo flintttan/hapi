@@ -10,6 +10,7 @@ import type { WebAppEnv } from '../middleware/auth'
 import { createCodexDesktopRoutes, importSelectedCodexSessions } from './codexDesktop'
 
 const originalCodexHome = process.env.CODEX_HOME
+const originalHome = process.env.HOME
 
 function createTranscript(codexHome: string, sessionId: string): void {
     const sessionDir = join(codexHome, 'sessions', '2026', '06', '04')
@@ -64,6 +65,11 @@ describe('Codex Desktop import routes', () => {
             delete process.env.CODEX_HOME
         } else {
             process.env.CODEX_HOME = originalCodexHome
+        }
+        if (originalHome === undefined) {
+            delete process.env.HOME
+        } else {
+            process.env.HOME = originalHome
         }
     })
 
@@ -164,6 +170,38 @@ describe('Codex Desktop import routes', () => {
             })
         } finally {
             rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
+    it('lists local Codex sessions from the real home when CODEX_HOME points to a temporary auth directory', async () => {
+        const actualHome = mkdtempSync(join(tmpdir(), 'hapi-codex-real-home-'))
+        const temporaryCodexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-temp-home-'))
+        const codexSessionId = '22222222-2222-4222-8222-222222222222'
+        process.env.HOME = actualHome
+        process.env.CODEX_HOME = temporaryCodexHome
+
+        try {
+            createTranscript(join(actualHome, '.codex'), codexSessionId)
+            writeFileSync(join(temporaryCodexHome, 'auth.json'), '{"token":"fixture"}', 'utf-8')
+
+            const app = createRoutesApp('default')
+            const response = await app.request('/api/codex/sessions')
+
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({
+                success: true,
+                sessions: [
+                    expect.objectContaining({
+                        id: codexSessionId,
+                        cwd: 'C:\\work\\project',
+                        originator: 'codex_cli_rs',
+                        cliVersion: '0.0.0-test'
+                    })
+                ]
+            })
+        } finally {
+            rmSync(actualHome, { recursive: true, force: true })
+            rmSync(temporaryCodexHome, { recursive: true, force: true })
         }
     })
 })
