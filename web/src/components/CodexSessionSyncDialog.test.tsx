@@ -7,7 +7,8 @@ import type { CodexLocalSessionSummary } from '@/types/api'
 function renderDialog(
     sessions: CodexLocalSessionSummary[],
     onConfirm = vi.fn(async () => {}),
-    currentCodexSessionId: string | null = null
+    currentCodexSessionId: string | null = null,
+    emptyHint: string | null = null
 ) {
     const view = render(
         <I18nProvider>
@@ -16,6 +17,7 @@ function renderDialog(
                 onClose={vi.fn()}
                 sessions={sessions}
                 currentCodexSessionId={currentCodexSessionId}
+                emptyHint={emptyHint}
                 onConfirm={onConfirm}
                 onRestartCodexDesktop={vi.fn()}
                 isPending={false}
@@ -146,6 +148,13 @@ describe('CodexSessionSyncDialog', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Import' }))
 
         expect(onConfirm).toHaveBeenCalledWith(['codex-session-2'])
+    })
+
+    it('shows an empty-state hint when provided', () => {
+        renderDialog([], vi.fn(async () => {}), null, 'Docker mount required')
+
+        expect(screen.getByText('No local Codex sessions found')).toBeInTheDocument()
+        expect(screen.getByText('Docker mount required')).toBeInTheDocument()
     })
 
 })

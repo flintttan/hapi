@@ -145,9 +145,13 @@ describe('Codex Desktop import routes', () => {
 
     it('allows Codex transcript endpoints for non-default namespaces', async () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-route-test-'))
+        const isolatedHome = mkdtempSync(join(tmpdir(), 'hapi-codex-isolated-home-'))
         process.env.CODEX_HOME = codexHome
+        process.env.HOME = isolatedHome
 
         try {
+            // Ensure the test home exists but is empty so the route returns no sessions.
+            mkdirSync(join(codexHome, 'sessions'), { recursive: true })
             const app = createRoutesApp('team-a')
             const response = await app.request('/api/codex/sessions')
 
@@ -157,15 +161,19 @@ describe('Codex Desktop import routes', () => {
                 sessions: []
             })
         } finally {
+            rmSync(isolatedHome, { recursive: true, force: true })
             rmSync(codexHome, { recursive: true, force: true })
         }
     })
 
     it('allows Codex transcript endpoints in the default namespace', async () => {
         const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-route-test-'))
+        const isolatedHome = mkdtempSync(join(tmpdir(), 'hapi-codex-isolated-home-'))
         process.env.CODEX_HOME = codexHome
+        process.env.HOME = isolatedHome
 
         try {
+            mkdirSync(join(codexHome, 'sessions'), { recursive: true })
             const app = createRoutesApp('default')
             const response = await app.request('/api/codex/sessions')
 
@@ -175,6 +183,7 @@ describe('Codex Desktop import routes', () => {
                 sessions: []
             })
         } finally {
+            rmSync(isolatedHome, { recursive: true, force: true })
             rmSync(codexHome, { recursive: true, force: true })
         }
     })
@@ -227,6 +236,38 @@ describe('Codex Desktop import routes', () => {
             const response = await app.request('/api/codex/sessions')
 
             expect(response.status).toBe(200)
+            const body = await response.json() as { success: true; sessions: Array<{ id: string }> }
+            expect(body).toEqual({
+                success: true,
+                sessions: [
+                    expect.objectContaining({
+                        id: codexSessionId
+                    })
+                ]
+            })
+        } finally {
+            rmSync(actualHome, { recursive: true, force: true })
+            rmSync(configuredImportHome, { recursive: true, force: true })
+            rmSync(process.env.CODEX_HOME ?? '', { recursive: true, force: true })
+        }
+    })
+
+    it('falls back to the real home when HAPI_CODEX_HOME exists but has no transcripts', async () => {
+        const actualHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-fallback-'))
+        const emptyImportHome = mkdtempSync(join(tmpdir(), 'hapi-codex-empty-import-home-'))
+        const codexSessionId = '44444444-4444-4444-8444-444444444444'
+        process.env.HOME = actualHome
+        process.env.CODEX_HOME = mkdtempSync(join(tmpdir(), 'hapi-codex-runtime-home-fallback-'))
+        process.env.HAPI_CODEX_HOME = emptyImportHome
+
+        try {
+            writeFileSync(join(process.env.CODEX_HOME, 'auth.json'), '{"token":"fixture"}', 'utf-8')
+            createTranscript(join(actualHome, '.codex'), codexSessionId)
+
+            const app = createRoutesApp('default')
+            const response = await app.request('/api/codex/sessions')
+
+            expect(response.status).toBe(200)
             const body = await response.json()
             expect(body).toEqual({
                 success: true,
@@ -236,6 +277,37 @@ describe('Codex Desktop import routes', () => {
                     })
                 ]
             })
+        } finally {
+            rmSync(actualHome, { recursive: true, force: true })
+            rmSync(emptyImportHome, { recursive: true, force: true })
+            rmSync(process.env.CODEX_HOME ?? '', { recursive: true, force: true })
+        }
+    })
+
+    it('does not fall back when HAPI_CODEX_HOME already has transcripts', async () => {
+        const actualHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-no-fallback-'))
+        const configuredImportHome = mkdtempSync(join(tmpdir(), 'hapi-codex-import-home-no-fallback-'))
+        const fallbackSessionId = '55555555-5555-4555-8555-555555555555'
+        const importSessionId = '66666666-6666-4666-8666-666666666666'
+        process.env.HOME = actualHome
+        process.env.CODEX_HOME = mkdtempSync(join(tmpdir(), 'hapi-codex-runtime-home-no-fallback-'))
+        process.env.HAPI_CODEX_HOME = configuredImportHome
+
+        try {
+            writeFileSync(join(process.env.CODEX_HOME, 'auth.json'), '{"token":"fixture"}', 'utf-8')
+            createTranscript(join(actualHome, '.codex'), fallbackSessionId)
+            createTranscript(join(configuredImportHome), importSessionId)
+
+            const app = createRoutesApp('default')
+            const response = await app.request('/api/codex/sessions')
+
+            expect(response.status).toBe(200)
+            const body = await response.json() as { success: true; sessions: Array<{ id: string }> }
+            expect(body.success).toBe(true)
+            expect(body.sessions).toHaveLength(1)
+            expect(body.sessions[0]).toEqual(expect.objectContaining({
+                id: importSessionId
+            }))
         } finally {
             rmSync(actualHome, { recursive: true, force: true })
             rmSync(configuredImportHome, { recursive: true, force: true })

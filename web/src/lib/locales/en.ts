@@ -55,12 +55,14 @@ export default {
   'sessions.group.new': 'New session in this directory',
   'codexSync.tooltip': 'Import sessions from Codex into Hapi',
   'codexSync.confirm.title': 'Import Codex sessions',
-  'codexSync.confirm.description': 'Choose Codex sessions to import into Hapi',
+  'codexSync.confirm.description': 'Choose Codex sessions to import from the currently connected machine into Hapi',
   // 中文注释：以下文案支撑导入弹窗的多选列表、加载态，以及右上角重启 Codex 客户端按钮提示。
   'codexSync.confirm.selectAll': 'Select all',
   'codexSync.confirm.clearAll': 'Clear all',
   'codexSync.confirm.selectedCount': '{n} sessions selected',
   'codexSync.confirm.empty': 'No local Codex sessions found',
+  'codexSync.confirm.emptyHint.noLocal': 'No Codex transcripts were found on the connected machine yet.',
+  'codexSync.confirm.emptyHint.docker': 'If HAPI is running in Docker, make sure the connected runner is the client machine that has your local ~/.codex.',
   'codexSync.confirm.current': 'Linked',
   'codexSync.confirm.cwd': 'Working directory',
   'codexSync.confirm.cwdFilter': 'Work directory',
@@ -189,6 +191,7 @@ export default {
   'button.close': 'Close',
   'button.dismiss': 'Dismiss',
   'button.copy': 'Copy',
+  'button.copied': 'Copied',
   'button.paste': 'Paste',
 
   // Cleanup settings
@@ -639,6 +642,7 @@ export default {
   'browse.noRootHint': 'Browsing is opt-in. Restart the runner with one or more workspace roots to enable file-tree navigation and scoped session spawning.',
   'browse.noRootFooter': 'You can still create sessions from the “New Session” page by entering a directory manually. If workspace roots are configured later, new sessions must stay within those allowed roots.',
   'browse.noMachinesConnected': 'No CLI connected. Run `hapi runner start --workspace-root /path/a --workspace-root /path/b` on a machine to get started.',
+  'codexSync.confirm.commandHint': 'To import Codex sessions from your local computer, run the command below in a local terminal, then return here to continue the conversation.',
 
   // Misc
   'misc.noMachines': 'No machines available',

@@ -238,6 +238,46 @@ export class ApiClient {
         return parsed.data.target
     }
 
+    async getCodexSessions(): Promise<{ success: true; sessions: Array<{
+        id: string
+        title: string
+        lastUserMessage?: string | null
+        cwd?: string | null
+        file: string
+        modifiedAt: number
+        originator?: string | null
+        cliVersion?: string | null
+    }> }> {
+        const response = await axios.get(
+            `${configuration.apiUrl}/api/codex/sessions`,
+            {
+                headers: this.authHeaders(),
+                timeout: 60_000
+            }
+        )
+        return response.data
+    }
+
+    async syncCodexSession(payload: { sessionIds: string[] }): Promise<{
+        success: boolean
+        message?: string
+        output?: string
+        error?: string
+        hapiSessionId?: string
+        sessionIds?: string[]
+        syncedCount?: number
+    }> {
+        const response = await axios.post(
+            `${configuration.apiUrl}/api/codex/sync-session`,
+            payload,
+            {
+                headers: this.authHeaders(),
+                timeout: 60_000
+            }
+        )
+        return response.data
+    }
+
     async handoffSessionToLocal(sessionId: string): Promise<void> {
         const response = await axios.post(
             `${configuration.apiUrl}/cli/sessions/${encodeURIComponent(sessionId)}/handoff-local`,

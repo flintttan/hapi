@@ -1,4 +1,5 @@
 import type { AgentFlavor, CodexCollaborationMode, PermissionMode } from '@hapi/protocol/types'
+import type { CodexTranscriptImportData } from '@hapi/protocol/codexImport'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import type {
     CodexModelSummary,
@@ -39,6 +40,27 @@ export type RpcListCursorModelsResponse = CursorModelsResponse
 export type RpcOpencodeModel = OpencodeModelSummary
 export type RpcListOpencodeModelsResponse = OpencodeModelsResponse
 export type RpcListOpencodeReasoningEffortOptionsResponse = OpencodeReasoningEffortResponse
+export type RpcListCodexSessionsResponse =
+    | {
+        success: true
+        sessions: Array<{
+            id: string
+            title: string
+            lastUserMessage?: string | null
+            cwd?: string | null
+            file: string
+            modifiedAt: number
+            originator?: string | null
+            cliVersion?: string | null
+        }>
+    }
+    | { success: false; error: string }
+export type RpcGetCodexTranscriptImportDataResponse =
+    | {
+        success: true
+        transcript: CodexTranscriptImportData
+    }
+    | { success: false; error: string }
 
 export class RpcGateway {
     constructor(
@@ -242,6 +264,17 @@ export class RpcGateway {
 
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
+    }
+
+    async listCodexSessionsForMachine(machineId: string): Promise<RpcListCodexSessionsResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.ListCodexSessions, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexSessionsResponse
+    }
+
+    async getCodexTranscriptImportDataForMachine(
+        machineId: string,
+        sessionId: string
+    ): Promise<RpcGetCodexTranscriptImportDataResponse> {
+        return await this.machineRpc(machineId, RPC_METHODS.GetCodexTranscriptImportData, { sessionId }) as RpcGetCodexTranscriptImportDataResponse
     }
 
     async listCursorModelsForSession(sessionId: string): Promise<RpcListCursorModelsResponse> {

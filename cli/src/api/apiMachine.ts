@@ -17,6 +17,7 @@ import { backoff } from '@/utils/time'
 import { getInvokedCwd } from '@/utils/invokedCwd'
 import { RpcHandlerManager } from './rpc/RpcHandlerManager'
 import { registerCommonHandlers } from '../modules/common/registerCommonHandlers'
+import { listLocalCodexSessions, getLocalCodexTranscriptImportData } from '@/codex/localSessions'
 import {
     listOpencodeModelsForCwd,
     type ListOpencodeModelsForCwdRequest,
@@ -204,6 +205,31 @@ export class ApiMachineClient {
                 }
 
                 return await listOpencodeModelsForCwd(resolvedCwd)
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler<RpcListCodexSessionsRequest, RpcListCodexSessionsResponse>(
+            RPC_METHODS.ListCodexSessions,
+            async () => {
+                return {
+                    success: true,
+                    sessions: listLocalCodexSessions()
+                }
+            }
+        )
+
+        this.rpcHandlerManager.registerHandler<RpcGetCodexTranscriptImportDataRequest, RpcGetCodexTranscriptImportDataResponse>(
+            RPC_METHODS.GetCodexTranscriptImportData,
+            async (params) => {
+                const sessionId = typeof params?.sessionId === 'string' ? params.sessionId.trim() : ''
+                if (!sessionId) {
+                    return { success: false, error: 'sessionId is required' }
+                }
+                const transcript = getLocalCodexTranscriptImportData(sessionId)
+                if (!transcript) {
+                    return { success: false, error: `Transcript not found for Codex session: ${sessionId}` }
+                }
+                return { success: true, transcript }
             }
         )
     }
@@ -510,3 +536,39 @@ export class ApiMachineClient {
         }
     }
 }
+
+type RpcListCodexSessionsRequest = Record<string, never>
+type RpcListCodexSessionsResponse =
+    | { success: true; sessions: Array<{
+        id: string
+        title: string
+        lastUserMessage?: string | null
+        cwd?: string | null
+        file: string
+        modifiedAt: number
+        originator?: string | null
+        cliVersion?: string | null
+    }> }
+    | { success: false; error: string }
+
+type RpcGetCodexTranscriptImportDataRequest = { sessionId: string }
+type RpcGetCodexTranscriptImportDataResponse =
+    | {
+        success: true
+        transcript: {
+            id: string
+            title: string
+            lastUserMessage?: string | null
+            cwd?: string | null
+            file: string
+            modifiedAt: number
+            originator?: string | null
+            cliVersion?: string | null
+            messages: Array<{
+                role: 'user' | 'agent'
+                content: unknown
+                meta: { sentFrom: 'cli' }
+            }>
+        }
+    }
+    | { success: false; error: string }

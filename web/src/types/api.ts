@@ -183,6 +183,8 @@ export type CodexDesktopScriptResponse = {
     message?: string
     pid?: number
     command?: string
+    // 中文注释：当导入动作创建/命中了具体 Hapi 会话时，回传这个 sessionId，方便客户端导入后直接继续。
+    hapiSessionId?: string
     script?: string
     cwd?: string
     output?: string
@@ -209,6 +211,28 @@ export type CodexLocalSessionSummary = {
 export type CodexLocalSessionsResponse = {
     success: true
     sessions: CodexLocalSessionSummary[]
+}
+
+export type CodexTranscriptImportDataResponse = {
+    success: true
+    transcript: {
+        id: string
+        title: string
+        lastUserMessage?: string | null
+        cwd?: string | null
+        file: string
+        modifiedAt: number
+        originator?: string | null
+        cliVersion?: string | null
+        messages: Array<{
+            role: 'user' | 'agent'
+            content: unknown
+            meta: { sentFrom: 'cli' }
+        }>
+    }
+} | {
+    success: false
+    error: string
 }
 
 export type CodexDesktopSyncRequest = {

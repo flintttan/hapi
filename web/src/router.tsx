@@ -152,6 +152,13 @@ function getMachineTitle(machine: Machine): string {
     return machine.id.slice(0, 8)
 }
 
+function selectCodexImportMachine(machines: Machine[]): Machine | null {
+    const onlineMachines = machines
+        .filter((machine) => machine.active)
+        .sort((a, b) => (b.activeAt - a.activeAt) || (b.updatedAt - a.updatedAt))
+    return onlineMachines[0] ?? null
+}
+
 function SessionsPage() {
     const { api, user, onLogout } = useAppContext()
     const navigate = useNavigate()
@@ -166,6 +173,7 @@ function SessionsPage() {
     const [codexSessions, setCodexSessions] = useState<CodexLocalSessionSummary[]>([])
     const [isLoadingCodexSessions, setIsLoadingCodexSessions] = useState(false)
     const [isSyncConfirmOpen, setIsSyncConfirmOpen] = useState(false)
+    const [codexEmptyHint, setCodexEmptyHint] = useState<string | null>(null)
     const [isRestartingCodexDesktop, setIsRestartingCodexDesktop] = useState(false)
     const [pendingDuplicateSessionIds, setPendingDuplicateSessionIds] = useState<string[]>([])
     const [duplicateSessionGroups, setDuplicateSessionGroups] = useState<CodexDuplicateSessionGroup[]>([])
@@ -355,9 +363,20 @@ function SessionsPage() {
 
         setIsSyncConfirmOpen(true)
         setIsLoadingCodexSessions(true)
+        setCodexEmptyHint(null)
         try {
-            const result = await api.getCodexSessions()
+            const importMachine = selectCodexImportMachine(machines)
+            if (!importMachine) {
+                setCodexSessions([])
+                setCodexEmptyHint(t('codexSync.confirm.emptyHint.noMachine'))
+                return
+            }
+
+            const result = await api.getMachineCodexSessions(importMachine.id)
             setCodexSessions(result.sessions)
+            if (result.sessions.length === 0) {
+                setCodexEmptyHint(t('codexSync.confirm.emptyHint.noLocal'))
+            }
         } catch (error) {
             setCodexSessions([])
             const reason = normalizeCodexScriptError(
@@ -373,15 +392,22 @@ function SessionsPage() {
         } finally {
             setIsLoadingCodexSessions(false)
         }
-    }, [addToast, api, formatCodexSyncFailureBody, isLoadingCodexSessions, normalizeCodexScriptError, t])
+    }, [addToast, api, formatCodexSyncFailureBody, isLoadingCodexSessions, machines, normalizeCodexScriptError, t])
 
     const handleImportCodexSessions = useCallback(async (sessionIds: string[]) => {
         if (isSyncingCodexSession || isLoadingCodexSessions) return
 
         setIsSyncingCodexSession(true)
         try {
-            // 中文注释：弹窗提交的是本地 Codex thread ID；后端会直接读取这些 transcript 并导入到 Hapi。
-            const result = await api.syncCodexSession({ sessionIds })
+            const importMachine = selectCodexImportMachine(machines)
+            if (!importMachine) {
+                throw new Error(t('codexSync.confirm.emptyHint.noMachine'))
+            }
+
+            const result = await api.syncCodexSessionFromMachine({
+                machineId: importMachine.id,
+                sessionIds
+            })
             if (!result.success) {
                 throw new Error(normalizeCodexScriptError(result.error, t('codexSync.failed.body')))
             }
@@ -395,6 +421,7 @@ function SessionsPage() {
             // 中文注释：导入成功后先在浏览器侧记住这些 Codex thread 的导入时间，供左侧会话列表显示特殊时间文案。
             markCodexSessionsImported(sessionIds)
             setIsSyncConfirmOpen(false)
+            setCodexEmptyHint(null)
             await refetch()
 
             setPendingDuplicateSessionIds([])
@@ -451,6 +478,7 @@ function SessionsPage() {
         setDuplicateSessionGroups,
         setIsDuplicateMergeConfirmOpen,
         setPendingDuplicateSessionIds,
+        machines,
         t
     ])
 
@@ -553,6 +581,7 @@ function SessionsPage() {
                 onClose={() => setIsSyncConfirmOpen(false)}
                 sessions={codexSessions}
                 currentCodexSessionId={currentCodexSessionId}
+                emptyHint={codexEmptyHint}
                 onConfirm={handleImportCodexSessions}
                 onRestartCodexDesktop={handleRestartCodexDesktop}
                 isPending={isSyncingCodexSession}

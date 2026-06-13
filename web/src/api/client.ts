@@ -24,7 +24,8 @@ import type {
     VisibilityPayload,
     HapiSessionExport,
     SessionResponse,
-    SessionsResponse
+    SessionsResponse,
+    CodexTranscriptImportDataResponse
 } from '@/types/api'
 import type {
     CodexModelsResponse,
@@ -251,6 +252,13 @@ export class ApiClient {
         return await this.request<CodexDesktopScriptResponse>('/api/codex/sync-session', {
             method: 'POST',
             ...(payload ? { body: JSON.stringify(payload) } : {})
+        })
+    }
+
+    async syncCodexSessionFromMachine(payload: { machineId: string; sessionIds: string[] }): Promise<CodexDesktopScriptResponse> {
+        return await this.request<CodexDesktopScriptResponse>('/api/codex/sync-session-from-machine', {
+            method: 'POST',
+            body: JSON.stringify(payload)
         })
     }
 
@@ -669,6 +677,18 @@ export class ApiClient {
     async getMachineCodexModels(machineId: string): Promise<CodexModelsResponse> {
         return await this.request<CodexModelsResponse>(
             `/api/machines/${encodeURIComponent(machineId)}/codex-models`
+        )
+    }
+
+    async getMachineCodexSessions(machineId: string): Promise<CodexLocalSessionsResponse> {
+        return await this.request<CodexLocalSessionsResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/codex-sessions`
+        )
+    }
+
+    async getMachineCodexTranscriptImportData(machineId: string, sessionId: string): Promise<CodexTranscriptImportDataResponse> {
+        return await this.request<CodexTranscriptImportDataResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/codex-sessions/${encodeURIComponent(sessionId)}/import-data`
         )
     }
 

@@ -10,6 +10,7 @@
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
 import type { CursorMigrateOutcome, CursorMigrateToAcpRequest, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
+import type { CodexTranscriptImportData } from '@hapi/protocol/codexImport'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import type { Store, CancelQueuedMessageResult } from '../store'
@@ -29,6 +30,8 @@ import {
     type RpcGeneratedImageResponse,
     type RpcListDirectoryResponse,
     type RpcListCodexModelsResponse,
+    type RpcListCodexSessionsResponse,
+    type RpcGetCodexTranscriptImportDataResponse,
     type RpcListCursorModelsResponse,
     type RpcListOpencodeModelsResponse,
     type RpcListOpencodeReasoningEffortOptionsResponse,
@@ -50,6 +53,8 @@ export type {
     RpcGeneratedImageResponse,
     RpcListDirectoryResponse,
     RpcListCodexModelsResponse,
+    RpcListCodexSessionsResponse,
+    RpcGetCodexTranscriptImportDataResponse,
     RpcListCursorModelsResponse,
     RpcListOpencodeModelsResponse,
     RpcListOpencodeReasoningEffortOptionsResponse,
@@ -59,6 +64,8 @@ export type {
     RpcReadFileResponse,
     RpcUploadFileResponse
 } from './rpcGateway'
+
+export type RpcCodexTranscriptImportData = CodexTranscriptImportData
 
 export type ResumeSessionResult =
     | { type: 'success'; sessionId: string }
@@ -1496,6 +1503,17 @@ export class SyncEngine {
 
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
         return await this.rpcGateway.listCodexModelsForMachine(machineId)
+    }
+
+    async listCodexSessionsForMachine(machineId: string): Promise<RpcListCodexSessionsResponse> {
+        return await this.rpcGateway.listCodexSessionsForMachine(machineId)
+    }
+
+    async getCodexTranscriptImportDataForMachine(
+        machineId: string,
+        sessionId: string
+    ): Promise<RpcGetCodexTranscriptImportDataResponse> {
+        return await this.rpcGateway.getCodexTranscriptImportDataForMachine(machineId, sessionId)
     }
 
     async listCursorModelsForSession(sessionId: string): Promise<RpcListCursorModelsResponse> {

@@ -51,6 +51,14 @@ export const codexCommand: CommandDefinition = {
                     i += 1
                     continue
                 }
+                if (i === 0 && arg === 'import-local') {
+                    const { codexImportLocalCommand } = await import('./codexImportLocal')
+                    await codexImportLocalCommand.run({ args: ['codex', ...commandArgs], commandArgs: commandArgs.slice(1) })
+                    return
+                }
+                if (arg === '--continue-in-web') {
+                    continue
+                }
                 if (arg === '--started-by') {
                     options.startedBy = commandArgs[++i] as 'runner' | 'terminal'
                 } else if (arg === '--hapi-starting-mode') {

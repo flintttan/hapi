@@ -4,10 +4,19 @@ import { randomUUID } from 'node:crypto'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { homedir, hostname, platform } from 'node:os'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
-import { Hono } from 'hono'
-import type { SyncEngine } from '../../sync/syncEngine'
-import type { Store, StoredMessage } from '../../store'
+import {
+    buildImportedSessionMetadata as buildImportedSessionMetadataShared,
+    parseCodexLocalSessionContent,
+    parseCodexTranscriptImportData as parseCodexTranscriptImportDataShared,
+    type CodexLocalSessionSummary,
+    type CodexTranscriptImportData
+} from '@hapi/protocol/codexImport'
+import type { Hono } from 'hono'
+import { Hono as HonoRuntime } from 'hono'
 import type { WebAppEnv } from '../middleware/auth'
+import type { Store, StoredMessage } from '../../store'
+import type { SyncEngine } from '../../sync/syncEngine'
+import type { CodexImportedMessageContent } from '@hapi/protocol/codexImport'
 
 type ScriptLogKind = 'sync' | 'restart'
 
@@ -29,6 +38,7 @@ type ScriptLaunchResponse = {
     codexClientAvailable?: boolean
     syncedCount?: number
     sessionIds?: string[]
+    hapiSessionId?: string
 } | {
     success: false
     error: string
@@ -39,6 +49,7 @@ type ScriptLaunchResponse = {
     codexClientAvailable?: boolean
     syncedCount?: number
     sessionIds?: string[]
+    hapiSessionId?: string
 }
 
 type CodexDesktopStatus = {
@@ -53,44 +64,9 @@ type CodexDesktopStatusResponse = {
     codexTranscriptImportAvailable: boolean
 }
 
-type CodexLocalSessionSummary = {
-    id: string
-    title: string
-    lastUserMessage?: string | null
-    cwd?: string | null
-    file: string
-    modifiedAt: number
-    originator?: string | null
-    cliVersion?: string | null
-}
-
 type CodexLocalSessionsResponse = {
     success: true
     sessions: CodexLocalSessionSummary[]
-}
-
-type CodexImportedMessageContent = {
-    role: 'user'
-    content: {
-        type: 'text'
-        text: string
-    }
-    meta: {
-        sentFrom: 'cli'
-    }
-} | {
-    role: 'agent'
-    content: {
-        type: typeof AGENT_MESSAGE_PAYLOAD_TYPE
-        data: unknown
-    }
-    meta: {
-        sentFrom: 'cli'
-    }
-}
-
-type CodexTranscriptImportData = CodexLocalSessionSummary & {
-    messages: CodexImportedMessageContent[]
 }
 
 type ImportCandidate = {
@@ -210,86 +186,16 @@ function getCodexHome(): string {
     return configured ? resolveLocalPath(expandHomePath(configured)) : join(getUserHomeDir(), '.codex')
 }
 
-function getConfiguredCodexImportHome(): string | null {
-    const configured = process.env.HAPI_CODEX_HOME?.trim()
-    return configured ? resolveLocalPath(expandHomePath(configured)) : null
-}
-
 function getCodexHomeCandidates(): string[] {
+    const configuredImportHome = process.env.HAPI_CODEX_HOME?.trim()
+    const configuredRuntimeHome = process.env.CODEX_HOME?.trim()
+    const homeCodexDir = join(getUserHomeDir(), '.codex')
     const candidates = [
-        getConfiguredCodexImportHome(),
-        getCodexHome(),
-        join(getUserHomeDir(), '.codex')
+        configuredImportHome ? resolveLocalPath(expandHomePath(configuredImportHome)) : null,
+        configuredRuntimeHome ? resolveLocalPath(expandHomePath(configuredRuntimeHome)) : null,
+        homeCodexDir
     ].filter((value): value is string => Boolean(value))
-
-    return Array.from(new Set(candidates))
-}
-
-function hasAnyJsonlFile(root: string): boolean {
-    if (!existsSync(root)) return false
-    let entries
-    try {
-        entries = readdirSync(root, { withFileTypes: true })
-    } catch {
-        return false
-    }
-
-    for (const entry of entries) {
-        const fullPath = join(root, entry.name)
-        if (entry.isDirectory()) {
-            if (hasAnyJsonlFile(fullPath)) {
-                return true
-            }
-            continue
-        }
-        if (entry.isFile() && fullPath.toLowerCase().endsWith('.jsonl')) {
-            return true
-        }
-    }
-
-    return false
-}
-
-function getCodexSessionRoots(): string[] {
-    const candidateHomes = getCodexHomeCandidates()
-    const primaryHome = candidateHomes[0]
-    const fallbackHome = candidateHomes[1]
-    const primaryRoot = primaryHome ? join(primaryHome, 'sessions') : null
-    const fallbackRoot = fallbackHome ? join(fallbackHome, 'sessions') : null
-
-    if (!primaryRoot || !fallbackRoot || primaryRoot === fallbackRoot) {
-        return primaryRoot ? [primaryRoot] : []
-    }
-
-    if (hasAnyJsonlFile(primaryRoot)) {
-        return [primaryRoot]
-    }
-
-    // 中文注释：runner 远程拉起 Codex 时会把 CODEX_HOME 指到只含 auth.json 的临时目录；
-    // 仅当该目录本身像“临时鉴权目录”（有 auth.json 但没有 transcript）时，才回退到真实
-    // 用户 home 下的 ~/.codex/sessions，避免误改用户显式自定义 CODEX_HOME 的语义。
-    return existsSync(join(primaryHome, 'auth.json')) ? [fallbackRoot] : [primaryRoot]
-}
-
-function collectJsonlFiles(root: string, files: string[]): void {
-    if (!existsSync(root)) return
-    let entries
-    try {
-        entries = readdirSync(root, { withFileTypes: true })
-    } catch {
-        return
-    }
-
-    for (const entry of entries) {
-        const fullPath = join(root, entry.name)
-        if (entry.isDirectory()) {
-            collectJsonlFiles(fullPath, files)
-            continue
-        }
-        if (entry.isFile() && fullPath.toLowerCase().endsWith('.jsonl')) {
-            files.push(fullPath)
-        }
-    }
+    return candidates
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -408,7 +314,6 @@ function extractCodexChangedTitle(record: Record<string, unknown>): string | nul
 }
 
 function getLatestCodexChangedTitle(lines: string[]): string | null {
-    // 中文注释：Codex 会在 transcript 中记录 change_title 调用；这里从后往前取最后一次成功设置的标题，作为弹窗主标题显示。
     for (let index = lines.length - 1; index >= 0; index -= 1) {
         try {
             const parsed = JSON.parse(lines[index])
@@ -426,7 +331,6 @@ function getLatestCodexChangedTitle(lines: string[]): string | null {
 }
 
 function getLatestCodexUserMessage(lines: string[]): string | null {
-    // 中文注释：弹窗副标题展示最近一次真实用户提问，不再显示路径，便于用户按会话内容而不是目录来识别。
     for (let index = lines.length - 1; index >= 0; index -= 1) {
         try {
             const parsed = JSON.parse(lines[index])
@@ -445,137 +349,9 @@ function getLatestCodexUserMessage(lines: string[]): string | null {
     return null
 }
 
-function getCodexSessionTitle(
-    cwd: string | null | undefined,
-    sessionId: string,
-    changedTitle: string | null,
-    firstUserMessage: string | null
-): string {
-    if (changedTitle) {
-        return truncateText(changedTitle, 80)
-    }
-
-    if (firstUserMessage) {
-        return truncateText(firstUserMessage, 80)
-    }
-
-    if (cwd) {
-        const parts = cwd.split(/[\\/]+/).filter(Boolean)
-        if (parts.length > 0) {
-            return parts[parts.length - 1]
-        }
-    }
-
-    return sessionId.slice(0, 8)
-}
-
 function isSubagentSource(value: unknown): boolean {
     const record = asRecord(value)
     return record ? Object.prototype.hasOwnProperty.call(record, 'subagent') : false
-}
-
-function parseCodexLocalSession(filePath: string): CodexLocalSessionSummary | null {
-    let content: string
-    try {
-        content = readFileSync(filePath, 'utf-8')
-    } catch {
-        return null
-    }
-
-    const allLines = content.split(/\r?\n/).filter(Boolean)
-    const headLines = allLines.slice(0, 200)
-    let sessionId: string | null = null
-    let cwd: string | null = null
-    let originator: string | null = null
-    let cliVersion: string | null = null
-    let firstUserMessage: string | null = null
-
-    for (const line of headLines) {
-        let parsed: unknown
-        try {
-            parsed = JSON.parse(line)
-        } catch {
-            continue
-        }
-
-        const record = asRecord(parsed)
-        const type = typeof record?.type === 'string' ? record.type : null
-        if (type === 'session_meta') {
-            const payload = asRecord(record?.payload)
-            if (payload) {
-                if (isSubagentSource(payload.source)) {
-                    return null
-                }
-                if (!sessionId && typeof payload.id === 'string') {
-                    sessionId = payload.id
-                }
-                if (!cwd && typeof payload.cwd === 'string') {
-                    cwd = payload.cwd
-                }
-                if (!originator && typeof payload.originator === 'string') {
-                    originator = payload.originator
-                }
-                if (!cliVersion && typeof payload.cli_version === 'string') {
-                    cliVersion = payload.cli_version
-                }
-            }
-        }
-
-        if (!firstUserMessage && type === 'response_item') {
-            const payload = asRecord(record?.payload)
-            if (payload?.type === 'message' && payload.role === 'user') {
-                const text = extractCodexText(payload.content)
-                if (text && !shouldIgnoreSyntheticUserMessage(text)) {
-                    firstUserMessage = text
-                }
-            }
-        }
-    }
-
-    const changedTitle = getLatestCodexChangedTitle(allLines)
-    const lastUserMessage = getLatestCodexUserMessage(allLines)
-
-    sessionId = sessionId ?? inferSessionIdFromFileName(filePath)
-    if (!sessionId) return null
-
-    let modifiedAt = Date.now()
-    try {
-        modifiedAt = statSync(filePath).mtimeMs
-    } catch {
-        // Fall back to current time if stat fails during a concurrent file change.
-    }
-
-    return {
-        id: sessionId,
-        title: getCodexSessionTitle(cwd, sessionId, changedTitle, firstUserMessage),
-        lastUserMessage,
-        cwd,
-        file: filePath,
-        modifiedAt,
-        originator,
-        cliVersion
-    }
-}
-
-function listLocalCodexSessions(limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT): CodexLocalSessionSummary[] {
-    const files: string[] = []
-    for (const root of getCodexSessionRoots()) {
-        collectJsonlFiles(root, files)
-    }
-
-    const deduped = new Map<string, CodexLocalSessionSummary>()
-    for (const filePath of files) {
-        const session = parseCodexLocalSession(filePath)
-        if (!session) continue
-        const previous = deduped.get(session.id)
-        if (!previous || previous.modifiedAt < session.modifiedAt) {
-            deduped.set(session.id, session)
-        }
-    }
-
-    return Array.from(deduped.values())
-        .sort((a, b) => b.modifiedAt - a.modifiedAt)
-        .slice(0, limit)
 }
 
 function buildImportedUserMessage(text: string): CodexImportedMessageContent {
@@ -703,6 +479,125 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
     return null
 }
 
+function hasAnyJsonlFile(root: string): boolean {
+    if (!existsSync(root)) return false
+    let entries
+    try {
+        entries = readdirSync(root, { withFileTypes: true })
+    } catch {
+        return false
+    }
+
+    for (const entry of entries) {
+        const fullPath = join(root, entry.name)
+        if (entry.isDirectory()) {
+            if (hasAnyJsonlFile(fullPath)) {
+                return true
+            }
+            continue
+        }
+        if (entry.isFile() && fullPath.toLowerCase().endsWith('.jsonl')) {
+            return true
+        }
+    }
+
+    return false
+}
+
+function hasAnyCodexTranscript(root: string): boolean {
+    return hasAnyJsonlFile(root)
+}
+
+function getCodexSessionRoots(): string[] {
+    const candidateHomes = getCodexHomeCandidates()
+    const candidateRoots = candidateHomes.map((home) => join(home, 'sessions'))
+
+    for (const root of candidateRoots) {
+        if (hasAnyCodexTranscript(root)) {
+            return [root]
+        }
+    }
+
+    return candidateRoots.filter((root) => existsSync(root))
+}
+
+function collectJsonlFiles(root: string, files: string[]): void {
+    if (!existsSync(root)) return
+    let entries
+    try {
+        entries = readdirSync(root, { withFileTypes: true })
+    } catch {
+        return
+    }
+
+    for (const entry of entries) {
+        const fullPath = join(root, entry.name)
+        if (entry.isDirectory()) {
+            collectJsonlFiles(fullPath, files)
+            continue
+        }
+        if (entry.isFile() && fullPath.toLowerCase().endsWith('.jsonl')) {
+            files.push(fullPath)
+        }
+    }
+}
+
+function getCodexSessionTitle(
+    cwd: string | null | undefined,
+    sessionId: string,
+    changedTitle: string | null,
+    firstUserMessage: string | null
+): string {
+    if (changedTitle) {
+        return truncateText(changedTitle, 80)
+    }
+
+    if (firstUserMessage) {
+        return truncateText(firstUserMessage, 80)
+    }
+
+    if (cwd) {
+        const parts = cwd.split(/[\\/]+/).filter(Boolean)
+        if (parts.length > 0) {
+            return parts[parts.length - 1]
+        }
+    }
+
+    return sessionId.slice(0, 8)
+}
+
+function listLocalCodexSessions(limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT): CodexLocalSessionSummary[] {
+    const files: string[] = []
+    for (const root of getCodexSessionRoots()) {
+        collectJsonlFiles(root, files)
+    }
+
+    const deduped = new Map<string, CodexLocalSessionSummary>()
+    for (const filePath of files) {
+        const session = parseCodexLocalSession(filePath)
+        if (!session) continue
+        const previous = deduped.get(session.id)
+        if (!previous || previous.modifiedAt < session.modifiedAt) {
+            deduped.set(session.id, session)
+        }
+    }
+
+    return Array.from(deduped.values())
+        .sort((a, b) => b.modifiedAt - a.modifiedAt)
+        .slice(0, limit)
+}
+
+function parseCodexLocalSession(filePath: string): CodexLocalSessionSummary | null {
+    let content: string
+    try {
+        content = readFileSync(filePath, 'utf-8')
+    } catch {
+        return null
+    }
+
+    return parseCodexLocalSessionContent(filePath, content)
+}
+
 function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): CodexTranscriptImportData | null {
     let content: string
     try {
@@ -711,62 +606,7 @@ function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): Code
         return null
     }
 
-    const lines = content.split(/\r?\n/).filter(Boolean)
-    const messages: CodexImportedMessageContent[] = []
-
-    for (const line of lines) {
-        let parsed: unknown
-        try {
-            parsed = JSON.parse(line)
-        } catch {
-            continue
-        }
-
-        const record = asRecord(parsed)
-        if (!record) continue
-        const message = convertCodexRecordToImportedMessage(record)
-        if (message) {
-            messages.push(message)
-        }
-    }
-
-    return {
-        ...summary,
-        messages
-    }
-}
-
-function buildImportedSessionMetadata(
-    data: CodexTranscriptImportData,
-    existingMetadata?: Record<string, unknown> | null
-): Record<string, unknown> {
-    const now = Date.now()
-    const path = data.cwd ?? (typeof existingMetadata?.path === 'string' ? existingMetadata.path : dirname(data.file))
-    const host = typeof existingMetadata?.host === 'string' ? existingMetadata.host : (process.env.HAPI_HOSTNAME || hostname())
-    const osValue = typeof existingMetadata?.os === 'string' ? existingMetadata.os : platform()
-    const summaryText = data.lastUserMessage ?? data.title
-
-    return {
-        ...(existingMetadata ?? {}),
-        path,
-        host,
-        os: osValue,
-        name: data.title,
-        summary: summaryText
-            ? {
-                text: summaryText,
-                updatedAt: now
-            }
-            : existingMetadata?.summary,
-        flavor: 'codex',
-        codexSessionId: data.id,
-        lifecycleState: typeof existingMetadata?.lifecycleState === 'string'
-            ? existingMetadata.lifecycleState
-            : 'imported',
-        lifecycleStateSince: typeof existingMetadata?.lifecycleStateSince === 'number'
-            ? existingMetadata.lifecycleStateSince
-            : now
-    }
+    return parseCodexTranscriptImportDataShared(summary, content)
 }
 
 function stableSerialize(value: unknown): string {
@@ -1663,37 +1503,22 @@ function createImportSuccessResponse(
         cwd: workspace,
         output: combineSyncOutputs(results),
         sessionIds: codexSessionIds,
-        syncedCount: results.length
+        syncedCount: results.length,
+        hapiSessionId: results.length === 1 ? results[0]?.hapiSessionId : undefined
     }
 }
 
-function importSingleCodexSession(options: {
-    codexSessionId: string
-    localSessionsById: Map<string, CodexLocalSessionSummary>
+function importCodexTranscriptData(options: {
+    transcript: CodexTranscriptImportData
     store: Store
     namespace: string
     getSyncEngine?: () => SyncEngine | null
 }): ScriptLaunchResponse {
-    const summary = options.localSessionsById.get(options.codexSessionId)
-    if (!summary) {
-        return {
-            ...createImportErrorResponse([options.codexSessionId], `Transcript not found for Codex session: ${options.codexSessionId}`),
-            output: `未找到对应的本地 transcript：${options.codexSessionId}`
-        }
-    }
-
-    const transcript = parseCodexTranscriptImportData(summary)
-    if (!transcript) {
-        return {
-            ...createImportErrorResponse([options.codexSessionId], `Failed to parse Codex transcript: ${summary.file}`),
-            output: `解析 transcript 失败：${summary.file}`
-        }
-    }
-
+    const transcript = options.transcript
     if (transcript.messages.length === 0) {
         return {
-            ...createImportErrorResponse([options.codexSessionId], `No importable conversation content found in transcript: ${summary.file}`),
-            output: `transcript 中没有可导入的会话内容：${summary.file}`
+            ...createImportErrorResponse([transcript.id], `No importable conversation content found in transcript: ${transcript.file}`),
+            output: `transcript 中没有可导入的会话内容：${transcript.file}`
         }
     }
 
@@ -1703,15 +1528,10 @@ function importSingleCodexSession(options: {
 
     try {
         const candidates = collectImportCandidates(options.store, options.namespace, options.getSyncEngine)
-        const target = selectImportTargetSession(
-            options.store,
-            candidates,
-            options.codexSessionId,
-            importedComparableMessages
-        )
+        const target = selectImportTargetSession(options.store, candidates, transcript.id, importedComparableMessages)
         const engine = options.getSyncEngine?.() ?? null
         const existingStored = target.sessionId ? options.store.sessions.getSessionByNamespace(target.sessionId, options.namespace) : null
-        const metadata = buildImportedSessionMetadata(transcript, asRecord(existingStored?.metadata))
+        const metadata = buildImportedSessionMetadataShared(transcript, asRecord(existingStored?.metadata))
 
         let sessionId = existingStored?.id ?? null
         let created = false
@@ -1739,7 +1559,7 @@ function importSingleCodexSession(options: {
         }
 
         if (!sessionId) {
-            throw new Error(`Failed to determine target Hapi session for Codex thread: ${options.codexSessionId}`)
+            throw new Error(`Failed to determine target Hapi session for Codex thread: ${transcript.id}`)
         }
 
         const comparablePrefixCount = sessionId ? target.comparablePrefixCount : 0
@@ -1758,7 +1578,7 @@ function importSingleCodexSession(options: {
         }
 
         const output = [
-            `Codex thread: ${options.codexSessionId}`,
+            `Codex thread: ${transcript.id}`,
             `Hapi session: ${sessionId}`,
             `Action: ${created ? 'created' : 'updated'}`,
             `Appended messages: ${appendedMessages.length}`
@@ -1767,7 +1587,7 @@ function importSingleCodexSession(options: {
         appendScriptLog(
             getDirectImportRouteContext().workspace,
             'sync',
-            `SUCCESS: codexSessionId=${options.codexSessionId}; hapiSessionId=${sessionId}; created=${created}; appended=${appendedMessages.length}`
+            `SUCCESS: codexSessionId=${transcript.id}; hapiSessionId=${sessionId}; created=${created}; appended=${appendedMessages.length}`
         )
 
         return {
@@ -1775,16 +1595,17 @@ function importSingleCodexSession(options: {
             message: created ? 'Codex session imported into a new Hapi session' : 'Codex session appended to existing Hapi session',
             pid: 0,
             command: DIRECT_IMPORT_COMMAND,
+            hapiSessionId: sessionId,
             cwd: getDirectImportRouteContext().workspace,
             output,
-            sessionIds: [options.codexSessionId],
+            sessionIds: [transcript.id],
             syncedCount: 1
         }
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
         return {
-            ...createImportErrorResponse([options.codexSessionId], message),
-            output: `Codex thread: ${options.codexSessionId}\n${message}`
+            ...createImportErrorResponse([transcript.id], message),
+            output: `Codex thread: ${transcript.id}\n${message}`
         }
     }
 }
@@ -1803,9 +1624,28 @@ export async function importSelectedCodexSessions(options: {
     const localSessionsById = new Map(listLocalCodexSessions().map((session) => [session.id, session]))
     const results: ScriptLaunchResponse[] = []
     for (const codexSessionId of codexSessionIds) {
-        const result = importSingleCodexSession({
-            codexSessionId,
-            localSessionsById,
+        const summary = localSessionsById.get(codexSessionId)
+        if (!summary) {
+            const result = {
+                ...createImportErrorResponse([codexSessionId], `Transcript not found for Codex session: ${codexSessionId}`),
+                output: `未找到对应的本地 transcript：${codexSessionId}`
+            }
+            results.push(result)
+            continue
+        }
+
+        const transcript = parseCodexTranscriptImportData(summary)
+        if (!transcript) {
+            const result = {
+                ...createImportErrorResponse([codexSessionId], `Failed to parse Codex transcript: ${summary.file}`),
+                output: `解析 transcript 失败：${summary.file}`
+            }
+            results.push(result)
+            continue
+        }
+
+        const result = importCodexTranscriptData({
+            transcript,
             store: options.store,
             namespace: options.namespace,
             getSyncEngine: options.getSyncEngine
@@ -1825,11 +1665,80 @@ export async function importSelectedCodexSessions(options: {
     return createImportSuccessResponse(codexSessionIds, results)
 }
 
+export async function importCodexTranscriptsFromRemoteMachine(options: {
+    transcripts: CodexTranscriptImportData[]
+    store: Store
+    namespace: string
+    getSyncEngine?: () => SyncEngine | null
+}): Promise<ScriptLaunchResponse> {
+    if (options.transcripts.length === 0) {
+        return createImportErrorResponse([], NO_SYNC_SESSION_SELECTED_ERROR)
+    }
+
+    const results: ScriptLaunchResponse[] = []
+    for (const transcript of options.transcripts) {
+        const result = importCodexTranscriptData({
+            transcript,
+            store: options.store,
+            namespace: options.namespace,
+            getSyncEngine: options.getSyncEngine
+        })
+        results.push(result)
+        if (!result.success) {
+            return {
+                ...result,
+                sessionIds: options.transcripts.map((item) => item.id),
+                syncedCount: Math.max(0, results.length - 1),
+                output: combineSyncOutputs(results) ?? result.output
+            }
+        }
+    }
+
+    return createImportSuccessResponse(options.transcripts.map((item) => item.id), results)
+}
+
+export async function importCodexSessionsFromMachine(options: {
+    machineId: string
+    codexSessionIds: string[]
+    store: Store
+    namespace: string
+    getSyncEngine?: () => SyncEngine | null
+}): Promise<ScriptLaunchResponse> {
+    if (options.codexSessionIds.length === 0) {
+        return createImportErrorResponse([], NO_SYNC_SESSION_SELECTED_ERROR)
+    }
+
+    const engine = options.getSyncEngine?.() ?? null
+    if (!engine) {
+        return createImportErrorResponse(options.codexSessionIds, 'Not connected')
+    }
+
+    const uniqueSessionIds = Array.from(new Set(options.codexSessionIds.map((value) => value.trim()).filter(Boolean)))
+    const transcripts: CodexTranscriptImportData[] = []
+    for (const sessionId of uniqueSessionIds) {
+        const result = await engine.getCodexTranscriptImportDataForMachine(options.machineId, sessionId)
+        if (!result.success) {
+            return {
+                ...createImportErrorResponse(uniqueSessionIds, result.error),
+                output: result.error
+            }
+        }
+        transcripts.push(result.transcript)
+    }
+
+    return await importCodexTranscriptsFromRemoteMachine({
+        transcripts,
+        store: options.store,
+        namespace: options.namespace,
+        getSyncEngine: options.getSyncEngine
+    })
+}
+
 export function createCodexDesktopRoutes(options: {
     store: Store
     getSyncEngine: () => SyncEngine | null
 }): Hono<WebAppEnv> {
-    const app = new Hono<WebAppEnv>()
+    const app = new HonoRuntime<WebAppEnv>()
 
     app.get('/codex/status', (c) => {
         const codexStatus = getCodexDesktopStatus()
@@ -1866,6 +1775,45 @@ export function createCodexDesktopRoutes(options: {
 
         // 中文注释：这里直接读取本地 transcript 写入 Hapi store，不再启动隐藏 codex resume 进程，避免漏导入客户端新增内容。
         const result = await importSelectedCodexSessions({
+            codexSessionIds: parsed.sessionIds,
+            store: options.store,
+            namespace: c.get('namespace'),
+            getSyncEngine: options.getSyncEngine
+        })
+        return c.json({
+            ...result,
+            codexDesktopRunning: codexStatus.running,
+            codexClientAvailable: codexStatus.clientAvailable
+        })
+    })
+
+    app.post('/codex/sync-session-from-machine', async (c) => {
+        const codexStatus = getCodexDesktopStatus()
+        const body = await c.req.json().catch(() => null)
+        const machineId = typeof body?.machineId === 'string' ? body.machineId.trim() : ''
+        const parsed = parseSyncSessionRequest(body)
+        if (!machineId) {
+            return c.json({
+                success: false,
+                error: 'machineId is required',
+                codexDesktopRunning: codexStatus.running,
+                codexClientAvailable: codexStatus.clientAvailable
+            })
+        }
+        if (parsed.error) {
+            const { workspace } = getDirectImportRouteContext()
+            appendScriptLog(workspace, 'sync', `FAILED: ${parsed.error}`)
+            return c.json({
+                success: false,
+                error: parsed.error,
+                cwd: workspace,
+                codexDesktopRunning: codexStatus.running,
+                codexClientAvailable: codexStatus.clientAvailable
+            })
+        }
+
+        const result = await importCodexSessionsFromMachine({
+            machineId,
             codexSessionIds: parsed.sessionIds,
             store: options.store,
             namespace: c.get('namespace'),

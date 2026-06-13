@@ -55,12 +55,14 @@ export default {
   'sessions.group.new': '在此目录新建会话',
   'codexSync.tooltip': '从 Codex 导入会话到 Hapi',
   'codexSync.confirm.title': '导入 Codex 会话',
-  'codexSync.confirm.description': '选择需要导入到 Hapi 的 Codex 会话',
+  'codexSync.confirm.description': '选择要从当前在线机器导入到 Hapi 的 Codex 会话',
   // 中文注释：以下文案支撑导入弹窗的多选列表、加载态，以及右上角重启 Codex 客户端按钮提示。
   'codexSync.confirm.selectAll': '全选',
   'codexSync.confirm.clearAll': '全取消',
   'codexSync.confirm.selectedCount': '已选择 {n} 个会话',
   'codexSync.confirm.empty': '未找到本地 Codex 会话',
+  'codexSync.confirm.emptyHint.noLocal': '这个客户端上还没有找到本地 Codex transcript。',
+  'codexSync.confirm.emptyHint.docker': '如果 HAPI 跑在 Docker 里，请在有本机 ~/.codex 的客户端上导入。',
   'codexSync.confirm.current': '当前关联',
   'codexSync.confirm.cwd': '工作目录',
   'codexSync.confirm.cwdFilter': '工作目录',
@@ -193,6 +195,7 @@ export default {
   'button.close': '关闭',
   'button.dismiss': '忽略',
   'button.copy': '复制',
+  'button.copied': '已复制',
   'button.paste': '粘贴',
 
   // Cleanup settings

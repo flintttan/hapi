@@ -36,6 +36,7 @@ export function CodexSessionSyncDialog(props: {
     onClose: () => void
     sessions: CodexLocalSessionSummary[]
     currentCodexSessionId: string | null
+    emptyHint?: string | null
     onConfirm: (sessionIds: string[]) => Promise<void>
     onRestartCodexDesktop: () => Promise<void>
     isPending: boolean
@@ -47,6 +48,7 @@ export function CodexSessionSyncDialog(props: {
         isOpen,
         sessions,
         currentCodexSessionId,
+        emptyHint,
         onConfirm,
         onRestartCodexDesktop,
         isPending,
@@ -218,7 +220,12 @@ export function CodexSessionSyncDialog(props: {
                             </div>
                         ) : sessions.length === 0 ? (
                             <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
-                                {t('codexSync.confirm.empty')}
+                                <div>{t('codexSync.confirm.empty')}</div>
+                                {emptyHint ? (
+                                    <div className="mt-2 text-xs leading-5 text-[var(--app-hint)]/80">
+                                        {emptyHint}
+                                    </div>
+                                ) : null}
                             </div>
                         ) : filteredSessions.length === 0 ? (
                             <div className="px-4 py-8 text-center text-sm text-[var(--app-hint)]">
@@ -280,23 +287,23 @@ export function CodexSessionSyncDialog(props: {
                 </div>
 
                 <div className="mt-4 flex justify-end gap-2">
-                            <Button
-                                type="button"
-                                variant="secondary"
-                                onClick={onClose}
-                                disabled={isPending || isRestartingCodexDesktop}
-                            >
-                                {t('button.cancel')}
-                            </Button>
-                            <Button
-                                type="button"
-                                variant="secondary"
-                                onClick={() => void handleConfirm()}
-                                disabled={isPending || isLoading || selectedSessionIds.length === 0}
-                            >
-                                {isPending ? t('codexSync.confirm.confirming') : t('codexSync.confirm.confirm')}
-                            </Button>
-                        </div>
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={onClose}
+                        disabled={isPending || isRestartingCodexDesktop}
+                    >
+                        {t('button.cancel')}
+                    </Button>
+                    <Button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => void handleConfirm()}
+                        disabled={isPending || isLoading || selectedSessionIds.length === 0}
+                    >
+                        {isPending ? t('codexSync.confirm.confirming') : t('codexSync.confirm.confirm')}
+                    </Button>
+                </div>
             </DialogContent>
         </Dialog>
     )

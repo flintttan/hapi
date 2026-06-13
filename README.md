@@ -35,14 +35,7 @@ For self-hosted options (Cloudflare Tunnel, Tailscale), see [Installation](docs/
 
 ### Import local Codex sessions
 
-If HAPI runs in Docker or another isolated environment, mount the host Codex data directory and point `HAPI_CODEX_HOME` at it, otherwise `/api/codex/sessions` will stay empty:
-
-```bash
-docker run \
-  -v "$HOME/.codex:/host-codex:ro" \
-  -e HAPI_CODEX_HOME=/host-codex \
-  ...
-```
+Codex sessions are read from the machine that runs the HAPI client.
 
 ## Docs
 
