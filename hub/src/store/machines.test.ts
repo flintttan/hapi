@@ -54,4 +54,38 @@ describe('Machine store metadata refresh', () => {
             displayName: 'Desk Mac',
         })
     })
+
+    it('preserves workspaceRoots when runner metadata refresh rehydrates machine cache', () => {
+        const store = new Store(':memory:')
+
+        store.machines.getOrCreateMachine(
+            'machine-1',
+            {
+                host: 'real-host',
+                platform: 'darwin',
+                happyCliVersion: '0.5.49',
+                workspaceRoots: ['/Users/tanfulin/llm']
+            },
+            { status: 'running' },
+            'user-1'
+        )
+
+        const refreshed = store.machines.getOrCreateMachine(
+            'machine-1',
+            {
+                host: 'real-host',
+                platform: 'darwin',
+                happyCliVersion: '0.5.50'
+            },
+            { status: 'running' },
+            'user-1'
+        )
+
+        expect(refreshed.metadata).toEqual({
+            host: 'real-host',
+            platform: 'darwin',
+            happyCliVersion: '0.5.50',
+            workspaceRoots: ['/Users/tanfulin/llm']
+        })
+    })
 })

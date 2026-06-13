@@ -63,6 +63,15 @@ export function getOrCreateMachine(
             ) {
                 incoming.displayName = (existingMetadata as Record<string, unknown>).displayName
             }
+            if (
+                !('workspaceRoots' in incoming)
+                && existingMetadata
+                && typeof existingMetadata === 'object'
+                && !Array.isArray(existingMetadata)
+                && Array.isArray((existingMetadata as Record<string, unknown>).workspaceRoots)
+            ) {
+                incoming.workspaceRoots = (existingMetadata as Record<string, unknown>).workspaceRoots
+            }
             return incoming
         })()
 
