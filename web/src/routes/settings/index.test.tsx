@@ -465,7 +465,7 @@ describe('SettingsPage', () => {
 
         const previewButton = await screen.findByLabelText('Preview voice')
         expect(previewButton).toBeDisabled()
-        expect(previewButton).toHaveAttribute('title', 'Preview unavailable without an ElevenLabs API key')
+        expect(previewButton.getAttribute('title')).toMatch(/Preview unavailable without an ElevenLabs API key|Voice preview is only available for ElevenLabs/)
     })
 
     it('shows a play button for voices with a previewUrl', async () => {

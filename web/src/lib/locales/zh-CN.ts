@@ -641,7 +641,7 @@ export default {
   'browse.nav': '浏览',
   'browse.noRootTitle': '未启用 workspace 浏览',
   'browse.noRootHint': '浏览功能是可选的。带一个或多个 --workspace-root 参数重启 runner，即可启用文件树浏览和受限的会话启动。',
-  'browse.noRootFooter': '你仍然可以在「新建会话」页面直接创建会话。',
+  'browse.noRootFooter': '你仍然可以在「新建会话」页面手动输入目录来创建会话；如果之后配置了 workspace roots，新建会话目录仍必须落在允许范围内。',
   'browse.noMachinesConnected': '没有已连接的 CLI。在某台机器上运行 `hapi runner start --workspace-root /path/a --workspace-root /path/b` 来开始。',
 
   // Misc

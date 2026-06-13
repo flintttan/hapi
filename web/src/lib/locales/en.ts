@@ -637,7 +637,7 @@ export default {
   'browse.nav': 'Browse',
   'browse.noRootTitle': 'Workspace browsing is off',
   'browse.noRootHint': 'Browsing is opt-in. Restart the runner with one or more workspace roots to enable file-tree navigation and scoped session spawning.',
-  'browse.noRootFooter': 'You can still create sessions from the “New Session” page.',
+  'browse.noRootFooter': 'You can still create sessions from the “New Session” page by entering a directory manually. If workspace roots are configured later, new sessions must stay within those allowed roots.',
   'browse.noMachinesConnected': 'No CLI connected. Run `hapi runner start --workspace-root /path/a --workspace-root /path/b` on a machine to get started.',
 
   // Misc
