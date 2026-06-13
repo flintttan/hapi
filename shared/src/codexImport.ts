@@ -1,6 +1,3 @@
-import { randomUUID } from 'node:crypto'
-import { dirname } from 'node:path'
-import { hostname, platform } from 'node:os'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
 
 export type CodexLocalSessionSummary = {
@@ -46,6 +43,26 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function asString(value: unknown): string | null {
     return typeof value === 'string' && value.length > 0 ? value : null
+}
+
+function createId(): string {
+    return globalThis.crypto?.randomUUID?.() ?? `codex-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}
+
+function getDirname(pathValue: string): string {
+    const normalized = pathValue.replace(/[\\/]+$/, '')
+    const index = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'))
+    return index > 0 ? normalized.slice(0, index) : '.'
+}
+
+function getHostName(): string {
+    const processValue = globalThis.process as { env?: Record<string, string | undefined> } | undefined
+    return processValue?.env?.HAPI_HOSTNAME ?? processValue?.env?.HOSTNAME ?? 'localhost'
+}
+
+function getPlatformName(): string {
+    const processValue = globalThis.process as { platform?: string } | undefined
+    return processValue?.platform ?? 'unknown'
 }
 
 function extractCodexText(value: unknown): string {
@@ -269,12 +286,12 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
 
         if (eventType === 'agent_message') {
             const message = asString(payload.message)
-            return message ? buildImportedAgentMessage({ type: 'message', message, id: randomUUID() }) : null
+            return message ? buildImportedAgentMessage({ type: 'message', message, id: createId() }) : null
         }
 
         if (eventType === 'agent_reasoning') {
             const message = asString(payload.text) ?? asString(payload.message)
-            return message ? buildImportedAgentMessage({ type: 'reasoning', message, id: randomUUID() }) : null
+            return message ? buildImportedAgentMessage({ type: 'reasoning', message, id: createId() }) : null
         }
 
         if (eventType === 'agent_reasoning_delta') {
@@ -284,7 +301,7 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
 
         if (eventType === 'token_count') {
             const info = asRecord(payload.info)
-            return info ? buildImportedAgentMessage({ type: 'token_count', info, id: randomUUID() }) : null
+            return info ? buildImportedAgentMessage({ type: 'token_count', info, id: createId() }) : null
         }
 
         return null
@@ -306,7 +323,7 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
                 return buildImportedUserMessage(text)
             }
             if (role === 'assistant') {
-                return buildImportedAgentMessage({ type: 'message', message: text, id: randomUUID() })
+                return buildImportedAgentMessage({ type: 'message', message: text, id: createId() })
             }
             return null
         }
@@ -322,7 +339,7 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
                 name,
                 callId,
                 input: parseCodexFunctionArguments(payload.arguments),
-                id: randomUUID()
+                id: createId()
             })
         }
 
@@ -335,7 +352,7 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
                 type: 'tool-call-result',
                 callId,
                 output: payload.output,
-                id: randomUUID()
+                id: createId()
             })
         }
     }
@@ -448,9 +465,9 @@ export function buildImportedSessionMetadata(
     existingMetadata?: Record<string, unknown> | null
 ): Record<string, unknown> {
     const now = Date.now()
-    const path = data.cwd ?? (typeof existingMetadata?.path === 'string' ? existingMetadata.path : dirname(data.file))
-    const host = typeof existingMetadata?.host === 'string' ? existingMetadata.host : (process.env.HAPI_HOSTNAME || hostname())
-    const osValue = typeof existingMetadata?.os === 'string' ? existingMetadata.os : platform()
+    const path = data.cwd ?? (typeof existingMetadata?.path === 'string' ? existingMetadata.path : getDirname(data.file))
+    const host = typeof existingMetadata?.host === 'string' ? existingMetadata.host : getHostName()
+    const osValue = typeof existingMetadata?.os === 'string' ? existingMetadata.os : getPlatformName()
     const summaryText = data.lastUserMessage ?? data.title
 
     return {
