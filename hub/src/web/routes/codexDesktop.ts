@@ -139,7 +139,7 @@ type DuplicateSessionGroupCandidate = {
     sessions: ImportCandidate[]
 }
 
-const CODEX_DESKTOP_NOT_FOUND_ERROR = '尝试重启codex客户端失败，未安装/找不到codex客户端'
+const CODEX_DESKTOP_NOT_FOUND_ERROR = '尝试重启Codex失败，未找到可用的 Codex CLI 或 Codex App'
 const SCRIPT_TIMEOUT_ERROR = '执行超时'
 const NO_SYNC_SESSION_SELECTED_ERROR = '未选择需要导入的 Codex 会话'
 const DEFAULT_SCRIPT_TIMEOUT_MS = 60_000
@@ -1076,10 +1076,37 @@ function findOnPath(commandName: string): string | null {
     return null
 }
 
+function findCodexCommandViaShell(): string | null {
+    if (process.platform === 'win32') {
+        return null
+    }
+
+    for (const shell of ['zsh', 'bash', 'sh']) {
+        try {
+            const result = spawnSync(shell, ['-lc', 'command -v codex'], {
+                encoding: 'utf-8',
+                timeout: 5000,
+                windowsHide: true
+            })
+            if (result.status === 0) {
+                const resolved = result.stdout.trim()
+                if (resolved) {
+                    return resolved
+                }
+            }
+        } catch {
+            // Try the next shell.
+        }
+    }
+
+    return null
+}
+
 function getCodexLauncherCandidates(): string[] {
     return [
         process.env.HAPI_CODEX_COMMAND?.trim() ?? '',
         findOnPath('codex') ?? '',
+        findCodexCommandViaShell() ?? '',
         process.env.LOCALAPPDATA ? join(process.env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'codex.exe') : ''
     ].filter(Boolean)
 }
@@ -1092,6 +1119,23 @@ function isCodexLauncherAvailable(): boolean {
             return false
         }
     })
+}
+
+function isCodexDesktopAppInstalled(): boolean {
+    if (process.platform !== 'darwin') {
+        return false
+    }
+
+    try {
+        const result = spawnSync('open', ['-Ra', 'Codex'], {
+            encoding: 'utf-8',
+            timeout: 5000,
+            windowsHide: true
+        })
+        return result.status === 0
+    } catch {
+        return false
+    }
 }
 
 function isCodexDesktopPath(pathValue: string): boolean {
@@ -1128,7 +1172,7 @@ function isCodexDesktopPackageInstalled(): boolean {
 
 function isCodexDesktopInstallAvailable(): boolean {
     if (process.platform !== 'win32') {
-        return isCodexLauncherAvailable()
+        return isCodexLauncherAvailable() || isCodexDesktopAppInstalled()
     }
 
     if (isCodexDesktopPackageInstalled()) {
@@ -1304,7 +1348,126 @@ async function runPowerShellScript(scriptPath: string, workspace: string, script
     throw lastError instanceof Error ? lastError : new Error(String(lastError))
 }
 
+async function runCommand(command: string, args: string[], workspace: string): Promise<{ pid: number; command: string; output: string }> {
+    return await new Promise((resolvePromise, rejectPromise) => {
+        const output: string[] = []
+        let settled = false
+        let didSpawn = false
+        let timeout: ReturnType<typeof setTimeout> | null = null
+        const child = spawn(command, args, {
+            cwd: workspace,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true
+        })
+
+        const cleanup = () => {
+            if (timeout) {
+                clearTimeout(timeout)
+            }
+            child.off('spawn', onSpawn)
+            child.off('error', onError)
+            child.off('exit', onExit)
+        }
+
+        const settleResolve = (value: { pid: number; command: string; output: string }) => {
+            if (settled) return
+            settled = true
+            cleanup()
+            resolvePromise(value)
+        }
+
+        const settleReject = (error: Error) => {
+            if (settled) return
+            settled = true
+            cleanup()
+            rejectPromise(error)
+        }
+
+        const onSpawn = () => {
+            didSpawn = true
+        }
+
+        const onError = (error: Error) => {
+            if (!didSpawn) {
+                ;(error as Error & { shellLaunchFailed?: boolean }).shellLaunchFailed = true
+            }
+            settleReject(error)
+        }
+
+        const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+            const combinedOutput = output.join('').trim()
+            if (code === 0) {
+                settleResolve({ pid: child.pid ?? 0, command, output: combinedOutput })
+                return
+            }
+            const detail = combinedOutput ? `\n${combinedOutput}` : ''
+            settleReject(new Error(`${command} exited with code ${code ?? 'null'}${signal ? ` signal ${signal}` : ''}.${detail}`))
+        }
+
+        timeout = setTimeout(() => {
+            child.kill()
+            settleReject(new Error(SCRIPT_TIMEOUT_ERROR))
+        }, getScriptTimeoutMs())
+
+        child.stdout?.on('data', (chunk) => output.push(String(chunk)))
+        child.stderr?.on('data', (chunk) => output.push(String(chunk)))
+        child.once('spawn', onSpawn)
+        child.once('error', onError)
+        child.once('exit', onExit)
+    })
+}
+
 async function launchRestartScript(): Promise<ScriptLaunchResponse> {
+    if (process.platform === 'darwin') {
+        const workspace = getDirectImportWorkspace()
+        const codexCommand = getCodexLauncherCandidates()[0]
+        if (codexCommand) {
+            try {
+                const launched = await runCommand(codexCommand, ['app', workspace], workspace)
+                return {
+                    success: true,
+                    message: RESTART_SCRIPT_MESSAGE,
+                    pid: launched.pid,
+                    command: launched.command,
+                    script: codexCommand,
+                    cwd: workspace,
+                    output: launched.output
+                }
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error)
+                appendScriptLog(workspace, 'restart', `FAILED: ${message}; command=${codexCommand}`)
+                return {
+                    success: false,
+                    error: message,
+                    script: codexCommand,
+                    cwd: workspace
+                }
+            }
+        }
+
+        try {
+            const launched = await runCommand('open', ['-a', 'Codex', workspace], workspace)
+            return {
+                success: true,
+                message: RESTART_SCRIPT_MESSAGE,
+                pid: launched.pid,
+                command: launched.command,
+                script: 'open -a Codex',
+                cwd: workspace,
+                output: launched.output
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error)
+            appendScriptLog(workspace, 'restart', `FAILED: ${message}; command=open -a Codex`)
+            return {
+                success: false,
+                error: message,
+                script: 'open -a Codex',
+                cwd: workspace
+            }
+        }
+    }
+
     const scriptPath = getRestartScriptPath()
     const workspace = getWorkspace(scriptPath)
 

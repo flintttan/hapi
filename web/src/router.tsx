@@ -226,7 +226,7 @@ function SessionsPage() {
         if (/当前会话仍处于活跃状态，请等待会话结束后重试|Active Hapi process already has this Codex thread/i.test(raw)) {
             return t('codexSync.error.active')
         }
-        if (/未安装\/找不到codex客户端|unable to find codex launcher|找不到.*codex/i.test(raw)) {
+        if (/未安装\/找不到codex客户端|未找到可用的\s*Codex CLI 或 Codex App|unable to find codex launcher|找不到.*codex/i.test(raw)) {
             return t('codexSync.restart.failed.notFound')
         }
         return raw
