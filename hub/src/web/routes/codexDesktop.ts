@@ -210,8 +210,14 @@ function getCodexHome(): string {
     return configured ? resolveLocalPath(expandHomePath(configured)) : join(getUserHomeDir(), '.codex')
 }
 
+function getConfiguredCodexImportHome(): string | null {
+    const configured = process.env.HAPI_CODEX_HOME?.trim()
+    return configured ? resolveLocalPath(expandHomePath(configured)) : null
+}
+
 function getCodexHomeCandidates(): string[] {
     const candidates = [
+        getConfiguredCodexImportHome(),
         getCodexHome(),
         join(getUserHomeDir(), '.codex')
     ].filter((value): value is string => Boolean(value))

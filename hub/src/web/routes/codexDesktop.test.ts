@@ -11,6 +11,7 @@ import { createCodexDesktopRoutes, importSelectedCodexSessions } from './codexDe
 
 const originalCodexHome = process.env.CODEX_HOME
 const originalHome = process.env.HOME
+const originalHapiCodexHome = process.env.HAPI_CODEX_HOME
 
 function createTranscript(codexHome: string, sessionId: string): void {
     const sessionDir = join(codexHome, 'sessions', '2026', '06', '04')
@@ -70,6 +71,11 @@ describe('Codex Desktop import routes', () => {
             delete process.env.HOME
         } else {
             process.env.HOME = originalHome
+        }
+        if (originalHapiCodexHome === undefined) {
+            delete process.env.HAPI_CODEX_HOME
+        } else {
+            process.env.HAPI_CODEX_HOME = originalHapiCodexHome
         }
     })
 
@@ -202,6 +208,38 @@ describe('Codex Desktop import routes', () => {
         } finally {
             rmSync(actualHome, { recursive: true, force: true })
             rmSync(temporaryCodexHome, { recursive: true, force: true })
+        }
+    })
+
+    it('prefers HAPI_CODEX_HOME for transcript discovery', async () => {
+        const actualHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-'))
+        const configuredImportHome = mkdtempSync(join(tmpdir(), 'hapi-codex-import-home-'))
+        const codexSessionId = '33333333-3333-4333-8333-333333333333'
+        process.env.HOME = actualHome
+        process.env.CODEX_HOME = mkdtempSync(join(tmpdir(), 'hapi-codex-runtime-home-'))
+        process.env.HAPI_CODEX_HOME = configuredImportHome
+
+        try {
+            writeFileSync(join(process.env.CODEX_HOME, 'auth.json'), '{"token":"fixture"}', 'utf-8')
+            createTranscript(join(configuredImportHome), codexSessionId)
+
+            const app = createRoutesApp('default')
+            const response = await app.request('/api/codex/sessions')
+
+            expect(response.status).toBe(200)
+            const body = await response.json()
+            expect(body).toEqual({
+                success: true,
+                sessions: [
+                    expect.objectContaining({
+                        id: codexSessionId
+                    })
+                ]
+            })
+        } finally {
+            rmSync(actualHome, { recursive: true, force: true })
+            rmSync(configuredImportHome, { recursive: true, force: true })
+            rmSync(process.env.CODEX_HOME ?? '', { recursive: true, force: true })
         }
     })
 })

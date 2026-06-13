@@ -33,6 +33,17 @@ The terminal will display a URL and QR code. Scan the QR code with your phone or
 
 For self-hosted options (Cloudflare Tunnel, Tailscale), see [Installation](docs/guide/installation.md)
 
+### Import local Codex sessions
+
+If HAPI runs in Docker or another isolated environment, mount the host Codex data directory and point `HAPI_CODEX_HOME` at it, otherwise `/api/codex/sessions` will stay empty:
+
+```bash
+docker run \
+  -v "$HOME/.codex:/host-codex:ro" \
+  -e HAPI_CODEX_HOME=/host-codex \
+  ...
+```
+
 ## Docs
 
 - [App](docs/guide/pwa.md)
