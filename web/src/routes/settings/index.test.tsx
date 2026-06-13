@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act, cleanup } from '@testing-library/react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { I18nContext, I18nProvider } from '@/lib/i18n-context'
 import { en } from '@/lib/locales'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
@@ -94,6 +95,17 @@ vi.mock('@/hooks/useTheme', () => ({
     ],
 }))
 
+vi.mock('@/hooks/queries/useMachines', () => ({
+    useMachines: () => ({
+        machines: [
+            { id: 'm1', metadata: { host: 'devbox', platform: 'darwin', displayName: 'My Mac' } },
+        ],
+        isLoading: false,
+        error: null,
+        refetch: vi.fn(),
+    }),
+}))
+
 // Mock languages
 vi.mock('@/lib/languages', () => ({
     getElevenLabsSupportedLanguages: () => [
@@ -112,6 +124,22 @@ const { mockFetchVoices, mockFetchVoiceBackend, mockApi } = vi.hoisted(() => {
     }))
     const mockApi = {
         fetchVoices: vi.fn(() => Promise.resolve({ voices: [] })),
+        getCleanupPreferences: vi.fn(() => Promise.resolve({
+            autoCleanupEnabled: true,
+            sessionRetentionDays: 30,
+            defaultSessionRetentionDays: 30,
+            effectiveSessionRetentionDays: 30,
+        })),
+        setCleanupPreferences: vi.fn((payload: { autoCleanupEnabled: boolean; sessionRetentionDays: number | null }) => Promise.resolve({
+            autoCleanupEnabled: payload.autoCleanupEnabled,
+            sessionRetentionDays: payload.sessionRetentionDays,
+            defaultSessionRetentionDays: 30,
+            effectiveSessionRetentionDays: payload.sessionRetentionDays ?? 30,
+        })),
+        setMachineDisplayName: vi.fn((machineId: string, displayName: string | null) => Promise.resolve({
+            id: machineId,
+            metadata: { displayName }
+        })),
     }
     return { mockFetchVoices, mockFetchVoiceBackend, mockApi }
 })
@@ -134,7 +162,13 @@ vi.mock('@/api/voice', () => ({
 
 // Mock useAppContext so the page doesn't throw "AppContext is not available"
 vi.mock('@/lib/app-context', () => ({
-    useAppContext: () => ({ api: mockApi, token: 'test', baseUrl: '' }),
+    useAppContext: () => ({
+        api: mockApi,
+        token: 'test',
+        baseUrl: '',
+        user: { id: 'u1', username: 'tester' },
+        onLogout: vi.fn(),
+    }),
     AppContextProvider: ({ children }: { children: React.ReactNode }) => children,
 }))
 
@@ -143,20 +177,36 @@ afterEach(() => {
     cleanup()
 })
 function renderWithProviders(ui: React.ReactElement) {
+    const queryClient = new QueryClient({
+        defaultOptions: {
+            queries: { retry: false },
+            mutations: { retry: false },
+        },
+    })
     return render(
-        <I18nProvider>
-            {ui}
-        </I18nProvider>
+        <QueryClientProvider client={queryClient}>
+            <I18nProvider>
+                {ui}
+            </I18nProvider>
+        </QueryClientProvider>
     )
 }
 
 function renderWithSpyT(ui: React.ReactElement) {
     const translations = en as Record<string, string>
     const spyT = vi.fn((key: string) => translations[key] ?? key)
+    const queryClient = new QueryClient({
+        defaultOptions: {
+            queries: { retry: false },
+            mutations: { retry: false },
+        },
+    })
     render(
-        <I18nContext.Provider value={{ t: spyT, locale: 'en', setLocale: vi.fn() }}>
-            {ui}
-        </I18nContext.Provider>
+        <QueryClientProvider client={queryClient}>
+            <I18nContext.Provider value={{ t: spyT, locale: 'en', setLocale: vi.fn() }}>
+                {ui}
+            </I18nContext.Provider>
+        </QueryClientProvider>
     )
     return spyT
 }
@@ -186,18 +236,21 @@ describe('SettingsPage', () => {
 
     it('displays the App Version with correct value', () => {
         renderWithProviders(<SettingsPage />)
+        fireEvent.click(screen.getByRole('button', { name: /About/i }))
         expect(screen.getAllByText('App Version').length).toBeGreaterThanOrEqual(1)
         expect(screen.getAllByText(__APP_VERSION__).length).toBeGreaterThanOrEqual(1)
     })
 
     it('displays the Protocol Version with correct value', () => {
         renderWithProviders(<SettingsPage />)
+        fireEvent.click(screen.getByRole('button', { name: /About/i }))
         expect(screen.getAllByText('Protocol Version').length).toBeGreaterThanOrEqual(1)
         expect(screen.getAllByText(String(PROTOCOL_VERSION)).length).toBeGreaterThanOrEqual(1)
     })
 
     it('displays the website link with correct URL and security attributes', () => {
         renderWithProviders(<SettingsPage />)
+        fireEvent.click(screen.getByRole('button', { name: /About/i }))
         expect(screen.getAllByText('Website').length).toBeGreaterThanOrEqual(1)
         const links = screen.getAllByRole('link', { name: 'hapi.run' })
         expect(links.length).toBeGreaterThanOrEqual(1)
@@ -209,6 +262,7 @@ describe('SettingsPage', () => {
 
     it('uses correct i18n keys for About section', () => {
         const spyT = renderWithSpyT(<SettingsPage />)
+        fireEvent.click(screen.getByRole('button', { name: /About/i }))
         const calledKeys = spyT.mock.calls.map((call) => call[0])
         expect(calledKeys).toContain('settings.about.title')
         expect(calledKeys).toContain('settings.about.website')
@@ -220,6 +274,13 @@ describe('SettingsPage', () => {
         renderWithProviders(<SettingsPage />)
         expect(screen.getAllByText('Appearance').length).toBeGreaterThanOrEqual(1)
         expect(screen.getAllByText('Follow System').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('renders the Account section with current user', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getByText('Account')).toBeInTheDocument()
+        expect(screen.getAllByText('@tester').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getByText('Sign out')).toBeInTheDocument()
     })
 
     it('uses correct i18n keys for Appearance setting', () => {
@@ -288,6 +349,57 @@ describe('SettingsPage', () => {
         expect(calledKeys).toContain('settings.chat.groupedToolBackground')
         expect(calledKeys).toContain('settings.chat.userMessageBackground')
         expect(calledKeys).toContain('settings.chat.surfaceColor.default')
+    })
+
+    it('renders cleanup settings and loads current preferences', async () => {
+        renderWithProviders(<SettingsPage />)
+        fireEvent.click(await screen.findByRole('button', { name: /Session cleanup/i }))
+        expect(await screen.findByText('Session cleanup')).toBeInTheDocument()
+        expect(screen.getByText('Enable automatic cleanup')).toBeInTheDocument()
+        await waitFor(() => {
+            expect(screen.getByLabelText('Retention days')).toHaveValue(30)
+        })
+    })
+
+    it('saves cleanup settings when toggled and submitted', async () => {
+        renderWithProviders(<SettingsPage />)
+
+        fireEvent.click(await screen.findByRole('button', { name: /Session cleanup/i }))
+        await waitFor(() => {
+            expect(screen.getByLabelText('Retention days')).toHaveValue(30)
+        })
+        const toggle = await screen.findByRole('checkbox')
+        fireEvent.click(toggle)
+        await waitFor(() => {
+            expect(mockApi.setCleanupPreferences).toHaveBeenCalledWith({
+                autoCleanupEnabled: false,
+                sessionRetentionDays: 30,
+            })
+        })
+
+        const input = screen.getByLabelText('Retention days')
+        fireEvent.change(input, { target: { value: '14' } })
+        fireEvent.click(screen.getByRole('button', { name: 'Save' }))
+
+        await waitFor(() => {
+            expect(mockApi.setCleanupPreferences).toHaveBeenCalledWith({
+                autoCleanupEnabled: false,
+                sessionRetentionDays: 14,
+            })
+        })
+    })
+
+    it('renders machines section and saves machine display name', async () => {
+        renderWithProviders(<SettingsPage />)
+        const machinesButton = screen.getByRole('button', { name: /Machines/i })
+        fireEvent.click(machinesButton)
+        expect(await screen.findByText('devbox')).toBeInTheDocument()
+        const input = screen.getByLabelText('Custom host name m1')
+        fireEvent.change(input, { target: { value: 'Studio Mac' } })
+        fireEvent.click(screen.getAllByRole('button', { name: 'Save' }).find((button) => button.closest('.px-3.py-3.border-t')) ?? screen.getByRole('button', { name: 'Save' }))
+        await waitFor(() => {
+            expect(mockApi.setMachineDisplayName).toHaveBeenCalledWith('m1', 'Studio Mac')
+        })
     })
 
     // Voice picker tests

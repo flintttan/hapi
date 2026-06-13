@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useTranslation, type Locale } from '@/lib/use-translation'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { getElevenLabsSupportedLanguages, getLanguageDisplayName, type Language } from '@/lib/languages'
@@ -19,6 +20,7 @@ import { getTerminalFontSizeOptions, useTerminalFontSize, type TerminalFontSize 
 import { getComposerEnterBehaviorOptions, useComposerEnterBehavior, type ComposerEnterBehavior } from '@/hooks/useComposerEnterBehavior'
 import { getTerminalToolDisplayModeOptions, useTerminalToolDisplayMode, type TerminalToolDisplayMode } from '@/hooks/useTerminalToolDisplayMode'
 import { getSessionListStatusModeOptions, useSessionListStatusMode, type SessionListStatusMode } from '@/hooks/useSessionListStatusMode'
+import { useMachines } from '@/hooks/queries/useMachines'
 import {
     MAX_SESSION_PREVIEW_LIMIT,
     MIN_SESSION_PREVIEW_LIMIT,
@@ -35,6 +37,7 @@ import {
     type ChatSurfaceColorPreset,
 } from '@/hooks/useChatSurfaceColors'
 import { useAppearance, getAppearanceOptions, type AppearancePreference } from '@/hooks/useTheme'
+import { queryKeys } from '@/lib/query-keys'
 import { PROTOCOL_VERSION } from '@hapi/protocol'
 import { VoiceRespondsControls, VoiceSoundsControls, VoicePersonaControls, VoiceDiagnosticsControls } from '@/components/settings/VoiceAdvancedControls'
 
@@ -310,8 +313,16 @@ function ChatSurfaceColorControl(props: {
 
 export default function SettingsPage() {
     const { t, locale, setLocale } = useTranslation()
-    const { api } = useAppContext()
+    const { api, user, onLogout } = useAppContext()
+    const queryClient = useQueryClient()
     const goBack = useAppGoBack()
+    const [isAccountSectionOpen, setIsAccountSectionOpen] = useState(true)
+    const [isDisplaySectionOpen, setIsDisplaySectionOpen] = useState(true)
+    const [isChatSectionOpen, setIsChatSectionOpen] = useState(true)
+    const [isVoiceSectionOpen, setIsVoiceSectionOpen] = useState(true)
+    const [isMachinesSectionOpen, setIsMachinesSectionOpen] = useState(false)
+    const [isCleanupSectionOpen, setIsCleanupSectionOpen] = useState(false)
+    const [isAboutSectionOpen, setIsAboutSectionOpen] = useState(false)
     const [isOpen, setIsOpen] = useState(false)
     const [isAppearanceOpen, setIsAppearanceOpen] = useState(false)
     const [isFontOpen, setIsFontOpen] = useState(false)
@@ -353,6 +364,8 @@ export default function SettingsPage() {
 
     const [configuredVoiceBackends, setConfiguredVoiceBackends] = useState<VoiceBackendType[]>([])
     const [voiceBackend, setVoiceBackend] = useState<VoiceBackendType | null>(null)
+    const [cleanupDaysInput, setCleanupDaysInput] = useState('')
+    const [machineNameDrafts, setMachineNameDrafts] = useState<Record<string, string>>({})
 
     // Per-backend voice selection (localStorage keys differ by backend)
     const [voiceId, setVoiceId] = useState<string | null>(null)
@@ -424,6 +437,41 @@ export default function SettingsPage() {
     const voicePreviewEnabled = voiceBackend === 'elevenlabs'
     const showVoiceBackendChooser = configuredVoiceBackends.length > 1
     const currentVoiceBackendLabel = voiceBackend ? VOICE_BACKEND_LABELS[voiceBackend] : null
+
+    const cleanupQuery = useQuery({
+        queryKey: ['cleanup-preferences'],
+        queryFn: () => api.getCleanupPreferences(),
+    })
+
+    const cleanupMutation = useMutation({
+        mutationFn: (payload: { autoCleanupEnabled: boolean; sessionRetentionDays: number | null }) =>
+            api.setCleanupPreferences(payload),
+        onSuccess: (data) => {
+            queryClient.setQueryData(['cleanup-preferences'], data)
+        },
+    })
+    const { machines, isLoading: machinesLoading, error: machinesError } = useMachines(api, true)
+    const machineNameMutation = useMutation({
+        mutationFn: (payload: { machineId: string; displayName: string | null }) =>
+            api.setMachineDisplayName(payload.machineId, payload.displayName),
+        onSuccess: async () => {
+            await queryClient.invalidateQueries({ queryKey: queryKeys.machines })
+        },
+    })
+
+    useEffect(() => {
+        setMachineNameDrafts(prev => {
+            const next = { ...prev }
+            let changed = false
+            for (const machine of machines) {
+                if (next[machine.id] === undefined) {
+                    next[machine.id] = machine.metadata?.displayName ?? ''
+                    changed = true
+                }
+            }
+            return changed ? next : prev
+        })
+    }, [machines])
 
     const handleLocaleChange = (newLocale: Locale) => {
         setLocale(newLocale)
@@ -544,6 +592,46 @@ export default function SettingsPage() {
         }
     }, [])
 
+    useEffect(() => {
+        const value = cleanupQuery.data?.sessionRetentionDays
+        setCleanupDaysInput(value == null ? '' : String(value))
+    }, [cleanupQuery.data?.sessionRetentionDays])
+
+    const saveCleanupPreferences = (next?: Partial<{ autoCleanupEnabled: boolean; sessionRetentionDays: number | null }>) => {
+        const current = cleanupQuery.data
+        const rawDays = cleanupDaysInput.trim()
+        const parsed = rawDays ? Number(rawDays) : null
+        const sessionRetentionDays = parsed === null || !Number.isFinite(parsed)
+            ? null
+            : Math.max(1, Math.min(365, Math.floor(parsed)))
+        cleanupMutation.mutate({
+            autoCleanupEnabled: next?.autoCleanupEnabled ?? current?.autoCleanupEnabled ?? true,
+            sessionRetentionDays: next?.sessionRetentionDays ?? sessionRetentionDays
+        })
+    }
+
+    const saveMachineDisplayName = (machineId: string) => {
+        const value = machineNameDrafts[machineId]?.trim() ?? ''
+        machineNameMutation.mutate({
+            machineId,
+            displayName: value.length > 0 ? value : null
+        })
+    }
+
+    const userLabel = (() => {
+        if (!user) return t('settings.account.unknownUser')
+        if (user.username) return `@${user.username}`
+        if (user.firstName) return user.firstName
+        return String(user.id)
+    })()
+
+    const handleLogout = useCallback(() => {
+        if (!onLogout) return
+        const confirmed = confirm(t('settings.account.logoutConfirm'))
+        if (!confirmed) return
+        onLogout()
+    }, [onLogout, t])
+
     // Close dropdown when clicking outside
     useEffect(() => {
         if (!isOpen && !isAppearanceOpen && !isFontOpen && !isTerminalFontOpen && !isChatOpen && !isTerminalToolDisplayOpen && !isSessionListStatusOpen && !isVoiceOpen && !isVoiceBackendOpen && !isVoicePickerOpen) return
@@ -624,7 +712,42 @@ export default function SettingsPage() {
             </div>
 
             <div className="app-scroll-y flex-1 min-h-0">
-                <div className="mx-auto w-full max-w-content">
+                    <div className="mx-auto w-full max-w-content">
+                    {/* Account section */}
+                    <div className="border-b border-[var(--app-divider)]">
+                        <button
+                            type="button"
+                            onClick={() => setIsAccountSectionOpen((value) => !value)}
+                            className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                            aria-expanded={isAccountSectionOpen}
+                        >
+                            <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                                    {t('settings.account.title')}
+                                </div>
+                                <div className="mt-1 text-sm text-[var(--app-hint)]">{userLabel}</div>
+                            </div>
+                            <ChevronDownIcon className={`transition-transform ${isAccountSectionOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {isAccountSectionOpen ? (
+                            <>
+                                <div className="flex w-full items-center justify-between px-3 py-3">
+                                    <span className="text-[var(--app-fg)]">{t('settings.account.currentUser')}</span>
+                                    <span className="text-[var(--app-hint)]">{userLabel}</span>
+                                </div>
+                                {onLogout ? (
+                                    <button
+                                        type="button"
+                                        onClick={handleLogout}
+                                        className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                                    >
+                                        <span className="text-red-600">{t('settings.account.logout')}</span>
+                                    </button>
+                                ) : null}
+                            </>
+                        ) : null}
+                    </div>
+
                     {/* Language section */}
                     <div className="border-b border-[var(--app-divider)]">
                         <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
@@ -682,9 +805,22 @@ export default function SettingsPage() {
 
                     {/* Display section */}
                     <div className="border-b border-[var(--app-divider)]">
-                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
-                            {t('settings.display.title')}
-                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setIsDisplaySectionOpen((value) => !value)}
+                            className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                            aria-expanded={isDisplaySectionOpen}
+                        >
+                            <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                                    {t('settings.display.title')}
+                                </div>
+                                <div className="mt-1 text-sm text-[var(--app-hint)]">{t(currentAppearanceLabel)} · {currentFontScaleLabel}</div>
+                            </div>
+                            <ChevronDownIcon className={`transition-transform ${isDisplaySectionOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {isDisplaySectionOpen ? (
+                            <>
                         <div ref={appearanceContainerRef} className="relative">
                             <button
                                 type="button"
@@ -889,13 +1025,28 @@ export default function SettingsPage() {
                                 {t('settings.display.sessionListStatus.detailedDescription')}
                             </div>
                         ) : null}
+                            </>
+                        ) : null}
                     </div>
 
                     {/* Chat section */}
                     <div className="border-b border-[var(--app-divider)]">
-                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
-                            {t('settings.chat.title')}
-                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setIsChatSectionOpen((value) => !value)}
+                            className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                            aria-expanded={isChatSectionOpen}
+                        >
+                            <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                                    {t('settings.chat.title')}
+                                </div>
+                                <div className="mt-1 text-sm text-[var(--app-hint)]">{t(currentComposerEnterBehaviorLabel)}</div>
+                            </div>
+                            <ChevronDownIcon className={`transition-transform ${isChatSectionOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {isChatSectionOpen ? (
+                            <>
                         <div ref={chatContainerRef} className="relative">
                             <button
                                 type="button"
@@ -1006,13 +1157,31 @@ export default function SettingsPage() {
                             onCustomChange={(value) => setUserMessageBackground(toCustomChatSurfaceColorPreference(value))}
                             t={t}
                         />
+                            </>
+                        ) : null}
                     </div>
 
                     {/* Voice Assistant section */}
                     <div className="border-b border-[var(--app-divider)]">
-                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
-                            {t('settings.voice.title')}
-                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setIsVoiceSectionOpen((value) => !value)}
+                            className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                            aria-expanded={isVoiceSectionOpen}
+                        >
+                            <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                                    {t('settings.voice.title')}
+                                </div>
+                                <div className="mt-1 text-sm text-[var(--app-hint)]">
+                                    {currentVoiceBackendLabel ?? t('settings.voice.voiceDefault')}
+                                    {currentVoiceName ? ` · ${currentVoiceName}` : ''}
+                                </div>
+                            </div>
+                            <ChevronDownIcon className={`transition-transform ${isVoiceSectionOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {isVoiceSectionOpen ? (
+                            <>
 
                         {/* ── Connection & provider ── */}
                         <div>
@@ -1175,13 +1344,169 @@ export default function SettingsPage() {
                             </div>
                             <VoiceDiagnosticsControls t={t} voiceBackend={voiceBackend} />
                         </div>
+                            </>
+                        ) : null}
+                    </div>
+
+                    {/* Machines section */}
+                    <div className="border-b border-[var(--app-divider)]">
+                        <button
+                            type="button"
+                            onClick={() => setIsMachinesSectionOpen((value) => !value)}
+                            className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                            aria-expanded={isMachinesSectionOpen}
+                        >
+                            <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                                    {t('settings.machines.title')}
+                                </div>
+                                <div className="mt-1 text-sm text-[var(--app-hint)]">
+                                    {machinesLoading
+                                        ? t('loading.machines')
+                                        : machines.length > 0
+                                            ? t('settings.machines.onlineCount', { n: machines.length })
+                                            : t('settings.machines.noOnline')}
+                                </div>
+                            </div>
+                            <ChevronDownIcon className={`transition-transform ${isMachinesSectionOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {isMachinesSectionOpen ? (
+                            <>
+                                {machinesError ? (
+                                    <div className="px-3 pb-3 text-sm text-red-500">{machinesError}</div>
+                                ) : null}
+                                {!machinesLoading && machines.length === 0 ? (
+                                    <div className="px-3 pb-3 text-sm text-[var(--app-hint)]">
+                                        {t('settings.machines.noOnline')}
+                                    </div>
+                                ) : null}
+                                {machines.map((machine) => (
+                                    <div key={machine.id} className="px-3 py-3 border-t border-[var(--app-divider)]">
+                                        <div className="mb-1.5 min-w-0">
+                                            <div className="truncate text-sm font-medium text-[var(--app-fg)]">
+                                                {machine.metadata?.host ?? machine.id.slice(0, 8)}
+                                            </div>
+                                            <div className="truncate text-xs text-[var(--app-hint)]">
+                                                {machine.metadata?.platform ?? t('machine.unknown')}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <input
+                                                aria-label={`${t('settings.machines.hostname')} ${machine.id}`}
+                                                value={machineNameDrafts[machine.id] ?? ''}
+                                                onChange={(event) => setMachineNameDrafts(prev => ({
+                                                    ...prev,
+                                                    [machine.id]: event.target.value
+                                                }))}
+                                                placeholder={t('settings.machines.hostnamePlaceholder')}
+                                                className="min-w-0 flex-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                                            />
+                                            <button
+                                                type="button"
+                                                onClick={() => saveMachineDisplayName(machine.id)}
+                                                disabled={machineNameMutation.isPending}
+                                                className="rounded-md bg-[var(--app-button)] px-3 py-2 text-sm text-[var(--app-button-text)] disabled:opacity-50"
+                                            >
+                                                {t('button.save')}
+                                            </button>
+                                        </div>
+                                        <div className="mt-1.5 text-xs text-[var(--app-hint)]">
+                                            {t('settings.machines.hostnameHint')}
+                                        </div>
+                                    </div>
+                                ))}
+                            </>
+                        ) : null}
+                    </div>
+
+                    {/* Cleanup section */}
+                    <div className="border-b border-[var(--app-divider)]">
+                        <button
+                            type="button"
+                            onClick={() => setIsCleanupSectionOpen((value) => !value)}
+                            className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                            aria-expanded={isCleanupSectionOpen}
+                        >
+                            <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                                    {t('settings.cleanup.title')}
+                                </div>
+                                <div className="mt-1 text-sm text-[var(--app-hint)]">
+                                    {cleanupQuery.data?.autoCleanupEnabled
+                                        ? t('settings.cleanup.status.enabled')
+                                        : t('settings.cleanup.status.disabled')}
+                                </div>
+                            </div>
+                            <ChevronDownIcon className={`transition-transform ${isCleanupSectionOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {isCleanupSectionOpen ? (
+                            <>
+                        <label className="flex w-full items-center justify-between gap-3 px-3 py-3">
+                            <span className="text-[var(--app-fg)]">{t('settings.cleanup.enabled')}</span>
+                            <input
+                                type="checkbox"
+                                checked={cleanupQuery.data?.autoCleanupEnabled ?? true}
+                                onChange={(event) => saveCleanupPreferences({ autoCleanupEnabled: event.target.checked })}
+                                disabled={cleanupMutation.isPending || cleanupQuery.isLoading}
+                                className="h-5 w-5"
+                            />
+                        </label>
+                        <div className="px-3 pb-3">
+                            <label className="mb-1 block text-sm text-[var(--app-fg)]">
+                                {t('settings.cleanup.retention')}
+                            </label>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    aria-label={t('settings.cleanup.retention')}
+                                    type="number"
+                                    min={1}
+                                    max={365}
+                                    value={cleanupDaysInput}
+                                    onChange={(event) => setCleanupDaysInput(event.target.value)}
+                                    onBlur={() => saveCleanupPreferences()}
+                                    disabled={cleanupMutation.isPending || cleanupQuery.isLoading}
+                                    className="min-w-0 flex-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2.5 py-2 text-sm outline-none focus:ring-2 focus:ring-[var(--app-link)]"
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => saveCleanupPreferences()}
+                                    disabled={cleanupMutation.isPending || cleanupQuery.isLoading}
+                                    className="rounded-md bg-[var(--app-button)] px-3 py-2 text-sm text-[var(--app-button-text)] disabled:opacity-50"
+                                >
+                                    {cleanupMutation.isPending ? t('settings.cleanup.saving') : t('button.save')}
+                                </button>
+                            </div>
+                            <div className="mt-1.5 text-xs text-[var(--app-hint)]">
+                                {t('settings.cleanup.defaultHint', { n: cleanupQuery.data?.defaultSessionRetentionDays ?? 30 })}
+                            </div>
+                            {cleanupMutation.error ? (
+                                <div className="mt-1.5 text-xs text-red-500">
+                                    {t('settings.cleanup.error')}
+                                </div>
+                            ) : null}
+                        </div>
+                            </>
+                        ) : null}
                     </div>
 
                     {/* About section */}
                     <div className="border-b border-[var(--app-divider)]">
-                        <div className="px-3 py-2 text-xs font-semibold text-[var(--app-hint)] uppercase tracking-wide">
-                            {t('settings.about.title')}
-                        </div>
+                        <button
+                            type="button"
+                            onClick={() => setIsAboutSectionOpen((value) => !value)}
+                            className="flex w-full items-center justify-between px-3 py-3 text-left transition-colors hover:bg-[var(--app-subtle-bg)]"
+                            aria-expanded={isAboutSectionOpen}
+                        >
+                            <div>
+                                <div className="text-xs font-semibold uppercase tracking-wide text-[var(--app-hint)]">
+                                    {t('settings.about.title')}
+                                </div>
+                                <div className="mt-1 text-sm text-[var(--app-hint)]">{__APP_VERSION__}</div>
+                            </div>
+                            <ChevronDownIcon className={`transition-transform ${isAboutSectionOpen ? 'rotate-180' : ''}`} />
+                        </button>
+                        {isAboutSectionOpen ? (
+                            <>
                         <div className="flex w-full items-center justify-between px-3 py-3">
                             <span className="text-[var(--app-fg)]">{t('settings.about.website')}</span>
                             <a
@@ -1201,6 +1526,8 @@ export default function SettingsPage() {
                             <span className="text-[var(--app-fg)]">{t('settings.about.protocolVersion')}</span>
                             <span className="text-[var(--app-hint)]">{PROTOCOL_VERSION}</span>
                         </div>
+                            </>
+                        ) : null}
                     </div>
                 </div>
             </div>

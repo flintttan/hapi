@@ -17,6 +17,7 @@ import type {
     PushSubscriptionPayload,
     PushUnsubscribePayload,
     PushVapidPublicKeyResponse,
+    CleanupPreferencesResponse,
     SlashCommandsResponse,
     SkillsResponse,
     SpawnResponse,
@@ -222,6 +223,20 @@ export class ApiClient {
 
     async getPushVapidPublicKey(): Promise<PushVapidPublicKeyResponse> {
         return await this.request<PushVapidPublicKeyResponse>('/api/push/vapid-public-key')
+    }
+
+    async getCleanupPreferences(): Promise<CleanupPreferencesResponse> {
+        return await this.request<CleanupPreferencesResponse>('/api/preferences/cleanup')
+    }
+
+    async setCleanupPreferences(payload: {
+        autoCleanupEnabled: boolean
+        sessionRetentionDays: number | null
+    }): Promise<CleanupPreferencesResponse> {
+        return await this.request<CleanupPreferencesResponse>('/api/preferences/cleanup', {
+            method: 'PUT',
+            body: JSON.stringify(payload)
+        })
     }
 
     async subscribePushNotifications(payload: PushSubscriptionPayload): Promise<void> {
@@ -599,6 +614,13 @@ export class ApiClient {
 
     async getMachines(): Promise<MachinesResponse> {
         return await this.request<MachinesResponse>('/api/machines')
+    }
+
+    async setMachineDisplayName(machineId: string, displayName: string | null): Promise<MachinesResponse['machines'][number]> {
+        return await this.request<MachinesResponse['machines'][number]>(`/api/machines/${encodeURIComponent(machineId)}/display-name`, {
+            method: 'PATCH',
+            body: JSON.stringify({ displayName })
+        })
     }
 
     async listMachineDirectory(

@@ -171,6 +171,13 @@ export type PushVapidPublicKeyResponse = {
     publicKey: string
 }
 
+export type CleanupPreferencesResponse = {
+    autoCleanupEnabled: boolean
+    sessionRetentionDays: number | null
+    defaultSessionRetentionDays: number
+    effectiveSessionRetentionDays: number
+}
+
 export type CodexDesktopScriptResponse = {
     success: boolean
     message?: string
