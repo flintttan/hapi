@@ -360,7 +360,11 @@ function convertCodexRecordToImportedMessage(record: Record<string, unknown>): C
     return null
 }
 
-export function parseCodexLocalSessionContent(filePath: string, content: string): CodexLocalSessionSummary | null {
+export function parseCodexLocalSessionContent(
+    filePath: string,
+    content: string,
+    options?: { modifiedAt?: number }
+): CodexLocalSessionSummary | null {
     const allLines = content.split(/\r?\n/).filter(Boolean)
     const headLines = allLines.slice(0, 200)
     let sessionId: string | null = null
@@ -417,7 +421,9 @@ export function parseCodexLocalSessionContent(filePath: string, content: string)
     sessionId = sessionId ?? inferSessionIdFromFileName(filePath)
     if (!sessionId) return null
 
-    const modifiedAt = Date.now()
+    const modifiedAt = typeof options?.modifiedAt === 'number' && Number.isFinite(options.modifiedAt)
+        ? options.modifiedAt
+        : Date.now()
 
     return {
         id: sessionId,

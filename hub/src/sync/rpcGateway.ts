@@ -24,6 +24,7 @@ import type { RpcRegistry } from '../socket/rpcRegistry'
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000
 const MODEL_LIST_RPC_TIMEOUT_MS = 120_000
+const CODEX_SESSION_LIST_RPC_TIMEOUT_MS = 300_000
 
 export type RpcCommandResponse = CommandResponse
 export type RpcReadFileResponse = FileReadResponse
@@ -267,7 +268,7 @@ export class RpcGateway {
     }
 
     async listCodexSessionsForMachine(machineId: string): Promise<RpcListCodexSessionsResponse> {
-        return await this.machineRpc(machineId, RPC_METHODS.ListCodexSessions, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexSessionsResponse
+        return await this.machineRpc(machineId, RPC_METHODS.ListCodexSessions, {}, CODEX_SESSION_LIST_RPC_TIMEOUT_MS) as RpcListCodexSessionsResponse
     }
 
     async getCodexTranscriptImportDataForMachine(

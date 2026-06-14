@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs'
+import { closeSync, existsSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import {
@@ -9,7 +9,8 @@ import {
 } from '@hapi/protocol/codexImport'
 import { logger } from '@/ui/logger'
 
-const DEFAULT_SCAN_LIMIT = 500
+const DEFAULT_SCAN_LIMIT = 2_000
+const SUMMARY_READ_WINDOW_BYTES = 64 * 1024
 
 function resolveLocalPath(pathValue: string): string {
     return isAbsolute(pathValue) ? pathValue : resolve(process.cwd(), pathValue)
@@ -96,14 +97,15 @@ export function listLocalCodexSessions(limit = DEFAULT_SCAN_LIMIT): CodexLocalSe
 
     const deduped = new Map<string, CodexLocalSessionSummary>()
     for (const filePath of files) {
-        let content: string
+        let modifiedAt = Date.now()
         try {
-            content = readFileSync(filePath, 'utf-8')
+            modifiedAt = statSync(filePath).mtimeMs
         } catch {
-            logger.debug(`[codex-local-sessions] Failed to read transcript ${filePath}`)
-            continue
+            logger.debug(`[codex-local-sessions] Failed to stat transcript ${filePath}`)
         }
-        const session = parseCodexLocalSessionContent(filePath, content)
+        const content = readTranscriptSummaryContent(filePath)
+        if (!content) continue
+        const session = parseCodexLocalSessionContent(filePath, content, { modifiedAt })
         if (!session) continue
         const previous = deduped.get(session.id)
         if (!previous || previous.modifiedAt < session.modifiedAt) {
@@ -127,4 +129,45 @@ export function getLocalCodexTranscriptImportData(sessionId: string): CodexTrans
         return null
     }
     return parseCodexTranscriptImportData(summary, content)
+}
+
+function readTranscriptSummaryContent(filePath: string): string | null {
+    let stats
+    try {
+        stats = statSync(filePath)
+    } catch {
+        logger.debug(`[codex-local-sessions] Failed to stat transcript for summary ${filePath}`)
+        return null
+    }
+
+    if (stats.size <= SUMMARY_READ_WINDOW_BYTES * 2) {
+        try {
+            return readFileSync(filePath, 'utf-8')
+        } catch {
+            logger.debug(`[codex-local-sessions] Failed to read transcript ${filePath}`)
+            return null
+        }
+    }
+
+    let fd: number | null = null
+    try {
+        fd = openSync(filePath, 'r')
+        const head = Buffer.allocUnsafe(SUMMARY_READ_WINDOW_BYTES)
+        const tail = Buffer.allocUnsafe(SUMMARY_READ_WINDOW_BYTES)
+        const headBytes = readSync(fd, head, 0, SUMMARY_READ_WINDOW_BYTES, 0)
+        const tailStart = Math.max(0, stats.size - SUMMARY_READ_WINDOW_BYTES)
+        const tailBytes = readSync(fd, tail, 0, SUMMARY_READ_WINDOW_BYTES, tailStart)
+        return `${head.subarray(0, headBytes).toString('utf-8')}\n${tail.subarray(0, tailBytes).toString('utf-8')}`
+    } catch {
+        logger.debug(`[codex-local-sessions] Failed to read transcript summary ${filePath}`)
+        return null
+    } finally {
+        if (fd !== null) {
+            try {
+                closeSync(fd)
+            } catch {
+                logger.debug(`[codex-local-sessions] Failed to close transcript ${filePath}`)
+            }
+        }
+    }
 }

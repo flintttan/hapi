@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync } from 'node:fs'
 import { spawn, spawnSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
@@ -120,7 +120,8 @@ const SCRIPT_TIMEOUT_ERROR = '执行超时'
 const NO_SYNC_SESSION_SELECTED_ERROR = '未选择需要导入的 Codex 会话'
 const RPC_HANDLER_NOT_REGISTERED_PREFIX = 'RPC handler not registered:'
 const DEFAULT_SCRIPT_TIMEOUT_MS = 60_000
-const DEFAULT_CODEX_SESSION_SCAN_LIMIT = 500
+const DEFAULT_CODEX_SESSION_SCAN_LIMIT = 2_000
+const SUMMARY_READ_WINDOW_BYTES = 64 * 1024
 
 function resolveLocalPath(pathValue: string): string {
     return isAbsolute(pathValue) ? pathValue : resolve(process.cwd(), pathValue)
@@ -547,11 +548,17 @@ export function canFallbackToLocalCodexMachine(machine: {
     const machineHomeDir = normalizeComparablePath(machine?.metadata?.homeDir)
     const localHomeDir = normalizeComparablePath(getUserHomeDir())
 
-    if (!machineHost || !machineHomeDir || !localHomeDir) {
+    if (!machineHost || !localHomeDir) {
         return false
     }
 
-    return machineHost === getLocalHostName() && machineHomeDir === localHomeDir
+    if (machineHost !== getLocalHostName()) {
+        return false
+    }
+
+    // 中文注释：旧 runner 可能还没有上报 homeDir，但同机导入仍然可以直接读本机 ~/.codex；
+    // 这种情况下只要 host 能对上，就允许走本地 fallback，避免 listCodexSessions 直接 500。
+    return !machineHomeDir || machineHomeDir === localHomeDir
 }
 
 function collectJsonlFiles(root: string, files: string[]): void {
@@ -625,14 +632,19 @@ export function listDiscoveredLocalCodexSessions(limit = DEFAULT_CODEX_SESSION_S
 }
 
 function parseCodexLocalSession(filePath: string): CodexLocalSessionSummary | null {
-    let content: string
+    let modifiedAt = Date.now()
     try {
-        content = readFileSync(filePath, 'utf-8')
+        modifiedAt = statSync(filePath).mtimeMs
     } catch {
+        // 中文注释：拿不到文件 mtime 时退回到当前时间，避免单个 transcript 的 stat 异常中断整个列表。
+    }
+
+    const content = readTranscriptSummaryContent(filePath)
+    if (!content) {
         return null
     }
 
-    return parseCodexLocalSessionContent(filePath, content)
+    return parseCodexLocalSessionContent(filePath, content, { modifiedAt })
 }
 
 function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): CodexTranscriptImportData | null {
@@ -650,6 +662,44 @@ export function getDiscoveredLocalCodexTranscriptImportData(sessionId: string): 
     const summary = listLocalCodexSessions().find((item) => item.id === sessionId)
     if (!summary) return null
     return parseCodexTranscriptImportData(summary)
+}
+
+function readTranscriptSummaryContent(filePath: string): string | null {
+    let stats
+    try {
+        stats = statSync(filePath)
+    } catch {
+        return null
+    }
+
+    if (stats.size <= SUMMARY_READ_WINDOW_BYTES * 2) {
+        try {
+            return readFileSync(filePath, 'utf-8')
+        } catch {
+            return null
+        }
+    }
+
+    let fd: number | null = null
+    try {
+        fd = openSync(filePath, 'r')
+        const head = Buffer.allocUnsafe(SUMMARY_READ_WINDOW_BYTES)
+        const tail = Buffer.allocUnsafe(SUMMARY_READ_WINDOW_BYTES)
+        const headBytes = readSync(fd, head, 0, SUMMARY_READ_WINDOW_BYTES, 0)
+        const tailStart = Math.max(0, stats.size - SUMMARY_READ_WINDOW_BYTES)
+        const tailBytes = readSync(fd, tail, 0, SUMMARY_READ_WINDOW_BYTES, tailStart)
+        return `${head.subarray(0, headBytes).toString('utf-8')}\n${tail.subarray(0, tailBytes).toString('utf-8')}`
+    } catch {
+        return null
+    } finally {
+        if (fd !== null) {
+            try {
+                closeSync(fd)
+            } catch {
+                // noop
+            }
+        }
+    }
 }
 
 function stableSerialize(value: unknown): string {

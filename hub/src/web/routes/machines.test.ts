@@ -301,4 +301,68 @@ describe('machines routes', () => {
             rmSync(actualHome, { recursive: true, force: true })
         }
     })
+
+    it('falls back to local Codex transcript discovery for same-host older runners without homeDir metadata', async () => {
+        const originalHome = process.env.HOME
+        const actualHome = mkdtempSync(join(tmpdir(), 'hapi-machine-codex-home-no-home-dir-'))
+        const codexHome = join(actualHome, '.codex')
+        const sessionDir = join(codexHome, 'sessions', '2026', '06', '14')
+        const codexSessionId = '77777777-7777-4777-8777-777777777777'
+        process.env.HOME = actualHome
+
+        try {
+            mkdirSync(sessionDir, { recursive: true })
+            writeFileSync(join(sessionDir, `rollout-${codexSessionId}.jsonl`), `${JSON.stringify({
+                type: 'session_meta',
+                payload: {
+                    id: codexSessionId,
+                    cwd: '/tmp/project-no-home-dir',
+                    originator: 'codex_cli_rs',
+                    cli_version: '0.0.0-test'
+                }
+            })}\n`, 'utf-8')
+
+            const machine = createMachine({
+                metadata: {
+                    host: hostname(),
+                    platform: 'darwin',
+                    happyCliVersion: '1.0.0'
+                }
+            })
+            const engine = {
+                getMachine: () => machine,
+                getMachineByNamespace: () => machine,
+                listCodexSessionsForMachine: async () => {
+                    throw new Error(`RPC handler not registered: ${machine.id}:listCodexSessions`)
+                }
+            } as Partial<SyncEngine>
+
+            const app = new Hono<WebAppEnv>()
+            app.use('*', async (c, next) => {
+                c.set('namespace', 'default')
+                await next()
+            })
+            app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+            const response = await app.request('/api/machines/machine-1/codex-sessions')
+
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({
+                success: true,
+                sessions: [
+                    expect.objectContaining({
+                        id: codexSessionId,
+                        cwd: '/tmp/project-no-home-dir'
+                    })
+                ]
+            })
+        } finally {
+            if (originalHome === undefined) {
+                delete process.env.HOME
+            } else {
+                process.env.HOME = originalHome
+            }
+            rmSync(actualHome, { recursive: true, force: true })
+        }
+    })
 })

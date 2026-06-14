@@ -61,6 +61,14 @@ describe('RpcGateway RPC timeouts', () => {
         expect(timeouts).toEqual([120_000])
     })
 
+    it('uses a longer RPC timeout when listing Codex sessions for a machine', async () => {
+        const { gateway, timeouts } = createGateway()
+
+        await gateway.listCodexSessionsForMachine('machine-1')
+
+        expect(timeouts).toEqual([300_000])
+    })
+
     it('uses an extended RPC timeout when listing Cursor models for a machine', async () => {
         const { gateway, timeouts } = createGateway()
 
@@ -69,4 +77,3 @@ describe('RpcGateway RPC timeouts', () => {
         expect(timeouts).toEqual([120_000])
     })
 })
-

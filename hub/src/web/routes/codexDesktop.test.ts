@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test'
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
@@ -220,6 +220,38 @@ describe('Codex Desktop import routes', () => {
         }
     })
 
+    it('uses transcript file mtime when listing local Codex sessions', async () => {
+        const codexHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-route-mtime-'))
+        const isolatedHome = mkdtempSync(join(tmpdir(), 'hapi-codex-isolated-home-mtime-'))
+        const codexSessionId = '27777777-7777-4777-8777-777777777777'
+        process.env.CODEX_HOME = codexHome
+        process.env.HOME = isolatedHome
+
+        try {
+            createTranscript(codexHome, codexSessionId)
+            const transcriptPath = join(codexHome, 'sessions', '2026', '06', '04', `rollout-${codexSessionId}.jsonl`)
+            const transcriptTime = new Date('2026-06-14T09:08:07.000Z')
+            utimesSync(transcriptPath, transcriptTime, transcriptTime)
+
+            const app = createRoutesApp('default')
+            const response = await app.request('/api/codex/sessions')
+
+            expect(response.status).toBe(200)
+            expect(await response.json()).toEqual({
+                success: true,
+                sessions: [
+                    expect.objectContaining({
+                        id: codexSessionId,
+                        modifiedAt: transcriptTime.getTime()
+                    })
+                ]
+            })
+        } finally {
+            rmSync(isolatedHome, { recursive: true, force: true })
+            rmSync(codexHome, { recursive: true, force: true })
+        }
+    })
+
     it('prefers HAPI_CODEX_HOME for transcript discovery', async () => {
         const actualHome = mkdtempSync(join(tmpdir(), 'hapi-codex-home-'))
         const configuredImportHome = mkdtempSync(join(tmpdir(), 'hapi-codex-import-home-'))
@@ -350,7 +382,7 @@ describe('Codex Desktop import routes', () => {
                 getCodexTranscriptImportDataForMachine: async () => {
                     throw new Error('RPC handler not registered: machine-1:getCodexTranscriptImportData')
                 }
-            } as Partial<SyncEngine>
+            } as unknown as Partial<SyncEngine>
 
             const app = new Hono<WebAppEnv>()
             app.use('*', async (c, next) => {
