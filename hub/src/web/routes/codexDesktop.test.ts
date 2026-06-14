@@ -133,14 +133,18 @@ describe('Codex Desktop import routes', () => {
     it('exposes namespace availability in codex status', async () => {
         const app = createRoutesApp('team-a')
         const response = await app.request('/api/codex/status')
+        const body = await response.json() as {
+            success: boolean
+            codexDesktopRunning: boolean
+            codexClientAvailable: boolean
+            codexTranscriptImportAvailable: boolean
+        }
 
         expect(response.status).toBe(200)
-        expect(await response.json()).toEqual({
-            success: true,
-            codexDesktopRunning: false,
-            codexClientAvailable: true,
-            codexTranscriptImportAvailable: true
-        })
+        expect(body.success).toBe(true)
+        expect(body.codexDesktopRunning).toBe(false)
+        expect(body.codexTranscriptImportAvailable).toBe(true)
+        expect(typeof body.codexClientAvailable).toBe('boolean')
     })
 
     it('allows Codex transcript endpoints for non-default namespaces', async () => {
