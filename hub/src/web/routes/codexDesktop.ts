@@ -118,6 +118,7 @@ type DuplicateSessionGroupCandidate = {
 const CODEX_DESKTOP_NOT_FOUND_ERROR = '尝试重启Codex失败，未找到可用的 Codex CLI 或 Codex App'
 const SCRIPT_TIMEOUT_ERROR = '执行超时'
 const NO_SYNC_SESSION_SELECTED_ERROR = '未选择需要导入的 Codex 会话'
+const RPC_HANDLER_NOT_REGISTERED_PREFIX = 'RPC handler not registered:'
 const DEFAULT_SCRIPT_TIMEOUT_MS = 60_000
 const DEFAULT_CODEX_SESSION_SCAN_LIMIT = 500
 
@@ -521,6 +522,38 @@ function getCodexSessionRoots(): string[] {
     return candidateRoots.filter((root) => existsSync(root))
 }
 
+function normalizeComparablePath(value: string | null | undefined): string | null {
+    const trimmed = value?.trim()
+    if (!trimmed) return null
+    return resolve(expandHomePath(trimmed))
+}
+
+function getLocalHostName(): string {
+    return process.env.HAPI_HOSTNAME?.trim() || hostname()
+}
+
+function isRpcHandlerNotRegisteredForMethod(error: unknown, method: string): boolean {
+    const message = error instanceof Error ? error.message : String(error ?? '')
+    return message.includes(RPC_HANDLER_NOT_REGISTERED_PREFIX) && message.endsWith(`:${method}`)
+}
+
+export function canFallbackToLocalCodexMachine(machine: {
+    metadata?: {
+        host?: string
+        homeDir?: string
+    } | null
+} | null | undefined): boolean {
+    const machineHost = machine?.metadata?.host?.trim()
+    const machineHomeDir = normalizeComparablePath(machine?.metadata?.homeDir)
+    const localHomeDir = normalizeComparablePath(getUserHomeDir())
+
+    if (!machineHost || !machineHomeDir || !localHomeDir) {
+        return false
+    }
+
+    return machineHost === getLocalHostName() && machineHomeDir === localHomeDir
+}
+
 function collectJsonlFiles(root: string, files: string[]): void {
     if (!existsSync(root)) return
     let entries
@@ -587,6 +620,10 @@ function listLocalCodexSessions(limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT): Codex
         .slice(0, limit)
 }
 
+export function listDiscoveredLocalCodexSessions(limit = DEFAULT_CODEX_SESSION_SCAN_LIMIT): CodexLocalSessionSummary[] {
+    return listLocalCodexSessions(limit)
+}
+
 function parseCodexLocalSession(filePath: string): CodexLocalSessionSummary | null {
     let content: string
     try {
@@ -607,6 +644,12 @@ function parseCodexTranscriptImportData(summary: CodexLocalSessionSummary): Code
     }
 
     return parseCodexTranscriptImportDataShared(summary, content)
+}
+
+export function getDiscoveredLocalCodexTranscriptImportData(sessionId: string): CodexTranscriptImportData | null {
+    const summary = listLocalCodexSessions().find((item) => item.id === sessionId)
+    if (!summary) return null
+    return parseCodexTranscriptImportData(summary)
 }
 
 function stableSerialize(value: unknown): string {
@@ -1714,16 +1757,37 @@ export async function importCodexSessionsFromMachine(options: {
     }
 
     const uniqueSessionIds = Array.from(new Set(options.codexSessionIds.map((value) => value.trim()).filter(Boolean)))
+    const machine = engine.getMachine(options.machineId)
+    const canUseLocalFallback = canFallbackToLocalCodexMachine(machine)
     const transcripts: CodexTranscriptImportData[] = []
     for (const sessionId of uniqueSessionIds) {
-        const result = await engine.getCodexTranscriptImportDataForMachine(options.machineId, sessionId)
-        if (!result.success) {
-            return {
-                ...createImportErrorResponse(uniqueSessionIds, result.error),
-                output: result.error
+        try {
+            const result = await engine.getCodexTranscriptImportDataForMachine(options.machineId, sessionId)
+            if (!result.success) {
+                return {
+                    ...createImportErrorResponse(uniqueSessionIds, result.error),
+                    output: result.error
+                }
             }
+            transcripts.push(result.transcript)
+        } catch (error) {
+            if (!canUseLocalFallback || !isRpcHandlerNotRegisteredForMethod(error, 'getCodexTranscriptImportData')) {
+                const reason = error instanceof Error ? error.message : 'Failed to fetch Codex transcript import data'
+                return {
+                    ...createImportErrorResponse(uniqueSessionIds, reason),
+                    output: reason
+                }
+            }
+            const localTranscript = getDiscoveredLocalCodexTranscriptImportData(sessionId)
+            if (!localTranscript) {
+                const reason = `Transcript not found for Codex session: ${sessionId}`
+                return {
+                    ...createImportErrorResponse(uniqueSessionIds, reason),
+                    output: reason
+                }
+            }
+            transcripts.push(localTranscript)
         }
-        transcripts.push(result.transcript)
     }
 
     return await importCodexTranscriptsFromRemoteMachine({

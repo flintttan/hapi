@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test'
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
 import { AGENT_MESSAGE_PAYLOAD_TYPE } from '@hapi/protocol'
@@ -312,6 +312,77 @@ describe('Codex Desktop import routes', () => {
             rmSync(actualHome, { recursive: true, force: true })
             rmSync(configuredImportHome, { recursive: true, force: true })
             rmSync(process.env.CODEX_HOME ?? '', { recursive: true, force: true })
+        }
+    })
+
+    it('falls back to local transcript import when an older runner has not registered getCodexTranscriptImportData', async () => {
+        const actualHome = mkdtempSync(join(tmpdir(), 'hapi-codex-machine-home-'))
+        const codexSessionId = '66666666-6666-4666-8666-666666666666'
+        process.env.HOME = actualHome
+
+        try {
+            createTranscript(join(actualHome, '.codex'), codexSessionId)
+            const store = new Store(':memory:')
+            const engine = {
+                getMachine: () => ({
+                    id: 'machine-1',
+                    namespace: 'default',
+                    seq: 1,
+                    createdAt: 1,
+                    updatedAt: 1,
+                    active: true,
+                    activeAt: 1,
+                    metadata: {
+                        host: hostname(),
+                        platform: 'darwin',
+                        happyCliVersion: '1.0.0',
+                        homeDir: actualHome
+                    },
+                    metadataVersion: 1,
+                    runnerState: null,
+                    runnerStateVersion: 1
+                }),
+                getSessionsByNamespace: () => [],
+                getOrCreateSession: (id: string, metadata: Record<string, unknown>, agentState: Record<string, unknown>, namespace: string) => (
+                    store.sessions.getOrCreateSession(id, metadata, agentState, namespace)
+                ),
+                recordSessionActivity: () => {},
+                getCodexTranscriptImportDataForMachine: async () => {
+                    throw new Error('RPC handler not registered: machine-1:getCodexTranscriptImportData')
+                }
+            } as Partial<SyncEngine>
+
+            const app = new Hono<WebAppEnv>()
+            app.use('*', async (c, next) => {
+                c.set('namespace', 'default')
+                await next()
+            })
+            app.route('/api', createCodexDesktopRoutes({
+                store,
+                getSyncEngine: () => engine as SyncEngine
+            }))
+
+            const response = await app.request('/api/codex/sync-session-from-machine', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                    machineId: 'machine-1',
+                    sessionIds: [codexSessionId]
+                })
+            })
+
+            expect(response.status).toBe(200)
+            const body = await response.json() as { success: boolean; syncedCount?: number }
+            expect(body.success).toBe(true)
+            expect(body.syncedCount).toBe(1)
+
+            const session = store.sessions.getSessionsByNamespace('default')[0]
+            expect(session).toBeDefined()
+            const messages = store.messages.getAllMessages(session.id)
+            expect(messages).toHaveLength(2)
+            store.close()
+        } finally {
+            rmSync(actualHome, { recursive: true, force: true })
         }
     })
 })

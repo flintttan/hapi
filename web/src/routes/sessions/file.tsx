@@ -10,6 +10,7 @@ import { useCopyToClipboard } from '@/hooks/useCopyToClipboard'
 import { formatDiffError, formatReadFileError } from '@/lib/files-i18n'
 import { queryKeys } from '@/lib/query-keys'
 import { langAlias, useShikiHighlighter } from '@/lib/shiki'
+import { getTabularFileDelimiter, parseTabularPreview } from '@/lib/tabularPreview'
 import { useTranslation } from '@/lib/use-translation'
 import { decodeBase64 } from '@/lib/utils'
 import { ImagePreview } from '@/components/ImagePreview'
@@ -141,6 +142,46 @@ function extractCommandError(result: GitCommandResponse | undefined): string | n
     return result.error ?? result.stderr ?? 'Failed to load diff'
 }
 
+function TabularFilePreview(props: { rows: string[][] }) {
+    const header = props.rows[0] ?? []
+    const bodyRows = props.rows.slice(1)
+
+    return (
+        <div className="overflow-auto rounded-md border border-[var(--app-border)] bg-[var(--app-code-bg)]">
+            <table className="min-w-full border-collapse text-left text-xs">
+                {header.length > 0 ? (
+                    <thead className="bg-[var(--app-subtle-bg)]">
+                        <tr>
+                            {header.map((cell, index) => (
+                                <th
+                                    key={`header-${index}`}
+                                    className="border-b border-[var(--app-border)] px-3 py-2 font-semibold text-[var(--app-fg)]"
+                                >
+                                    {cell}
+                                </th>
+                            ))}
+                        </tr>
+                    </thead>
+                ) : null}
+                <tbody>
+                    {(bodyRows.length > 0 ? bodyRows : [header]).map((row, rowIndex) => (
+                        <tr key={`row-${rowIndex}`} className="odd:bg-[var(--app-bg)] even:bg-[var(--app-secondary-bg)]/40">
+                            {row.map((cell, cellIndex) => (
+                                <td
+                                    key={`cell-${rowIndex}-${cellIndex}`}
+                                    className="max-w-[28rem] whitespace-pre-wrap break-words border-b border-[var(--app-border)] px-3 py-2 align-top text-[var(--app-fg)]"
+                                >
+                                    {cell}
+                                </td>
+                            ))}
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+    )
+}
+
 export default function FilePage() {
     const { api } = useAppContext()
     const { t } = useTranslation()
@@ -155,6 +196,10 @@ export default function FilePage() {
     const filePath = useMemo(() => decodePath(encodedPath), [encodedPath])
     const fileName = filePath.split('/').pop() || filePath || t('file.page.fallbackName')
     const imageMimeType = useMemo(() => resolveImageMimeType(filePath), [filePath])
+    const tabularDelimiter = useMemo(
+        () => imageMimeType ? null : getTabularFileDelimiter(filePath),
+        [filePath, imageMimeType]
+    )
 
     const diffQuery = useQuery({
         queryKey: queryKeys.gitFileDiff(sessionId, filePath, staged),
@@ -194,6 +239,13 @@ export default function FilePage() {
     const imagePreviewUrl = fileContentResult?.success && fileContentResult.content && imageMimeType
         ? `data:${imageMimeType};base64,${fileContentResult.content}`
         : null
+    const tabularPreview = useMemo(() => {
+        if (!tabularDelimiter || !fileContentResult?.success || binaryFile || !decodedContentResult.ok || !decodedContent) {
+            return null
+        }
+        const preview = parseTabularPreview(decodedContent, { delimiter: tabularDelimiter })
+        return preview.rows.length > 0 ? preview : null
+    }, [binaryFile, decodedContent, decodedContentResult.ok, fileContentResult?.success, tabularDelimiter])
 
     const language = useMemo(() => imageMimeType ? undefined : resolveLanguage(filePath), [filePath, imageMimeType])
     const highlighted = useShikiHighlighter(imageMimeType ? '' : decodedContent, language)
@@ -312,6 +364,8 @@ export default function FilePage() {
                             <div className="text-sm text-[var(--app-hint)]">
                                 {t('file.page.binary')}
                             </div>
+                        ) : tabularPreview ? (
+                            <TabularFilePreview rows={tabularPreview.rows} />
                         ) : (
                             decodedContent ? (
                                 <div className="relative">

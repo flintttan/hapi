@@ -6,7 +6,17 @@ import {
 import { Hono } from 'hono'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
+import {
+    canFallbackToLocalCodexMachine,
+    getDiscoveredLocalCodexTranscriptImportData,
+    listDiscoveredLocalCodexSessions
+} from './codexDesktop'
 import { requireMachine } from './guards'
+
+function isRpcHandlerNotRegisteredForMethod(error: unknown, method: string): boolean {
+    const message = error instanceof Error ? error.message : String(error ?? '')
+    return message.includes('RPC handler not registered:') && message.endsWith(`:${method}`)
+}
 
 export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
@@ -151,6 +161,12 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             const result = await engine.listCodexSessionsForMachine(machineId)
             return c.json(result)
         } catch (error) {
+            if (canFallbackToLocalCodexMachine(machine) && isRpcHandlerNotRegisteredForMethod(error, 'listCodexSessions')) {
+                return c.json({
+                    success: true,
+                    sessions: listDiscoveredLocalCodexSessions()
+                })
+            }
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to list Codex sessions'
@@ -179,6 +195,19 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             const result = await engine.getCodexTranscriptImportDataForMachine(machineId, sessionId)
             return c.json(result)
         } catch (error) {
+            if (canFallbackToLocalCodexMachine(machine) && isRpcHandlerNotRegisteredForMethod(error, 'getCodexTranscriptImportData')) {
+                const transcript = getDiscoveredLocalCodexTranscriptImportData(sessionId)
+                if (transcript) {
+                    return c.json({
+                        success: true,
+                        transcript
+                    })
+                }
+                return c.json({
+                    success: false,
+                    error: `Transcript not found for Codex session: ${sessionId}`
+                }, 404)
+            }
             return c.json({
                 success: false,
                 error: error instanceof Error ? error.message : 'Failed to get Codex transcript import data'
